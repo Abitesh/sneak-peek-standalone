@@ -5,7 +5,7 @@
 import { EventEmitter } from 'events';
 import { TranscriptSegment, SuggestionTrigger } from './NativeAudioClient';
 import { LLMHelper } from './LLMHelper';
-import { AnswerLLM, AssistLLM, FollowUpLLM, RecapLLM, FollowUpQuestionsLLM, WhatToAnswerLLM, prepareTranscriptForWhatToAnswer } from './llm';
+import { AnswerLLM, AssistLLM, FollowUpLLM, RecapLLM, FollowUpQuestionsLLM, WhatToAnswerLLM, prepareTranscriptForWhatToAnswer, GROQ_TITLE_PROMPT, GROQ_SUMMARY_JSON_PROMPT } from './llm';
 import { desktopCapturer } from 'electron';
 import { DatabaseManager, Meeting } from './db/DatabaseManager';
 const crypto = require('crypto');
@@ -128,17 +128,20 @@ export class IntelligenceManager extends EventEmitter {
 
 
     /**
-     * Initialize mode-specific LLMs with shared Gemini client
+     * Initialize mode-specific LLMs with shared Gemini client and Groq client
      */
     private initializeModeLLMs(): void {
         const client = this.llmHelper.getGeminiClient();
+        const groqClient = this.llmHelper.getGroqClient();
+
         if (client) {
-            this.answerLLM = new AnswerLLM(client, this.currentModel);
-            this.assistLLM = new AssistLLM(client, this.currentModel);
-            this.followUpLLM = new FollowUpLLM(client, this.currentModel);
-            this.recapLLM = new RecapLLM(client, this.currentModel);
-            this.followUpQuestionsLLM = new FollowUpQuestionsLLM(client, this.currentModel);
-            this.whatToAnswerLLM = new WhatToAnswerLLM(client, this.currentModel);
+            // Pass Groq client to ALL LLMs (now all support it)
+            this.answerLLM = new AnswerLLM(client, this.currentModel, groqClient);
+            this.assistLLM = new AssistLLM(client, this.currentModel, groqClient);
+            this.followUpLLM = new FollowUpLLM(client, this.currentModel, groqClient);
+            this.recapLLM = new RecapLLM(client, this.currentModel, groqClient);
+            this.followUpQuestionsLLM = new FollowUpQuestionsLLM(client, this.currentModel, groqClient);
+            this.whatToAnswerLLM = new WhatToAnswerLLM(client, this.currentModel, groqClient);
         }
     }
 
@@ -762,7 +765,9 @@ export class IntelligenceManager extends EventEmitter {
             // Generate Title (only if not set by calendar)
             if (this.recapLLM && (!this.currentMeetingMetadata || !this.currentMeetingMetadata.title)) {
                 const titlePrompt = `Generate a concise 3-6 word title for this meeting context. Output ONLY the title text. Do not use quotes or conversational filler. Context:\n${data.context.substring(0, 5000)}`;
-                const generatedTitle = await this.llmHelper.chatWithGemini(titlePrompt, undefined, undefined, true);
+                const groqTitlePrompt = `${GROQ_TITLE_PROMPT}\n\nContext:\n${data.context.substring(0, 5000)}`;
+
+                const generatedTitle = await this.llmHelper.chatWithGemini(titlePrompt, undefined, undefined, true, groqTitlePrompt);
                 if (generatedTitle) title = generatedTitle.replace(/["*]/g, '').trim();
             }
 
@@ -790,7 +795,10 @@ Return ONLY valid JSON (no markdown code blocks):
 
 CONVERSATION:
 ${data.context.substring(0, 10000)}`;
-                const generatedSummary = await this.llmHelper.chatWithGemini(summaryPrompt, undefined, undefined, true);
+
+                const groqSummaryPrompt = GROQ_SUMMARY_JSON_PROMPT.replace('{CONTEXT}', data.context.substring(0, 10000));
+
+                const generatedSummary = await this.llmHelper.chatWithGemini(summaryPrompt, undefined, undefined, true, groqSummaryPrompt);
 
                 if (generatedSummary) {
                     // Try to extract JSON - handle both raw JSON and markdown-wrapped

@@ -1,22 +1,29 @@
 // electron/llm/FollowUpLLM.ts
 // MODE: Follow-Up - Refinement of last answer
 // Modifies previous answer based on user request (shorter, longer, rephrase, etc.)
+// Uses Groq first with Gemini fallback
 
 import { GoogleGenAI } from "@google/genai";
+import Groq from "groq-sdk";
 import { MODE_CONFIGS } from "./types";
-import { buildFollowUpContents } from "./prompts";
+import { GROQ_FOLLOWUP_PROMPT, buildFollowUpContents } from "./prompts";
 import { clampResponse } from "./postProcessor";
 
 const GEMINI_FLASH_MODEL = "gemini-3-flash-preview";
+const GROQ_MODEL = "llama-3.3-70b-versatile";
 
 export class FollowUpLLM {
     private client: GoogleGenAI;
+    private groqClient: Groq | null = null;
     private modelName: string;
     private config = MODE_CONFIGS.followUp;
 
-    constructor(client: GoogleGenAI, modelName: string) {
+    constructor(client: GoogleGenAI, modelName: string, groqClient?: Groq | null) {
         this.client = client;
         this.modelName = modelName;
+        if (groqClient) {
+            this.groqClient = groqClient;
+        }
     }
 
     /**
@@ -68,6 +75,7 @@ export class FollowUpLLM {
 
     /**
      * Refine a previous answer based on user request (Streamed)
+     * Uses Groq first if available, falls back to Gemini
      */
     async *generateStream(
         previousAnswer: string,
@@ -80,13 +88,53 @@ export class FollowUpLLM {
                 return;
             }
 
+            // Try Groq first if available
+            if (this.groqClient) {
+                try {
+                    console.log(`[FollowUpLLM] 🚀 Using Groq (${GROQ_MODEL})...`);
+                    const groqMessage = `${GROQ_FOLLOWUP_PROMPT}
+
+PREVIOUS ANSWER:
+${previousAnswer}
+
+REFINEMENT REQUEST: ${refinementRequest}
+
+REFINED ANSWER:`;
+
+                    const stream = await this.groqClient.chat.completions.create({
+                        model: GROQ_MODEL,
+                        messages: [{ role: "user", content: groqMessage }],
+                        stream: true,
+                        temperature: 0.3,
+                        max_tokens: 2048,
+                    });
+
+                    let hasContent = false;
+                    for await (const chunk of stream) {
+                        const content = chunk.choices[0]?.delta?.content;
+                        if (content) {
+                            hasContent = true;
+                            yield content;
+                        }
+                    }
+
+                    if (hasContent) {
+                        console.log(`[FollowUpLLM] ✅ Groq stream completed`);
+                        return; // Success - done
+                    }
+                } catch (err: any) {
+                    console.warn(`[FollowUpLLM] ⚠️ Groq failed: ${err.message}, falling back to Gemini`);
+                }
+            }
+
+            // Fallback to Gemini
             const contents = buildFollowUpContents(
                 previousAnswer,
                 refinementRequest,
                 context
             );
 
-            console.log(`[FollowUpLLM] Starting stream with model: ${this.modelName}`);
+            console.log(`[FollowUpLLM] 🔄 Using Gemini fallback (${this.modelName})...`);
 
             const streamResult = await this.client.models.generateContentStream({
                 model: this.modelName,

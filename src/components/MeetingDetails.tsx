@@ -46,16 +46,17 @@ interface MeetingDetailsProps {
 
 const MeetingDetails: React.FC<MeetingDetailsProps> = ({ meeting, onBack, onOpenSettings }) => {
     const [activeTab, setActiveTab] = useState<'summary' | 'transcript' | 'usage'>('summary');
+    const [query, setQuery] = useState('');
 
     return (
-        <div className="h-full w-full flex flex-col bg-bg-primary text-text-primary font-sans overflow-hidden">
+        <div className="h-full w-full flex flex-col bg-[#0C0C0D] text-[#A4A4A7] font-sans overflow-hidden">
             {/* Main Content */}
             <main className="flex-1 overflow-y-auto custom-scrollbar">
                 <motion.div
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.1, duration: 0.3 }}
-                    className="max-w-4xl mx-auto px-8 py-8"
+                    className="max-w-4xl mx-auto px-8 py-8 pb-32" // Added pb-32 for floating footer clearance
                 >
                     {/* Meta Info & Actions Row */}
                     <div className="flex items-start justify-between mb-6">
@@ -64,7 +65,7 @@ const MeetingDetails: React.FC<MeetingDetailsProps> = ({ meeting, onBack, onOpen
                             <div className="text-xs text-text-tertiary font-medium mb-1">
                                 {new Date(meeting.date).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}
                             </div>
-                            <h1 className="text-3xl font-bold text-text-primary tracking-tight">{meeting.title}</h1>
+                            <h1 className="text-3xl font-bold text-[#E9E9E9] tracking-tight">{meeting.title}</h1>
                         </div>
 
                         {/* Moved Actions: Follow-up & Share */}
@@ -119,8 +120,8 @@ const MeetingDetails: React.FC<MeetingDetailsProps> = ({ meeting, onBack, onOpen
                                 {/* Action Items */}
                                 <section className="mb-8">
                                     <div className="flex items-center justify-between mb-4">
-                                        <h2 className="text-lg font-semibold text-text-primary">Action Items</h2>
-                                        <button className="flex items-center gap-1.5 text-xs text-text-tertiary hover:text-text-primary transition-colors">
+                                        <h2 className="text-lg font-semibold text-[#E9E9E9]">Action Items</h2>
+                                        <button className="flex items-center gap-1.5 text-xs text-text-tertiary hover:text-[#E9E9E9] transition-colors">
                                             <Copy size={12} />
                                             Copy full summary
                                         </button>
@@ -137,7 +138,7 @@ const MeetingDetails: React.FC<MeetingDetailsProps> = ({ meeting, onBack, onOpen
 
                                 {/* Key Points */}
                                 <section>
-                                    <h2 className="text-lg font-semibold text-text-primary mb-4">Key Points</h2>
+                                    <h2 className="text-lg font-semibold text-[#E9E9E9] mb-4">Key Points</h2>
                                     <ul className="space-y-3">
                                         {meeting.detailedSummary?.keyPoints?.length ? meeting.detailedSummary.keyPoints.map((item, i) => (
                                             <li key={i} className="flex items-start gap-3 group">
@@ -165,7 +166,7 @@ const MeetingDetails: React.FC<MeetingDetailsProps> = ({ meeting, onBack, onOpen
                                                 <span className="text-xs font-semibold text-text-secondary">{entry.speaker === 'user' ? 'Me' : 'Them'}</span>
                                                 <span className="text-xs text-text-tertiary font-mono">{entry.timestamp ? formatTime(entry.timestamp) : '0:00'}</span>
                                             </div>
-                                            <p className="text-text-primary text-[15px] leading-relaxed transition-colors">{entry.text}</p>
+                                            <p className="text-[#A4A4A7] text-[15px] leading-relaxed transition-colors">{entry.text}</p>
                                         </div>
                                     ))}
                                     {!meeting.transcript?.length && <p className="text-text-tertiary">No transcript available.</p>}
@@ -196,7 +197,7 @@ const MeetingDetails: React.FC<MeetingDetailsProps> = ({ meeting, onBack, onOpen
                                                 </div>
                                                 <div>
                                                     <div className="text-[11px] text-text-tertiary mb-1.5 font-medium">{formatTime(interaction.timestamp)}</div>
-                                                    <p className="text-text-primary text-[15px] leading-relaxed whitespace-pre-wrap">{interaction.answer}</p>
+                                                    <p className="text-[#A4A4A7] text-[15px] leading-relaxed whitespace-pre-wrap">{interaction.answer}</p>
                                                 </div>
                                             </div>
                                         )}
@@ -209,24 +210,25 @@ const MeetingDetails: React.FC<MeetingDetailsProps> = ({ meeting, onBack, onOpen
                 </motion.div>
             </main>
 
-            {/* Footer */}
-            <footer className="shrink-0 px-8 py-6 border-t border-border-subtle bg-bg-secondary flex items-center justify-center gap-4">
-                <button className="flex items-center gap-2 px-4 py-2 bg-bg-input hover:bg-bg-elevated border border-border-subtle rounded-full text-sm font-medium text-text-primary transition-colors">
-                    <Play size={14} fill="currentColor" />
-                    Resume Session
-                </button>
-
-                <div className="flex-1 max-w-xl relative">
+            {/* Floating Footer (Ask Bar) */}
+            <div className="absolute bottom-0 left-0 right-0 p-6 flex justify-center pointer-events-none z-20">
+                <div className="w-full max-w-[440px] relative group pointer-events-auto">
+                    {/* Dark Glass Effect Input (Matching Reference) */}
                     <input
                         type="text"
+                        value={query}
+                        onChange={(e) => setQuery(e.target.value)}
                         placeholder="Ask about this meeting..."
-                        className="w-full pl-5 pr-10 py-2.5 bg-bg-input border border-border-subtle rounded-full text-sm text-text-primary placeholder-text-tertiary focus:outline-none focus:ring-1 focus:ring-border-muted transition-all"
+                        className="w-full pl-5 pr-12 py-3 bg-[#1C1C1E]/40 backdrop-blur-md border border-white/[0.08] rounded-full text-sm text-[#E9E9E9] placeholder-text-tertiary/70 focus:outline-none focus:ring-1 focus:ring-white/10 focus:bg-[#1C1C1E]/60 transition-all shadow-xl"
                     />
-                    <button className="absolute right-1.5 top-1.5 p-1.5 bg-bg-input hover:bg-bg-elevated rounded-full text-text-tertiary transition-colors">
-                        <ArrowUp size={14} />
+                    <button
+                        className={`absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full transition-all duration-200 border border-white/5 ${query ? 'bg-white text-black hover:scale-105' : 'bg-[#2C2C2E] text-[#E9E9E9] hover:bg-[#3A3A3C]'
+                            }`}
+                    >
+                        <ArrowUp size={16} className="transform rotate-45" />
                     </button>
                 </div>
-            </footer>
+            </div>
         </div>
     );
 };

@@ -333,10 +333,10 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
                         transition={{ duration: 0.15 }}
                     >
 
-                        {/* Main Area - Fixed Top, Scrollable Bottom */}
-                        <main className="flex-1 flex flex-col overflow-hidden">
+                        {/* Main Area - Full Scrollable */}
+                        <main className="flex-1 flex flex-col overflow-y-auto custom-scrollbar">
 
-                            {/* TOP SECTION: Grey Background (Fixed) */}
+                            {/* TOP SECTION: Grey Background (Scrolls with content) */}
                             <section className="bg-bg-elevated px-8 pt-6 pb-8 border-b border-border-subtle shrink-0">
                                 <div className="max-w-4xl mx-auto space-y-6">
                                     {/* 1.5. Hero Header (Title + Controls + CTA) */}
@@ -355,12 +355,12 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
                                             </button>
 
                                             {/* Detectable Toggle Pill */}
-                                            <div className="flex items-center gap-3 bg-bg-input border border-border-muted rounded-full px-3 py-1.5 min-w-[140px]">
+                                            <div className="flex items-center gap-3 bg-[#101011] border border-border-muted rounded-full px-3 py-1.5 min-w-[140px]">
                                                 {isDetectable ? (
                                                     <Ghost
                                                         size={14}
-                                                        strokeWidth={2}
-                                                        className="text-text-secondary transition-colors"
+                                                        strokeWidth={2} // Using 2 for clearer visibility
+                                                        className="text-white transition-colors"
                                                     />
                                                 ) : (
                                                     <svg
@@ -368,25 +368,25 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
                                                         height="14"
                                                         viewBox="0 0 24 24"
                                                         fill="none"
-                                                        stroke="currentColor"
-                                                        strokeWidth="2"
-                                                        strokeLinecap="round"
-                                                        strokeLinejoin="round"
+                                                        xmlns="http://www.w3.org/2000/svg"
                                                         className="transition-colors"
                                                     >
-                                                        <path d="M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8z" fill="currentColor" stroke="currentColor" />
-                                                        <path d="M9 10h.01" stroke="var(--bg-input)" strokeWidth="2.5" />
-                                                        <path d="M15 10h.01" stroke="var(--bg-input)" strokeWidth="2.5" />
+                                                        <path
+                                                            d="M12 2C7.58172 2 4 5.58172 4 10V22L7 19L9.5 21.5L12 19L14.5 21.5L17 19L20 22V10C20 5.58172 16.4183 2 12 2Z"
+                                                            fill="white"
+                                                        />
+                                                        <circle cx="9" cy="10" r="1.5" fill="black" />
+                                                        <circle cx="15" cy="10" r="1.5" fill="black" />
                                                     </svg>
                                                 )}
-                                                <span className={`text-xs font-medium flex-1 transition-colors text-text-primary`}>
+                                                <span className={`text-xs font-medium flex-1 transition-colors text-[#B7B7B8]`}>
                                                     {isDetectable ? "Detectable" : "Undetectable"}
                                                 </span>
                                                 <div
-                                                    className={`w-8 h-4 rounded-full relative cursor-pointer transition-colors ${!isDetectable ? 'bg-white' : 'bg-slate-700'}`}
+                                                    className={`w-8 h-4 rounded-full relative cursor-pointer transition-colors ${!isDetectable ? 'bg-blue-500' : 'bg-zinc-700'}`}
                                                     onClick={toggleDetectable}
                                                 >
-                                                    <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-black transition-all ${!isDetectable ? 'left-[18px]' : 'left-0.5'}`} />
+                                                    <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${!isDetectable ? 'left-[18px]' : 'left-0.5'}`} />
                                                 </div>
                                             </div>
                                         </div>
@@ -574,8 +574,8 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
                                 </div>
                             </section>
 
-                            {/* BOTTOM SECTION: Black Background (Scrollable) */}
-                            <section className="bg-bg-primary px-8 py-8 flex-1 overflow-y-auto">
+                            {/* BOTTOM SECTION: Black Background (Scrollable content) */}
+                            <section className="bg-bg-primary px-8 py-8 flex-1">
                                 <div className="max-w-4xl mx-auto space-y-8">
 
                                     {/* Iterating Date Groups */}
@@ -587,10 +587,10 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
                                                     <motion.div
                                                         key={m.id}
                                                         layoutId={`meeting-${m.id}`}
-                                                        className="group relative flex items-center justify-between px-3 py-2 rounded-lg bg-transparent hover:bg-white/15 transition-colors cursor-pointer"
+                                                        className="group relative flex items-center justify-between px-3 py-2 rounded-lg bg-transparent hover:bg-[#18181B] transition-colors cursor-pointer"
                                                         onClick={() => handleOpenMeeting(m)}
                                                     >
-                                                        <div className={`font-medium text-[15px] max-w-[60%] truncate ${m.title === 'Processing...' ? 'text-blue-400 italic animate-pulse' : (m.title.includes('Demo') ? 'text-text-primary' : 'text-text-secondary group-hover:text-text-primary')}`}>
+                                                        <div className={`font-medium text-[14px] max-w-[60%] truncate ${m.title === 'Processing...' ? 'text-blue-400 italic animate-pulse' : 'text-[#F4F4F5]'}`}>
                                                             {m.title}
                                                         </div>
 
@@ -603,12 +603,12 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
                                                                 </div>
                                                             ) : (
                                                                 <>
-                                                                    <span className="bg-white/10 text-text-tertiary text-[11px] px-2.5 py-1 rounded-full font-medium min-w-[50px] text-center tracking-wide">
+                                                                    <span className="relative z-10 bg-[#242426] text-[#9F9FAA] text-[9px] px-1.5 py-0.5 rounded-full font-medium min-w-[35px] text-center tracking-wide">
                                                                         {formatDurationPill(m.duration)}
                                                                     </span>
 
                                                                     {/* Time Text (Should fade out on hover) */}
-                                                                    <span className="text-xs text-text-tertiary font-medium min-w-[60px] text-right transition-all duration-200 ease-out group-hover:opacity-0 group-hover:translate-x-2 delayed-hover-exit">
+                                                                    <span className="text-[13px] text-[#D4D4D8] font-medium min-w-[60px] text-right transition-all duration-200 ease-out group-hover:opacity-0 group-hover:translate-x-2 delayed-hover-exit">
                                                                         {formatTime(m.date)}
                                                                     </span>
                                                                 </>

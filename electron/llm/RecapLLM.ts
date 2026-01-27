@@ -1,22 +1,29 @@
 // electron/llm/RecapLLM.ts
 // MODE: Recap - Neutral conversation summary
 // Summarizes conversation in bullet points, no advice or opinions
+// Uses Groq first with Gemini fallback
 
 import { GoogleGenAI } from "@google/genai";
+import Groq from "groq-sdk";
 import { MODE_CONFIGS } from "./types";
-import { buildRecapContents } from "./prompts";
+import { GROQ_RECAP_PROMPT, buildRecapContents } from "./prompts";
 import { clampResponse } from "./postProcessor";
 
 const GEMINI_FLASH_MODEL = "gemini-3-flash-preview";
+const GROQ_MODEL = "llama-3.3-70b-versatile";
 
 export class RecapLLM {
     private client: GoogleGenAI;
+    private groqClient: Groq | null = null;
     private modelName: string;
     private config = MODE_CONFIGS.recap;
 
-    constructor(client: GoogleGenAI, modelName: string) {
+    constructor(client: GoogleGenAI, modelName: string, groqClient?: Groq | null) {
         this.client = client;
         this.modelName = modelName;
+        if (groqClient) {
+            this.groqClient = groqClient;
+        }
     }
 
     /**
@@ -59,6 +66,7 @@ export class RecapLLM {
 
     /**
      * Generate a neutral conversation summary (Streamed)
+     * Uses Groq first if available, falls back to Gemini
      */
     async *generateStream(context: string): AsyncGenerator<string> {
         try {
@@ -67,9 +75,42 @@ export class RecapLLM {
                 return;
             }
 
+            // Try Groq first if available
+            if (this.groqClient) {
+                try {
+                    console.log(`[RecapLLM] 🚀 Using Groq (${GROQ_MODEL})...`);
+                    const groqMessage = `${GROQ_RECAP_PROMPT}\n\nCONVERSATION:\n${context}`;
+
+                    const stream = await this.groqClient.chat.completions.create({
+                        model: GROQ_MODEL,
+                        messages: [{ role: "user", content: groqMessage }],
+                        stream: true,
+                        temperature: 0.2,
+                        max_tokens: 1024,
+                    });
+
+                    let hasContent = false;
+                    for await (const chunk of stream) {
+                        const content = chunk.choices[0]?.delta?.content;
+                        if (content) {
+                            hasContent = true;
+                            yield content;
+                        }
+                    }
+
+                    if (hasContent) {
+                        console.log(`[RecapLLM] ✅ Groq stream completed`);
+                        return; // Success - done
+                    }
+                } catch (err: any) {
+                    console.warn(`[RecapLLM] ⚠️ Groq failed: ${err.message}, falling back to Gemini`);
+                }
+            }
+
+            // Fallback to Gemini
             const contents = buildRecapContents(context);
 
-            console.log(`[RecapLLM] Starting stream with model: ${this.modelName}`);
+            console.log(`[RecapLLM] 🔄 Using Gemini fallback (${this.modelName})...`);
 
             const streamResult = await this.client.models.generateContentStream({
                 model: this.modelName,

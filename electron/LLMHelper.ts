@@ -467,67 +467,75 @@ ANSWER DIRECTLY:`;
     }
   }
 
-  public async chatWithGemini(message: string, imagePath?: string, context?: string, skipSystemPrompt: boolean = false): Promise<string> {
+  public async chatWithGemini(message: string, imagePath?: string, context?: string, skipSystemPrompt: boolean = false, alternateGroqMessage?: string): Promise<string> {
     try {
       console.log(`[LLMHelper] chatWithGemini called with message:`, message.substring(0, 50))
 
-      // Build context-aware prompt
-      let fullMessage = skipSystemPrompt ? message : `${HARD_SYSTEM_PROMPT}\n\n${message}`;
-      if (context) {
-        fullMessage = skipSystemPrompt
-          ? `CONTEXT:\n${context}\n\nUSER QUESTION:\n${message}`
-          : `${HARD_SYSTEM_PROMPT}\n\nCONTEXT:\n${context}\n\nUSER QUESTION:\n${message}`;
-      }
-
-      // Try with current model first
-      let rawResponse = await this.tryGenerateResponse(fullMessage, imagePath);
-
-      // If response is empty/undefined, retry with same model
-      if (!rawResponse || rawResponse.trim().length === 0) {
-        console.warn("[LLMHelper] Empty response, retrying with same model...");
-        rawResponse = await this.tryGenerateResponse(fullMessage, imagePath);
-      }
-
-      // If still empty, retry with Gemini 3 Pro
-      if (!rawResponse || rawResponse.trim().length === 0) {
-        console.warn("[LLMHelper] Still empty after retry, switching to Gemini 3 Pro...");
-        const originalModel = this.geminiModel;
-        this.geminiModel = GEMINI_PRO_MODEL;
-        try {
-          rawResponse = await this.tryGenerateResponse(fullMessage, imagePath);
-        } finally {
-          this.geminiModel = originalModel;
+      // Helper to build prompts for different providers
+      const buildMessage = (systemPrompt: string) => {
+        let msg = skipSystemPrompt ? message : `${systemPrompt}\n\n${message}`;
+        if (context) {
+          msg = skipSystemPrompt
+            ? `CONTEXT:\n${context}\n\nUSER QUESTION:\n${message}`
+            : `${systemPrompt}\n\nCONTEXT:\n${context}\n\nUSER QUESTION:\n${message}`;
         }
-      }
+        return msg;
+      };
 
-      // If still empty after all retries, return error message
-      if (!rawResponse || rawResponse.trim().length === 0) {
-        console.error("[LLMHelper] All retry attempts failed, returning error message");
-        return "I apologize, but I couldn't generate a response. Please try again.";
-      }
+      const geminiMessage = buildMessage(HARD_SYSTEM_PROMPT);
 
+      // ATTEMPT 1: Default Model (Likely Flash)
       try {
-        return this.processResponse(rawResponse);
-      } catch (processError) {
-        // If processResponse throws (e.g., filtered fallback), retry with Pro once
-        console.warn("[LLMHelper] processResponse failed, retrying with Pro model...", processError);
-        const originalModel = this.geminiModel;
-        this.geminiModel = GEMINI_PRO_MODEL;
-        try {
-          const retryResponse = await this.tryGenerateResponse(fullMessage, imagePath);
-          if (retryResponse && retryResponse.trim().length > 0) {
-            try {
-              return this.processResponse(retryResponse);
-            } catch {
-              // If Pro also gets filtered, return full raw response (no truncation)
-              return retryResponse;
-            }
-          }
-        } finally {
-          this.geminiModel = originalModel;
+        const rawResponse = await this.tryGenerateResponse(geminiMessage, imagePath);
+        if (rawResponse && rawResponse.trim().length > 0) {
+          return this.processResponse(rawResponse);
         }
-        return "I apologize, but I couldn't generate a response. Please try again.";
+        console.warn("[LLMHelper] Empty response from primary model, initiating fallback...");
+      } catch (error: any) {
+        console.warn(`[LLMHelper] Primary model failed: ${error.message} - Initiating fallback...`);
       }
+
+      // ATTEMPT 2: Gemini 3 Pro
+      console.log("[LLMHelper] ⚠️ Switching to Gemini 3 Pro (Fallback)...");
+      const originalModel = this.geminiModel;
+      this.geminiModel = GEMINI_PRO_MODEL;
+      try {
+        const rawResponse = await this.tryGenerateResponse(geminiMessage, imagePath);
+        // Reset model immediately after call to ensure cleaner state even if processing fails
+        this.geminiModel = originalModel;
+
+        if (rawResponse && rawResponse.trim().length > 0) {
+          return this.processResponse(rawResponse);
+        }
+        console.warn("[LLMHelper] Empty response from Pro model, initiating Groq fallback...");
+      } catch (error: any) {
+        this.geminiModel = originalModel; // Ensure model is reset
+        console.warn(`[LLMHelper] Pro model failed: ${error.message}`);
+      }
+
+      // ATTEMPT 3: Groq (Text Only)
+      if (!imagePath && this.groqClient) {
+        console.log("[LLMHelper] ⚠️ Switching to Groq (Fallback)...");
+        try {
+          // Use alternate message if provided, otherwise default logic
+          let groqMessage = alternateGroqMessage;
+          if (!groqMessage) {
+            groqMessage = buildMessage(GROQ_SYSTEM_PROMPT);
+          }
+
+          const rawResponse = await this.generateWithGroq(groqMessage);
+          if (rawResponse && rawResponse.trim().length > 0) {
+            return this.processResponse(rawResponse);
+          }
+        } catch (error: any) {
+          console.warn(`[LLMHelper] Groq failed: ${error.message}`);
+        }
+      }
+
+      // Fallback exhausted
+      console.error("[LLMHelper] All retry attempts and fallbacks failed.");
+      return "I apologize, but I couldn't generate a response. Please try again.";
+
     } catch (error: any) {
       console.error("[LLMHelper] Critical Error in chatWithGemini:", error);
 
@@ -540,6 +548,21 @@ ANSWER DIRECTLY:`;
       }
       return `I encountered an error: ${error.message || "Unknown error"}. Please try again.`;
     }
+  }
+
+  private async generateWithGroq(fullMessage: string): Promise<string> {
+    if (!this.groqClient) throw new Error("Groq client not initialized");
+
+    // Non-streaming Groq call
+    const response = await this.groqClient.chat.completions.create({
+      model: GROQ_MODEL,
+      messages: [{ role: "user", content: fullMessage }],
+      temperature: 0.4,
+      max_tokens: 8192,
+      stream: false
+    });
+
+    return response.choices[0]?.message?.content || "";
   }
 
   private async tryGenerateResponse(fullMessage: string, imagePath?: string): Promise<string> {
@@ -923,6 +946,69 @@ ANSWER DIRECTLY:`;
   public getGeminiClient(): GoogleGenAI | null {
     if (!this.client) return null;
     return this.createRobustClient(this.client);
+  }
+
+  /**
+   * Get the Groq client for mode-specific LLMs
+   */
+  public getGroqClient(): Groq | null {
+    return this.groqClient;
+  }
+
+  /**
+   * Check if Groq is available
+   */
+  public hasGroq(): boolean {
+    return this.groqClient !== null;
+  }
+
+  /**
+   * Stream with Groq using a specific prompt, with Gemini fallback
+   * Used by mode-specific LLMs (RecapLLM, FollowUpLLM, WhatToAnswerLLM)
+   * @param groqMessage - Message with Groq-optimized prompt
+   * @param geminiMessage - Message with Gemini prompt (for fallback)
+   * @param config - Optional temperature and max tokens
+   */
+  public async *streamWithGroqOrGemini(
+    groqMessage: string,
+    geminiMessage: string,
+    config?: { temperature?: number; maxTokens?: number }
+  ): AsyncGenerator<string, void, unknown> {
+    const temperature = config?.temperature ?? 0.3;
+    const maxTokens = config?.maxTokens ?? 8192;
+
+    // Try Groq first if available
+    if (this.groqClient) {
+      try {
+        console.log(`[LLMHelper] 🚀 Mode-specific Groq stream starting...`);
+        const stream = await this.groqClient.chat.completions.create({
+          model: GROQ_MODEL,
+          messages: [{ role: "user", content: groqMessage }],
+          stream: true,
+          temperature: temperature,
+          max_tokens: maxTokens,
+        });
+
+        for await (const chunk of stream) {
+          const content = chunk.choices[0]?.delta?.content;
+          if (content) {
+            yield content;
+          }
+        }
+        console.log(`[LLMHelper] ✅ Mode-specific Groq stream completed`);
+        return; // Success - done
+      } catch (err: any) {
+        console.warn(`[LLMHelper] ⚠️ Groq mode-specific failed: ${err.message}, falling back to Gemini`);
+      }
+    }
+
+    // Fallback to Gemini
+    if (this.client) {
+      console.log(`[LLMHelper] 🔄 Falling back to Gemini for mode-specific request...`);
+      yield* this.streamWithGeminiModel(geminiMessage, GEMINI_FLASH_MODEL);
+    } else {
+      throw new Error("No LLM provider available");
+    }
   }
 
   /**

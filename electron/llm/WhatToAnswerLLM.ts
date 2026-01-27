@@ -2,30 +2,31 @@
 // MODE: "What to Answer" - Manual trigger for interview copilot
 // Single-pass question inference + answer generation
 // NEVER returns empty - always provides a usable response
+// Uses Groq first with Gemini fallback
 
 import { GoogleGenAI } from "@google/genai";
-import { WHAT_TO_ANSWER_PROMPT, buildWhatToAnswerContents } from "./prompts";
+import Groq from "groq-sdk";
+import { WHAT_TO_ANSWER_PROMPT, GROQ_WHAT_TO_ANSWER_PROMPT, buildWhatToAnswerContents } from "./prompts";
 
 const GEMINI_FLASH_MODEL = "gemini-3-flash-preview";
+const GROQ_MODEL = "llama-3.3-70b-versatile";
 
 export class WhatToAnswerLLM {
     private client: GoogleGenAI;
+    private groqClient: Groq | null = null;
     private modelName: string;
 
-    constructor(client: GoogleGenAI, modelName: string = GEMINI_FLASH_MODEL) {
+    constructor(client: GoogleGenAI, modelName: string = GEMINI_FLASH_MODEL, groqClient?: Groq | null) {
         this.client = client;
         this.modelName = modelName;
+        if (groqClient) {
+            this.groqClient = groqClient;
+        }
     }
 
     /**
-     * Generate a spoken interview answer from transcript context
-     * Performs BOTH question inference AND answer generation in one call
-     * 
-     * @param cleanedTranscript - Pre-processed transcript (cleaned + sparsified)
-     * @returns Ready-to-speak answer, NEVER empty
-     */
-    /**
      * Generate a spoken interview answer from transcript context (Streamed)
+     * Uses Groq first if available, falls back to Gemini
      */
     async *generateStream(cleanedTranscript: string): AsyncGenerator<string> {
         try {
@@ -36,6 +37,40 @@ export class WhatToAnswerLLM {
                 return;
             }
 
+            // Try Groq first if available
+            if (this.groqClient) {
+                try {
+                    console.log(`[WhatToAnswerLLM] 🚀 Using Groq (${GROQ_MODEL})...`);
+                    const groqMessage = `${GROQ_WHAT_TO_ANSWER_PROMPT}\n\nCONVERSATION:\n${cleanedTranscript}`;
+
+                    const stream = await this.groqClient.chat.completions.create({
+                        model: GROQ_MODEL,
+                        messages: [{ role: "user", content: groqMessage }],
+                        stream: true,
+                        temperature: 0.3,
+                        max_tokens: 4096,
+                    });
+
+                    let hasContent = false;
+                    for await (const chunk of stream) {
+                        const content = chunk.choices[0]?.delta?.content;
+                        if (content) {
+                            hasContent = true;
+                            yield content;
+                        }
+                    }
+
+                    if (hasContent) {
+                        console.log(`[WhatToAnswerLLM] ✅ Groq stream completed`);
+                        return; // Success - done
+                    }
+                } catch (err: any) {
+                    console.warn(`[WhatToAnswerLLM] ⚠️ Groq failed: ${err.message}, falling back to Gemini`);
+                }
+            }
+
+            // Fallback to Gemini
+            console.log(`[WhatToAnswerLLM] 🔄 Using Gemini fallback...`);
             const contents = buildWhatToAnswerContents(cleanedTranscript);
 
             const streamResult = await this.client.models.generateContentStream({
