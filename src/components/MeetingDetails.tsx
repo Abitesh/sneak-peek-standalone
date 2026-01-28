@@ -408,7 +408,7 @@ ${meeting.detailedSummary.keyPoints?.map(item => `- ${item}`).join('\n') || 'Non
             </main>
 
             {/* Floating Footer (Ask Bar) */}
-            <div className="absolute bottom-0 left-0 right-0 p-6 flex justify-center pointer-events-none z-20">
+            <div className={`absolute bottom-0 left-0 right-0 p-6 flex justify-center pointer-events-none ${isChatOpen ? 'z-50' : 'z-20'}`}>
                 <div className="w-full max-w-[440px] relative group pointer-events-auto">
                     {/* Dark Glass Effect Input (Matching Reference) */}
                     <input

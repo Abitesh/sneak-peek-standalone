@@ -42,13 +42,9 @@ function fuzzyMatch(text: string, query: string): boolean {
     if (normalizedText.includes(normalizedQuery)) return true;
 
     // Fuzzy character match
-    let queryIndex = 0;
-    for (let i = 0; i < normalizedText.length && queryIndex < normalizedQuery.length; i++) {
-        if (normalizedText[i] === normalizedQuery[queryIndex]) {
-            queryIndex++;
-        }
-    }
-    return queryIndex === normalizedQuery.length;
+    // Fuzzy match removed for stricter accuracy
+    // Only return true if exact substring match (already checked above)
+    return false;
 }
 
 function searchMeetings(meetings: Meeting[], query: string): SearchResult[] {
@@ -253,20 +249,14 @@ const TopSearchPill: React.FC<TopSearchPillProps> = ({
                         }}
                         transition={{
                             type: "spring",
-                            stiffness: 400,
-                            damping: 30
+                            stiffness: 150,
+                            damping: 25
                         }}
-                        className="relative"
+                        className="relative transform-gpu"
                     >
                         {/* Main Pill */}
                         <div className="relative">
-                            <motion.div
-                                initial={false}
-                                transition={{
-                                    type: "spring",
-                                    stiffness: 400,
-                                    damping: 30
-                                }}
+                            <div
                                 className={`
                                     relative overflow-hidden
                                     bg-[#1C1C1E]/90
@@ -310,9 +300,9 @@ const TopSearchPill: React.FC<TopSearchPillProps> = ({
                                             exit={{ height: 0, opacity: 0 }}
                                             transition={{
                                                 type: "spring",
-                                                stiffness: 400,
-                                                damping: 30,
-                                                opacity: { duration: 0.2 }
+                                                stiffness: 150,
+                                                damping: 25,
+                                                opacity: { duration: 0.3 }
                                             }}
                                             className="overflow-hidden"
                                         >
@@ -423,7 +413,7 @@ const TopSearchPill: React.FC<TopSearchPillProps> = ({
                                         </motion.div>
                                     )}
                                 </AnimatePresence>
-                            </motion.div>
+                            </div>
                         </div>
                     </motion.div>
                 </div >

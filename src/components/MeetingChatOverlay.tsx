@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { X, Copy, Check, Maximize2 } from 'lucide-react';
+import { X, Copy, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // ============================================
@@ -278,9 +278,51 @@ const MeetingChatOverlay: React.FC<MeetingChatOverlayProps> = ({
 
             if (meetingId) {
                 // Use RAG-powered meeting query
-                await window.electronAPI?.ragQueryMeeting(meetingId, question);
+                const result = await window.electronAPI?.ragQueryMeeting(meetingId, question);
+
+                // If RAG not available (or failed), fall back to context-window chat
+                if (result?.fallback) {
+                    console.log("[MeetingChat] RAG unavailable, using context window fallback");
+                    // Cleanup RAG listeners since we won't use them
+                    tokenCleanup?.();
+                    doneCleanup?.();
+                    errorCleanup?.();
+
+                    // FALLBACK LOGIC
+                    const contextString = buildContextString();
+                    const systemPrompt = `You are recalling a specific meeting. Answer questions ONLY about this meeting. Be concise (2-4 sentences). Sound natural, like a human recalling. If information is not present, say so briefly. Never guess.
+
+${contextString}`;
+
+                    const oldTokenCleanup = window.electronAPI?.onGeminiStreamToken((token: string) => {
+                        setChatState('streaming_response');
+                        setMessages(prev => prev.map(msg =>
+                            msg.id === assistantMessageId
+                                ? { ...msg, content: msg.content + token }
+                                : msg
+                        ));
+                    });
+
+                    const oldDoneCleanup = window.electronAPI?.onGeminiStreamDone(() => {
+                        setMessages(prev => prev.map(msg =>
+                            msg.id === assistantMessageId
+                                ? { ...msg, isStreaming: false }
+                                : msg
+                        ));
+                        setChatState('idle');
+                        oldTokenCleanup?.();
+                        oldDoneCleanup?.();
+                    });
+
+                    await window.electronAPI?.streamGeminiChat(
+                        question,
+                        undefined,
+                        systemPrompt,
+                        { skipSystemPrompt: true }
+                    );
+                }
             } else {
-                // Fallback: use original Gemini streaming with context
+                // No meeting ID, standard fallback
                 const contextString = buildContextString();
                 const systemPrompt = `You are recalling a specific meeting. Answer questions ONLY about this meeting. Be concise (2-4 sentences). Sound natural, like a human recalling. If information is not present, say so briefly. Never guess.
 
@@ -333,7 +375,7 @@ ${contextString}`;
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
                     transition={{ duration: 0.16 }}
-                    className="absolute inset-0 z-40 flex flex-col"
+                    className="absolute inset-0 z-40 flex flex-col justify-end"
                     onClick={handleBackdropClick}
                 >
                     {/* Backdrop with blur */}
@@ -348,20 +390,15 @@ ${contextString}`;
                     {/* Chat Window - extends to bottom, leaves room for input */}
                     <motion.div
                         ref={chatWindowRef}
-                        initial={{ scale: 0.98, opacity: 0, y: 20 }}
-                        animate={{ scale: 1, opacity: 1, y: 0 }}
-                        exit={{ scale: 0.98, opacity: 0, y: 20 }}
-                        transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-                        className="relative mx-auto w-full max-w-[680px] mt-4 mb-24 bg-[#121214] rounded-2xl border border-white/[0.08] shadow-2xl overflow-hidden flex flex-col flex-1"
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: "85vh", opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.4, ease: [0.19, 1, 0.22, 1] }} // "Snake-like" smooth fluid motion (approximating expoOut)
+                        className="relative mx-auto w-full max-w-[680px] mb-0 bg-bg-secondary rounded-t-2xl border-t border-x border-white/[0.08] shadow-2xl overflow-hidden flex flex-col"
                         onClick={(e) => e.stopPropagation()}
                     >
                         {/* Header with close button */}
-                        <div className="flex items-center justify-end px-4 py-3 gap-2 border-b border-white/[0.05] shrink-0">
-                            <button
-                                className="p-2 rounded-lg hover:bg-white/5 transition-colors group"
-                            >
-                                <Maximize2 size={16} className="text-[#636366] group-hover:text-[#A4A4A7] transition-colors" />
-                            </button>
+                        <div className="flex items-center justify-end px-4 py-3 gap-2 shrink-0">
                             <button
                                 onClick={handleClose}
                                 className="p-2 rounded-lg hover:bg-white/5 transition-colors group"
@@ -371,7 +408,7 @@ ${contextString}`;
                         </div>
 
                         {/* Messages area - scrollable */}
-                        <div className="flex-1 overflow-y-auto px-6 py-4 custom-scrollbar">
+                        <div className="flex-1 overflow-y-auto px-6 py-4 pb-32 custom-scrollbar">
                             {messages.map((msg) => (
                                 msg.role === 'user'
                                     ? <UserMessage key={msg.id} content={msg.content} />

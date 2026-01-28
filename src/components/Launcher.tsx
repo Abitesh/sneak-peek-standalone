@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ToggleLeft, ToggleRight, Search, Zap, Calendar, ArrowRight, ArrowLeft, MoreHorizontal, Globe, Clock, ChevronRight, Settings, RefreshCw, Eye, EyeOff, Ghost, Plus, Mail, Link as LinkIcon, ChevronDown, Trash2 } from 'lucide-react';
+import { ToggleLeft, ToggleRight, Search, Zap, Calendar, ArrowRight, ArrowLeft, MoreHorizontal, Globe, Clock, ChevronRight, Settings, RefreshCw, Eye, EyeOff, Ghost, Plus, Mail, Link as LinkIcon, ChevronDown, Trash2, Bell, Check } from 'lucide-react';
 import icon from "./icon.png";
 import mainui from "../UI_comp/mainui.png";
 import calender from "../UI_comp/calender.png";
@@ -75,6 +75,7 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
     const [isCalendarConnected, setIsCalendarConnected] = useState(false);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [showNotification, setShowNotification] = useState(false);
+    const [isInterested, setIsInterested] = useState(false);
 
     // Global search state (for AI chat overlay)
     const [isGlobalChatOpen, setIsGlobalChatOpen] = useState(false);
@@ -347,68 +348,68 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
                         transition={{ duration: 0.15 }}
                     >
 
-                        {/* Main Area - Full Scrollable */}
-                        <main className="flex-1 flex flex-col overflow-y-auto custom-scrollbar">
+                        {/* Main Area - Fixed Top, Scrollable Bottom */}
+                        {/* Top Section is now effectively static due to parent flex col */}
 
-                            {/* TOP SECTION: Grey Background (Scrolls with content) */}
-                            <section className="bg-bg-elevated px-8 pt-6 pb-8 border-b border-border-subtle shrink-0">
-                                <div className="max-w-4xl mx-auto space-y-6">
-                                    {/* 1.5. Hero Header (Title + Controls + CTA) */}
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-4">
-                                            <h1 className="text-3xl font-celeb-light font-medium text-text-primary tracking-wide drop-shadow-sm">My Natively</h1>
+                        {/* TOP SECTION: Grey Background (Scrolls with content) */}
+                        <section className="bg-bg-elevated px-8 pt-6 pb-8 border-b border-border-subtle shrink-0">
+                            <div className="max-w-4xl mx-auto space-y-6">
+                                {/* 1.5. Hero Header (Title + Controls + CTA) */}
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-4">
+                                        <h1 className="text-3xl font-celeb-light font-medium text-text-primary tracking-wide drop-shadow-sm">My Natively</h1>
 
-                                            {/* Refresh Button */}
-                                            <button
-                                                onClick={handleRefresh}
-                                                disabled={isRefreshing}
-                                                className={`p-2 text-text-secondary hover:text-text-primary hover:bg-white/10 rounded-full transition-colors ${isRefreshing ? 'animate-spin text-blue-400' : ''}`}
-                                                title="Refresh State"
-                                            >
-                                                <RefreshCw size={18} />
-                                            </button>
+                                        {/* Refresh Button */}
+                                        <button
+                                            onClick={handleRefresh}
+                                            disabled={isRefreshing}
+                                            className={`p-2 text-text-secondary hover:text-text-primary hover:bg-white/10 rounded-full transition-colors ${isRefreshing ? 'animate-spin text-blue-400' : ''}`}
+                                            title="Refresh State"
+                                        >
+                                            <RefreshCw size={18} />
+                                        </button>
 
-                                            {/* Detectable Toggle Pill */}
-                                            <div className="flex items-center gap-3 bg-[#101011] border border-border-muted rounded-full px-3 py-1.5 min-w-[140px]">
-                                                {isDetectable ? (
-                                                    <Ghost
-                                                        size={14}
-                                                        strokeWidth={2} // Using 2 for clearer visibility
-                                                        className="text-white transition-colors"
-                                                    />
-                                                ) : (
-                                                    <svg
-                                                        width="14"
-                                                        height="14"
-                                                        viewBox="0 0 24 24"
-                                                        fill="none"
-                                                        xmlns="http://www.w3.org/2000/svg"
-                                                        className="transition-colors"
-                                                    >
-                                                        <path
-                                                            d="M12 2C7.58172 2 4 5.58172 4 10V22L7 19L9.5 21.5L12 19L14.5 21.5L17 19L20 22V10C20 5.58172 16.4183 2 12 2Z"
-                                                            fill="white"
-                                                        />
-                                                        <circle cx="9" cy="10" r="1.5" fill="black" />
-                                                        <circle cx="15" cy="10" r="1.5" fill="black" />
-                                                    </svg>
-                                                )}
-                                                <span className={`text-xs font-medium flex-1 transition-colors text-[#B7B7B8]`}>
-                                                    {isDetectable ? "Detectable" : "Undetectable"}
-                                                </span>
-                                                <div
-                                                    className={`w-8 h-4 rounded-full relative cursor-pointer transition-colors ${!isDetectable ? 'bg-blue-500' : 'bg-zinc-700'}`}
-                                                    onClick={toggleDetectable}
+                                        {/* Detectable Toggle Pill */}
+                                        <div className="flex items-center gap-3 bg-[#101011] border border-border-muted rounded-full px-3 py-1.5 min-w-[140px]">
+                                            {isDetectable ? (
+                                                <Ghost
+                                                    size={14}
+                                                    strokeWidth={2} // Using 2 for clearer visibility
+                                                    className="text-white transition-colors"
+                                                />
+                                            ) : (
+                                                <svg
+                                                    width="14"
+                                                    height="14"
+                                                    viewBox="0 0 24 24"
+                                                    fill="none"
+                                                    xmlns="http://www.w3.org/2000/svg"
+                                                    className="transition-colors"
                                                 >
-                                                    <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${!isDetectable ? 'left-[18px]' : 'left-0.5'}`} />
-                                                </div>
+                                                    <path
+                                                        d="M12 2C7.58172 2 4 5.58172 4 10V22L7 19L9.5 21.5L12 19L14.5 21.5L17 19L20 22V10C20 5.58172 16.4183 2 12 2Z"
+                                                        fill="white"
+                                                    />
+                                                    <circle cx="9" cy="10" r="1.5" fill="black" />
+                                                    <circle cx="15" cy="10" r="1.5" fill="black" />
+                                                </svg>
+                                            )}
+                                            <span className={`text-xs font-medium flex-1 transition-colors text-[#B7B7B8]`}>
+                                                {isDetectable ? "Detectable" : "Undetectable"}
+                                            </span>
+                                            <div
+                                                className={`w-8 h-4 rounded-full relative cursor-pointer transition-colors ${!isDetectable ? 'bg-blue-500' : 'bg-zinc-700'}`}
+                                                onClick={toggleDetectable}
+                                            >
+                                                <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${!isDetectable ? 'left-[18px]' : 'left-0.5'}`} />
                                             </div>
                                         </div>
+                                    </div>
 
-                                        {/* Start Natively CTA Pill */}
-                                        <button
-                                            onClick={onStartMeeting}
-                                            className="
+                                    {/* Start Natively CTA Pill */}
+                                    <button
+                                        onClick={onStartMeeting}
+                                        className="
                                     group relative overflow-hidden
                                     bg-gradient-to-b from-sky-400 via-sky-500 to-blue-600
                                     text-white
@@ -424,172 +425,261 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
                                     flex items-center justify-center gap-3
                                     backdrop-blur-xl
                                 "
-                                        >
-                                            {/* Top Highlight Band */}
-                                            <div className="absolute inset-x-3 top-0 h-[40%] bg-gradient-to-b from-white/40 to-transparent blur-[2px] rounded-b-lg opacity-80 pointer-events-none" />
+                                    >
+                                        {/* Top Highlight Band */}
+                                        <div className="absolute inset-x-3 top-0 h-[40%] bg-gradient-to-b from-white/40 to-transparent blur-[2px] rounded-b-lg opacity-80 pointer-events-none" />
 
-                                            {/* Internal "suspended light" glow */}
-                                            <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/5 to-white/10 opacity-0 group-hover:opacity-100 transition-opacity duration-700 pointer-events-none" />
+                                        {/* Internal "suspended light" glow */}
+                                        <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/5 to-white/10 opacity-0 group-hover:opacity-100 transition-opacity duration-700 pointer-events-none" />
 
-                                            <img src={icon} alt="Logo" className="w-[18px] h-[18px] object-contain brightness-0 invert drop-shadow-[0_1px_2px_rgba(0,0,0,0.1)] opacity-90" />
-                                            <span className="drop-shadow-[0_1px_1px_rgba(0,0,0,0.1)] text-[20px] leading-none">Start Natively</span>
-                                        </button>
-                                    </div>
+                                        <img src={icon} alt="Logo" className="w-[18px] h-[18px] object-contain brightness-0 invert drop-shadow-[0_1px_2px_rgba(0,0,0,0.1)] opacity-90" />
+                                        <span className="drop-shadow-[0_1px_1px_rgba(0,0,0,0.1)] text-[20px] leading-none">Start Natively</span>
+                                    </button>
+                                </div>
 
-                                    {/* 2. Hero Section Cards */}
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 h-[198px]">
-                                        {/* PREPARED STATE CARD */}
-                                        {isPrepared && preparedEvent ? (
-                                            <div className="md:col-span-3 relative group rounded-xl overflow-hidden border border-emerald-500/30 bg-bg-secondary flex flex-col items-center justify-center p-6 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-emerald-900/40 via-bg-secondary to-bg-secondary">
+                                {/* 2. Hero Section Cards */}
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 h-[198px]">
+                                    {/* PREPARED STATE CARD */}
+                                    {isPrepared && preparedEvent ? (
+                                        <div className="md:col-span-3 relative group rounded-xl overflow-hidden border border-emerald-500/30 bg-bg-secondary flex flex-col items-center justify-center p-6 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-emerald-900/40 via-bg-secondary to-bg-secondary">
 
-                                                <div className="absolute top-4 right-4 text-emerald-400">
-                                                    <Zap size={16} className="text-yellow-400" />
+                                            <div className="absolute top-4 right-4 text-emerald-400">
+                                                <Zap size={16} className="text-yellow-400" />
+                                            </div>
+
+                                            <div className="text-center max-w-lg z-10">
+                                                <span className="inline-block px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 text-[10px] font-bold tracking-wider mb-4 border border-emerald-500/20">
+                                                    READY TO JOIN
+                                                </span>
+                                                <h2 className="text-2xl font-bold text-white mb-2">{preparedEvent.title}</h2>
+                                                <p className="text-xs text-text-secondary mb-6 flex items-center justify-center gap-2">
+                                                    <Calendar size={12} />
+                                                    {new Date(preparedEvent.startTime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} - {new Date(preparedEvent.endTime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                                                    {preparedEvent.link && " • Link Ready"}
+                                                </p>
+
+                                                <div className="flex items-center gap-3 justify-center">
+                                                    <button
+                                                        onClick={handleStartPreparedMeeting}
+                                                        className="bg-emerald-500 hover:bg-emerald-400 text-white px-8 py-3 rounded-xl text-sm font-semibold transition-all shadow-lg hover:shadow-emerald-500/25 active:scale-95 flex items-center gap-2"
+                                                    >
+                                                        Start Meeting
+                                                        <ArrowRight size={16} />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setIsPrepared(false)}
+                                                        className="px-4 py-3 rounded-xl text-xs font-medium text-text-tertiary hover:text-white transition-colors"
+                                                    >
+                                                        Cancel
+                                                    </button>
                                                 </div>
+                                            </div>
 
-                                                <div className="text-center max-w-lg z-10">
-                                                    <span className="inline-block px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 text-[10px] font-bold tracking-wider mb-4 border border-emerald-500/20">
-                                                        READY TO JOIN
-                                                    </span>
-                                                    <h2 className="text-2xl font-bold text-white mb-2">{preparedEvent.title}</h2>
-                                                    <p className="text-xs text-text-secondary mb-6 flex items-center justify-center gap-2">
+                                            {/* Glows */}
+                                            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[300px] h-[300px] bg-emerald-500/10 blur-[100px] pointer-events-none" />
+                                        </div>
+                                    ) : (
+                                        /* Dynamic Next Meeting OR Default Intro */
+                                        nextMeeting ? (
+                                            <div className="md:col-span-2 relative group rounded-xl overflow-hidden bg-bg-secondary flex flex-col">
+                                                {/* Header */}
+                                                <div className="p-5 flex-1 relative z-10">
+                                                    <div className="flex items-center gap-2 mb-2">
+                                                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                                        <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider">Up Next</span>
+                                                        <span className="text-[11px] text-text-tertiary">• Starts in {Math.max(0, Math.ceil((new Date(nextMeeting.startTime).getTime() - Date.now()) / 60000))} min</span>
+                                                    </div>
+
+                                                    <h2 className="text-xl font-bold text-white leading-tight mb-1 line-clamp-2">
+                                                        {nextMeeting.title}
+                                                    </h2>
+
+                                                    <div className="flex items-center gap-2 text-text-secondary text-xs mt-2">
                                                         <Calendar size={12} />
-                                                        {new Date(preparedEvent.startTime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} - {new Date(preparedEvent.endTime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-                                                        {preparedEvent.link && " • Link Ready"}
-                                                    </p>
-
-                                                    <div className="flex items-center gap-3 justify-center">
-                                                        <button
-                                                            onClick={handleStartPreparedMeeting}
-                                                            className="bg-emerald-500 hover:bg-emerald-400 text-white px-8 py-3 rounded-xl text-sm font-semibold transition-all shadow-lg hover:shadow-emerald-500/25 active:scale-95 flex items-center gap-2"
-                                                        >
-                                                            Start Meeting
-                                                            <ArrowRight size={16} />
-                                                        </button>
-                                                        <button
-                                                            onClick={() => setIsPrepared(false)}
-                                                            className="px-4 py-3 rounded-xl text-xs font-medium text-text-tertiary hover:text-white transition-colors"
-                                                        >
-                                                            Cancel
-                                                        </button>
+                                                        <span>{new Date(nextMeeting.startTime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} - {new Date(nextMeeting.endTime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
+                                                        {nextMeeting.link && (
+                                                            <>
+                                                                <span className="opacity-20">|</span>
+                                                                <LinkIcon size={12} />
+                                                                <span className="truncate max-w-[150px]">Meeting Link Found</span>
+                                                            </>
+                                                        )}
                                                     </div>
                                                 </div>
 
-                                                {/* Glows */}
-                                                <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[300px] h-[300px] bg-emerald-500/10 blur-[100px] pointer-events-none" />
+                                                {/* Actions */}
+                                                <div className="p-4 bg-bg-elevated/50 border-t border-border-subtle flex items-center gap-3">
+                                                    <button
+                                                        onClick={() => handlePrepare(nextMeeting)}
+                                                        className="flex-1 bg-white/10 hover:bg-white/20 border border-white/10 text-white px-4 py-2 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-2"
+                                                    >
+                                                        <Zap size={13} className="text-yellow-400" />
+                                                        Prepare
+                                                    </button>
+                                                    <button
+                                                        onClick={onStartMeeting} // For now just start, later could link
+                                                        className="px-4 py-2 rounded-lg text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-white/5 transition-all"
+                                                    >
+                                                        Start now
+                                                    </button>
+                                                </div>
+
+                                                {/* Background Decoration */}
+                                                <div className="absolute top-0 right-0 w-[150px] h-[150px] bg-emerald-500/10 blur-[60px] pointer-events-none" />
                                             </div>
                                         ) : (
-                                            /* Dynamic Next Meeting OR Default Intro */
-                                            nextMeeting ? (
-                                                <div className="md:col-span-2 relative group rounded-xl overflow-hidden bg-bg-secondary flex flex-col">
+                                            <div className="md:col-span-2 relative group rounded-[22px] bg-gradient-to-br from-[#1C1C1E] to-[#151516] flex flex-col justify-between p-5 overflow-hidden">
+
+                                                {/* Backdrop Image (Refined Visibility) */}
+                                                <div className="absolute inset-0">
+                                                    <img src={mainui} alt="" className="w-full h-full object-cover opacity-80 scale-100 transition-transform duration-700 group-hover:scale-105" />
+                                                    <div className="absolute inset-0 bg-black/10" /> {/* Subtle tint to reduce raw brightness */}
+                                                </div>
+
+                                                {/* Content */}
+                                                <div className="relative z-10 flex flex-col h-full justify-between">
                                                     {/* Header */}
-                                                    <div className="p-5 flex-1 relative z-10">
-                                                        <div className="flex items-center gap-2 mb-2">
-                                                            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                                                            <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider">Up Next</span>
-                                                            <span className="text-[11px] text-text-tertiary">• Starts in {Math.max(0, Math.ceil((new Date(nextMeeting.startTime).getTime() - Date.now()) / 60000))} min</span>
-                                                        </div>
+                                                    <div>
+                                                        <h2 className="text-[22px] font-semibold text-white mb-1 -mt-1 leading-tight drop-shadow-md tracking-wider">Upcoming features in Natively</h2>
 
-                                                        <h2 className="text-xl font-bold text-white leading-tight mb-1 line-clamp-2">
-                                                            {nextMeeting.title}
-                                                        </h2>
+                                                        <p className="text-[13px] text-white/[0.8] font-medium leading-relaxed drop-shadow-sm tracking-wide whitespace-nowrap">
+                                                            These updates tailor answers for you.
+                                                        </p>
 
-                                                        <div className="flex items-center gap-2 text-text-secondary text-xs mt-2">
-                                                            <Calendar size={12} />
-                                                            <span>{new Date(nextMeeting.startTime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} - {new Date(nextMeeting.endTime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
-                                                            {nextMeeting.link && (
-                                                                <>
-                                                                    <span className="opacity-20">|</span>
-                                                                    <LinkIcon size={12} />
-                                                                    <span className="truncate max-w-[150px]">Meeting Link Found</span>
-                                                                </>
-                                                            )}
+                                                        <div className="flex flex-col gap-2.5 mt-2">
+                                                            <div className="pl-3 text-[11px] font-medium leading-normal">
+                                                                <span className="text-white/[0.75]">GitHub integration</span> <span className="text-white/[0.5]">for code context</span>
+                                                            </div>
+                                                            <div className="pl-3 text-[11px] font-medium leading-normal">
+                                                                <span className="text-white/[0.75]">Resume & job-description</span> <span className="text-white/[0.5]">aware answers</span>
+                                                            </div>
+                                                            <div className="pl-3 text-[11px] font-medium leading-normal">
+                                                                <span className="text-white/[0.75]">Confidence timeline</span> <span className="text-white/[0.5]">for fact checking</span>
+                                                            </div>
                                                         </div>
                                                     </div>
 
-                                                    {/* Actions */}
-                                                    <div className="p-4 bg-bg-elevated/50 border-t border-border-subtle flex items-center gap-3">
-                                                        <button
-                                                            onClick={() => handlePrepare(nextMeeting)}
-                                                            className="flex-1 bg-white/10 hover:bg-white/20 border border-white/10 text-white px-4 py-2 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-2"
+                                                    {/* Footer */}
+                                                    <div className="mt-1 flex items-center justify-between">
+                                                        <span className="text-[13px] font-medium text-white/[0.8] tracking-wide drop-shadow-sm">Your interest helps shape what we build next</span>
+                                                        <motion.button
+                                                            layout
+                                                            onClick={() => setIsInterested(!isInterested)}
+                                                            className="group relative flex items-center gap-2 pl-4 pr-5 py-2 rounded-full text-[13px] font-medium ease-[cubic-bezier(0.23,1,0.32,1)] hover:brightness-125 active:scale-[0.98] overflow-hidden"
+                                                            animate={{
+                                                                backgroundColor: isInterested ? 'rgba(50, 80, 160, 0.6)' : 'rgba(20, 40, 70, 0.4)',
+                                                            }}
+                                                            transition={{
+                                                                layout: { duration: 0.4, ease: [0.23, 1, 0.32, 1] }, // Direct morph A -> B
+                                                                backgroundColor: { duration: 0.3 }
+                                                            }}
+                                                            style={{
+                                                                backdropFilter: 'blur(14px)',
+                                                                WebkitBackdropFilter: 'blur(14px)',
+                                                                color: '#F4F6FA',
+                                                            }}
                                                         >
-                                                            <Zap size={13} className="text-yellow-400" />
-                                                            Prepare
-                                                        </button>
-                                                        <button
-                                                            onClick={onStartMeeting} // For now just start, later could link
-                                                            className="px-4 py-2 rounded-lg text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-white/5 transition-all"
-                                                        >
-                                                            Start now
-                                                        </button>
-                                                    </div>
+                                                            {/* Gradient Border */}
+                                                            <div
+                                                                className="absolute inset-0 rounded-full pointer-events-none transition-opacity duration-300 group-hover:opacity-80"
+                                                                style={{
+                                                                    padding: '1px',
+                                                                    background: isInterested ? 'linear-gradient(to right, #60A5FA, #8B5CF6)' : 'linear-gradient(to right, #60A5FA, #3B82F6)',
+                                                                    WebkitMask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
+                                                                    WebkitMaskComposite: 'xor',
+                                                                    maskComposite: 'exclude',
+                                                                    opacity: 0.6,
+                                                                }}
+                                                            />
+                                                            {/* Inner Highlight */}
+                                                            <div
+                                                                className="absolute inset-0 rounded-full pointer-events-none"
+                                                                style={{ boxShadow: 'inset 0 1px 0 0 rgba(255, 255, 255, 0.08)' }}
+                                                            />
+                                                            <motion.div layout className="relative z-10 flex items-center gap-2 font-semibold">
+                                                                {/* Text Transition */}
+                                                                <AnimatePresence mode="popLayout" initial={false}>
+                                                                    <motion.span
+                                                                        layout
+                                                                        key={isInterested ? 'interested' : 'mark'}
+                                                                        initial={{ opacity: 0, scale: 0.9, y: 5, filter: 'blur(2px)' }}
+                                                                        animate={{ opacity: 1, scale: 1, y: 0, filter: 'blur(0px)' }}
+                                                                        exit={{ opacity: 0, scale: 1.1, y: -5, filter: 'blur(2px)' }}
+                                                                        transition={{ duration: 0.25, ease: "easeOut" }}
+                                                                        className="block whitespace-nowrap"
+                                                                    >
+                                                                        {isInterested ? 'Interested' : 'Mark interest'}
+                                                                    </motion.span>
+                                                                </AnimatePresence>
 
-                                                    {/* Background Decoration */}
-                                                    <div className="absolute top-0 right-0 w-[150px] h-[150px] bg-emerald-500/10 blur-[60px] pointer-events-none" />
+                                                                {/* Icon Container (Stable) */}
+                                                                <motion.div layout className="relative flex items-center justify-center -ml-0.5">
+                                                                    <Bell size={13} className={`transition-all duration-300 ${isInterested ? 'fill-white/20' : ''}`} />
+                                                                    <AnimatePresence>
+                                                                        {isInterested && (
+                                                                            <motion.div
+                                                                                initial={{ scale: 0, opacity: 0 }}
+                                                                                animate={{ scale: 1, opacity: 1 }}
+                                                                                exit={{ scale: 0, opacity: 0 }}
+                                                                                transition={{
+                                                                                    type: "spring",
+                                                                                    stiffness: 500,
+                                                                                    damping: 30,
+                                                                                    mass: 0.8
+                                                                                }}
+                                                                                className="absolute -top-1 -right-1 bg-emerald-500 rounded-full p-[1px] border border-[#1C1C1E]"
+                                                                            >
+                                                                                <Check size={6} className="text-white" strokeWidth={4} />
+                                                                            </motion.div>
+                                                                        )}
+                                                                    </AnimatePresence>
+                                                                </motion.div>
+                                                            </motion.div>
+                                                        </motion.button>
+                                                    </div>
                                                 </div>
-                                            ) : (
-                                                <div className="md:col-span-2 relative group rounded-xl overflow-hidden bg-bg-secondary">
-                                                    {/* Backdrop Image */}
-                                                    <div className="absolute inset-0">
-                                                        <img src={mainui} alt="" className="w-full h-full object-cover opacity-100 transition-opacity duration-500" />
-                                                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent" />
-                                                    </div>
-
-                                                    {/* Background Accent */}
-                                                    <div className="absolute inset-0 bg-blue-600/5 mix-blend-overlay opacity-50" />
-
-                                                    {/* Content */}
-                                                    <div className="absolute inset-0 p-6 flex flex-col justify-between z-10">
-                                                        <div className="max-w-md">
-                                                            <h2 className="text-xl font-bold text-white mb-2 tracking-tight">Start Natively and get notes.</h2>
-                                                            <p className="text-xs text-slate-300 leading-relaxed opacity-90">Natively takes notes without a meeting bot, provides real-time AI assistance, and automatically generates notes and follow-up emails.</p>
-                                                        </div>
-
-                                                        <button onClick={onStartMeeting} className="w-fit bg-white/10 hover:bg-white/20 border border-white/10 backdrop-blur-sm text-white px-4 py-2 rounded-xl text-xs font-medium transition-all flex items-center gap-2 group-hover:pl-5 group-hover:pr-3">
-                                                            Join demo meeting
-                                                            <ArrowRight size={12} className="opacity-0 -ml-2 group-hover:ml-0 group-hover:opacity-100 transition-all" />
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            )
-                                        )}
-
-
-
-                                        {/* Right Secondary Card */}
-                                        <div className="md:col-span-1 rounded-xl overflow-hidden bg-bg-elevated relative group flex flex-col items-center pt-6 text-center">
-                                            {/* Backdrop Image */}
-                                            <div className="absolute inset-0">
-                                                <img src={calender} alt="" className="w-full h-full object-cover opacity-100 transition-opacity duration-500 translate-x--1 translate-y-[1px] scale-105" />
                                             </div>
+                                        )
+                                    )}
 
-                                            {/* Content Layer */}
-                                            <div className="relative z-10 w-full flex flex-col items-center h-full">
-                                                <h3 className="text-[19px] leading-tight mb-4">
-                                                    {isCalendarConnected ? (
-                                                        <>
-                                                            <span className="block font-semibold text-white">Calendar linked</span>
-                                                            <span className="block font-medium text-white/60 text-[0.95em]">Events synced</span>
-                                                        </>
-                                                    ) : (
-                                                        <>
-                                                            <span className="block font-semibold text-white">Link your calendar to</span>
-                                                            <span className="block font-medium text-white/60 text-[0.95em]">see upcoming events</span>
-                                                        </>
-                                                    )}
-                                                </h3>
 
-                                                <ConnectCalendarButton
-                                                    className="-translate-x-0.5"
-                                                    onConnect={() => setIsCalendarConnected(true)}
-                                                />
-                                            </div>
+
+                                    {/* Right Secondary Card */}
+                                    <div className="md:col-span-1 rounded-xl overflow-hidden bg-bg-elevated relative group flex flex-col items-center pt-6 text-center">
+                                        {/* Backdrop Image */}
+                                        <div className="absolute inset-0">
+                                            <img src={calender} alt="" className="w-full h-full object-cover opacity-100 transition-opacity duration-500 translate-x--1 translate-y-[1px] scale-105" />
+                                        </div>
+
+                                        {/* Content Layer */}
+                                        <div className="relative z-10 w-full flex flex-col items-center h-full">
+                                            <h3 className="text-[19px] leading-tight mb-4">
+                                                {isCalendarConnected ? (
+                                                    <>
+                                                        <span className="block font-semibold text-white">Calendar linked</span>
+                                                        <span className="block font-medium text-white/60 text-[0.95em]">Events synced</span>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <span className="block font-semibold text-white">Link your calendar to</span>
+                                                        <span className="block font-medium text-white/60 text-[0.95em]">see upcoming events</span>
+                                                    </>
+                                                )}
+                                            </h3>
+
+                                            <ConnectCalendarButton
+                                                className="-translate-x-0.5"
+                                                onConnect={() => setIsCalendarConnected(true)}
+                                            />
                                         </div>
                                     </div>
                                 </div>
-                            </section>
+                            </div>
+                        </section>
 
-                            {/* BOTTOM SECTION: Black Background (Scrollable content) */}
-                            <section className="bg-bg-primary px-8 py-8 flex-1">
+                        {/* BOTTOM SECTION: Black Background (Scrollable content) */}
+                        <main className="flex-1 overflow-y-auto custom-scrollbar bg-bg-primary">
+                            <section className="px-8 py-8 min-h-full">
                                 <div className="max-w-4xl mx-auto space-y-8">
 
                                     {/* Iterating Date Groups */}

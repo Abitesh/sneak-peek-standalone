@@ -695,6 +695,12 @@ export function initializeIpcHandlers(appState: AppState): void {
       return { fallback: true };
     }
 
+    // Check if the meeting actually has embeddings
+    if (!ragManager.isMeetingProcessed(meetingId)) {
+      console.log(`[RAG] Meeting ${meetingId} not processed, falling back to regular chat`);
+      return { fallback: true };
+    }
+
     const abortController = new AbortController();
     const queryKey = `meeting-${meetingId}`;
     activeRAGQueries.set(queryKey, abortController);
