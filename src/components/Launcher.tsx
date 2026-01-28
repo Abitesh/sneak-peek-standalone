@@ -528,7 +528,7 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
                                                 <div className="absolute top-0 right-0 w-[150px] h-[150px] bg-emerald-500/10 blur-[60px] pointer-events-none" />
                                             </div>
                                         ) : (
-                                            <div className="md:col-span-2 relative group rounded-[22px] bg-gradient-to-br from-[#1C1C1E] to-[#151516] flex flex-col justify-between p-5 overflow-hidden">
+                                            <div className="md:col-span-2 relative group rounded-xl bg-gradient-to-br from-[#1C1C1E] to-[#151516] flex flex-col justify-between px-5 py-4 overflow-hidden">
 
                                                 {/* Backdrop Image (Refined Visibility) */}
                                                 <div className="absolute inset-0">
@@ -537,31 +537,32 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
                                                 </div>
 
                                                 {/* Content */}
-                                                <div className="relative z-10 flex flex-col h-full justify-between">
+                                                <div className="relative z-10 flex flex-col h-full items-center text-center">
                                                     {/* Header */}
-                                                    <div>
-                                                        <h2 className="text-[22px] font-semibold text-white mb-1 -mt-1 leading-tight drop-shadow-md tracking-wider">Upcoming features in Natively</h2>
-
-                                                        <p className="text-[13px] text-white/[0.8] font-medium leading-relaxed drop-shadow-sm tracking-wide whitespace-nowrap">
-                                                            These updates tailor answers for you.
+                                                    <div className="flex flex-col items-center w-full">
+                                                        <h2 className="text-[22px] font-semibold text-white mb-1 leading-tight drop-shadow-md tracking-wide">
+                                                            Upcoming features
+                                                        </h2>
+                                                        <p className="text-[14px] text-white/[0.8] font-medium leading-relaxed drop-shadow-sm tracking-wide">
+                                                            Answers, tailored to you.
                                                         </p>
+                                                    </div>
 
-                                                        <div className="flex flex-col gap-2.5 mt-2">
-                                                            <div className="pl-3 text-[11px] font-medium leading-normal">
-                                                                <span className="text-white/[0.75]">GitHub integration</span> <span className="text-white/[0.5]">for code context</span>
-                                                            </div>
-                                                            <div className="pl-3 text-[11px] font-medium leading-normal">
-                                                                <span className="text-white/[0.75]">Resume & job-description</span> <span className="text-white/[0.5]">aware answers</span>
-                                                            </div>
-                                                            <div className="pl-3 text-[11px] font-medium leading-normal">
-                                                                <span className="text-white/[0.75]">Confidence timeline</span> <span className="text-white/[0.5]">for fact checking</span>
-                                                            </div>
+                                                    {/* Feature List (Centered, No Bullets) */}
+                                                    <div className="flex flex-col gap-1 mt-3 w-full">
+                                                        <div className="text-[14px] text-white/[0.7] font-medium leading-relaxed">
+                                                            GitHub integration for code context
+                                                        </div>
+                                                        <div className="text-[14px] text-white/[0.7] font-medium leading-relaxed">
+                                                            Resume & job-description aware answers
+                                                        </div>
+                                                        <div className="text-[14px] text-white/[0.7] font-medium leading-relaxed">
+                                                            Confidence timeline for fact checking
                                                         </div>
                                                     </div>
 
-                                                    {/* Footer */}
-                                                    <div className="mt-1 flex items-center justify-between">
-                                                        <span className="text-[13px] font-medium text-white/[0.8] tracking-wide drop-shadow-sm">Your interest helps shape what we build next</span>
+                                                    {/* Footer (Anchored Button) */}
+                                                    <div className="mt-3 w-full flex justify-center">
                                                         <motion.button
                                                             layout
                                                             onClick={() => setIsInterested(!isInterested)}

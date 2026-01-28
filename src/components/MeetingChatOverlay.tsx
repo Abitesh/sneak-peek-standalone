@@ -157,6 +157,15 @@ const MeetingChatOverlay: React.FC<MeetingChatOverlayProps> = ({
         }
     }, [initialQuery]);
 
+    // Reset state when overlay closes
+    useEffect(() => {
+        if (!isOpen) {
+            setChatState('idle');
+            setMessages([]);
+            setErrorMessage(null);
+        }
+    }, [isOpen]);
+
     // ESC key handler
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
@@ -176,13 +185,7 @@ const MeetingChatOverlay: React.FC<MeetingChatOverlayProps> = ({
     }, []);
 
     const handleClose = useCallback(() => {
-        setChatState('closing');
-        setTimeout(() => {
-            onClose();
-            setChatState('idle');
-            setMessages([]);
-            setErrorMessage(null);
-        }, 140);
+        onClose();
     }, [onClose]);
 
     // Build context string for LLM
@@ -365,11 +368,9 @@ ${contextString}`;
         }
     }, [chatState, buildContextString, meetingContext]);
 
-    if (!isOpen && chatState !== 'closing') return null;
-
     return (
         <AnimatePresence>
-            {(isOpen || chatState === 'closing') && (
+            {isOpen && (
                 <motion.div
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
@@ -393,8 +394,11 @@ ${contextString}`;
                         initial={{ height: 0, opacity: 0 }}
                         animate={{ height: "85vh", opacity: 1 }}
                         exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.4, ease: [0.19, 1, 0.22, 1] }} // "Snake-like" smooth fluid motion (approximating expoOut)
-                        className="relative mx-auto w-full max-w-[680px] mb-0 bg-bg-secondary rounded-t-2xl border-t border-x border-white/[0.08] shadow-2xl overflow-hidden flex flex-col"
+                        transition={{
+                            height: { type: "spring", stiffness: 300, damping: 30, mass: 0.8 },
+                            opacity: { duration: 0.2 }
+                        }}
+                        className="relative mx-auto w-full max-w-[680px] mb-0 bg-bg-secondary rounded-t-[24px] border-t border-x border-white/[0.08] shadow-2xl overflow-hidden flex flex-col"
                         onClick={(e) => e.stopPropagation()}
                     >
                         {/* Header with close button */}

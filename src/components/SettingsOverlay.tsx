@@ -367,8 +367,11 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                     </div>
 
                     <div className="mt-auto p-6 border-t border-border-subtle">
-                        <button className="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-red-400 hover:bg-red-500/10 transition-colors flex items-center gap-3">
-                            <LogOut size={16} /> Sign out
+                        <button
+                            onClick={() => window.electronAPI.quitApp()}
+                            className="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-red-400 hover:bg-red-500/10 transition-colors flex items-center gap-3"
+                        >
+                            <LogOut size={16} /> Quit Natively
                         </button>
                         <button onClick={onClose} className="mt-2 w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-text-secondary hover:bg-bg-item-active/50 transition-colors flex items-center gap-3">
                             <X size={16} /> Close

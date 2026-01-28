@@ -718,8 +718,15 @@ export function initializeIpcHandlers(appState: AppState): void {
 
     } catch (error: any) {
       if (error.name !== 'AbortError') {
+        const msg = error.message || "";
+        // If specific RAG failures, return fallback to use transcript window
+        if (msg.includes('NO_RELEVANT_CONTEXT') || msg.includes('NO_MEETING_EMBEDDINGS')) {
+          console.log(`[RAG] Query failed with '${msg}', falling back to regular chat`);
+          return { fallback: true };
+        }
+
         console.error("[RAG] Query error:", error);
-        event.sender.send("rag:stream-error", { meetingId, error: error.message });
+        event.sender.send("rag:stream-error", { meetingId, error: msg });
       }
       return { success: false, error: error.message };
     } finally {

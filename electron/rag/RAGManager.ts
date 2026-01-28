@@ -122,17 +122,16 @@ export class RAGManager {
         const hasEmbeddings = this.vectorStore.hasEmbeddings(meetingId);
 
         if (!hasEmbeddings) {
-            // Fallback: no embeddings available yet
-            yield NO_CONTEXT_FALLBACK;
-            return;
+            // Fallback: no embeddings available yet - trigger wrapper fallback
+            throw new Error('NO_MEETING_EMBEDDINGS');
         }
 
         // Retrieve relevant context
         const context = await this.retriever.retrieve(query, { meetingId });
 
         if (context.chunks.length === 0) {
-            yield NO_CONTEXT_FALLBACK;
-            return;
+            // No context relevant to query - trigger wrapper fallback to use context window
+            throw new Error('NO_RELEVANT_CONTEXT_FOUND');
         }
 
         // Build prompt with intent hint
