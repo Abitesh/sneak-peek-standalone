@@ -5,6 +5,7 @@ import mainui from "../UI_comp/mainui.png";
 import calender from "../UI_comp/calender.png";
 import ConnectCalendarButton from './ui/ConnectCalendarButton';
 import MeetingDetails from './MeetingDetails';
+import TopSearchPill from './TopSearchPill';
 import GlobalChatOverlay from './GlobalChatOverlay';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -75,8 +76,7 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [showNotification, setShowNotification] = useState(false);
 
-    // Global search state
-    const [globalSearchQuery, setGlobalSearchQuery] = useState('');
+    // Global search state (for AI chat overlay)
     const [isGlobalChatOpen, setIsGlobalChatOpen] = useState(false);
     const [submittedGlobalQuery, setSubmittedGlobalQuery] = useState('');
 
@@ -287,29 +287,27 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
                     </button>
                 </div>
 
-                {/* Center: Search Bar (Pill Shaped) - Absolutely Centered */}
-                <div className="absolute left-1/2 -translate-x-1/2 w-[340px] no-drag">
-                    <div className="relative group">
-                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                            <Search size={13} className="text-text-tertiary group-focus-within:text-text-primary transition-colors" />
-                        </div>
-                        <input
-                            type="text"
-                            value={globalSearchQuery}
-                            onChange={(e) => setGlobalSearchQuery(e.target.value)}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter' && globalSearchQuery.trim()) {
-                                    e.preventDefault();
-                                    setSubmittedGlobalQuery(globalSearchQuery);
-                                    setIsGlobalChatOpen(true);
-                                    setGlobalSearchQuery('');
-                                }
-                            }}
-                            className="block w-full pl-9 pr-3 py-1 bg-bg-input border border-border-subtle rounded-full text-xs text-text-primary placeholder-text-tertiary focus:outline-none focus:ring-1 focus:ring-border-muted focus:bg-bg-elevated transition-all"
-                            placeholder="Search or ask anything..."
-                        />
-                    </div>
-                </div>
+
+                {/* Center: Spotlight-style Search Pill */}
+                <TopSearchPill
+                    meetings={meetings}
+                    onAIQuery={(query) => {
+                        setSubmittedGlobalQuery(query);
+                        setIsGlobalChatOpen(true);
+                    }}
+                    onLiteralSearch={(query) => {
+                        // For now, also use AI query for literal search
+                        // Could be enhanced to do fuzzy filtering in the UI
+                        setSubmittedGlobalQuery(query);
+                        setIsGlobalChatOpen(true);
+                    }}
+                    onOpenMeeting={(meetingId) => {
+                        const meeting = meetings.find(m => m.id === meetingId);
+                        if (meeting) {
+                            handleOpenMeeting(meeting);
+                        }
+                    }}
+                />
 
                 {/* Right: Actions */}
                 <div className="flex items-center gap-3 no-drag">

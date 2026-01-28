@@ -372,7 +372,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
   startMeeting: () => ipcRenderer.invoke("start-meeting"),
   endMeeting: () => ipcRenderer.invoke("end-meeting"),
   getRecentMeetings: () => ipcRenderer.invoke("get-recent-meetings"),
-  searchMeetings: (query: string) => ipcRenderer.invoke("meetings:search", query),
   getMeetingDetails: (id: string) => ipcRenderer.invoke("get-meeting-details", id),
   deleteMeeting: (id: string) => ipcRenderer.invoke("delete-meeting", id),
 

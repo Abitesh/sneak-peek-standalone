@@ -73,7 +73,6 @@ export interface ElectronAPI {
   startMeeting: () => Promise<{ success: boolean; error?: string }>
   endMeeting: () => Promise<{ success: boolean; error?: string }>
   getRecentMeetings: () => Promise<Array<{ id: string; title: string; date: string; duration: string; summary: string }>>
-  searchMeetings: (query: string) => Promise<Array<{ id: string; title: string; date: string; duration: string; summary: string }>>
   getMeetingDetails: (id: string) => Promise<any>
   deleteMeeting: (id: string) => Promise<boolean>
   setWindowMode: (mode: 'launcher' | 'overlay') => Promise<void>

@@ -33,6 +33,10 @@
       {
         "from": "assets/",
         "to": "assets/"
+      },
+      {
+        "from": "assets/natively.icns",
+        "to": "natively.icns"
       }
     ],
     "mac": {
@@ -46,7 +50,7 @@
           ]
         }
       ],
-      "icon": "electron/assets/natively.icns",
+      "icon": "assets/natively.icns",
       "hardenedRuntime": true,
       "entitlements": "assets/entitlements.mac.plist"
     },

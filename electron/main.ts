@@ -1,5 +1,6 @@
 import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain } from "electron"
 import path from "path"
+import fs from "fs"
 import { autoUpdater } from "electron-updater"
 require('dotenv').config();
 
@@ -795,6 +796,29 @@ export class AppState {
 }
 
 // Application initialization
+
+// Canonical Dock Icon Setup (dev + prod safe) - MUST be called before any window is created
+function setMacDockIcon() {
+  if (process.platform !== "darwin") return;
+
+  const iconPath = app.isPackaged
+    ? path.join(process.resourcesPath, "natively.icns")
+    : path.resolve(__dirname, "../assets/natively.icns");
+
+  console.log("[DockIcon] Using:", iconPath);
+  console.log("[DockIcon] Exists:", fs.existsSync(iconPath));
+
+  const image = nativeImage.createFromPath(iconPath);
+
+  if (image.isEmpty()) {
+    console.error("[DockIcon] nativeImage failed to load (image is empty)");
+    return;
+  }
+
+  app.dock.setIcon(image);
+  console.log("[DockIcon] Dock icon set via nativeImage");
+}
+
 async function initializeApp() {
   const appState = AppState.getInstance()
 
@@ -804,26 +828,7 @@ async function initializeApp() {
   app.whenReady().then(() => {
     app.setName("Natively"); // Fix App Name in Menu
 
-    // macOS Dock icon (IMPORTANT) - Must be set BEFORE windows are created
-    if (process.platform === "darwin") {
-      const iconPath = path.join(
-        app.isPackaged
-          ? process.resourcesPath
-          : process.cwd(),
-        "electron/assets/natively.icns"
-      );
-
-      console.log("[Main] Setting Dock icon:", iconPath);
-      console.log("[Main] isPackaged:", app.isPackaged);
-      console.log("[Main] cwd:", process.cwd());
-
-      try {
-        app.dock.setIcon(iconPath);
-        console.log("[Main] Dock icon set successfully");
-      } catch (err) {
-        console.error("[Main] Failed to set Dock icon:", err);
-      }
-    }
+    setMacDockIcon(); // 🔴 MUST be first, before any window
 
     console.log("App is ready")
     appState.createWindow()
@@ -833,11 +838,6 @@ async function initializeApp() {
 
     // Pre-create settings window in background for faster first open
     appState.settingsWindowHelper.preloadWindow()
-
-    // Connect to native audio service - REMOVED for Launcher Flow
-    // appState.connectNativeAudio().then(() => {
-    //   console.log("Native audio client connected/connecting...")
-    // });
 
     // Initialize CalendarManager
     try {
@@ -864,14 +864,8 @@ async function initializeApp() {
       console.error('[Main] Failed to initialize CalendarManager:', e);
     }
 
-    // Simplified Dock Icon Logic - REMOVED per user request
-    // We will rely on Electron's default for Dev, and package.json for Build.
-
     if (process.platform === 'darwin') {
-      // Set the dock icon purely for development (in prod it comes from the bundle)
-      const iconPath = path.join(process.cwd(), 'electron/assets/natively.icns');
-      app.dock.setIcon(iconPath);
-      app.dock.show(); // Ensure dock is visible
+      app.dock.show(); // Ensure dock is visible (but icon already set)
     }
   })
 

@@ -404,10 +404,6 @@ export function initializeIpcHandlers(appState: AppState): void {
     return DatabaseManager.getInstance().getRecentMeetings(50);
   });
 
-  ipcMain.handle("meetings:search", async (event, query: string) => {
-    return DatabaseManager.getInstance().searchMeetings(query);
-  });
-
   ipcMain.handle("get-meeting-details", async (event, id) => {
     // Helper to fetch full details
     return DatabaseManager.getInstance().getMeetingDetails(id);

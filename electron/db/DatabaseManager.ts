@@ -281,6 +281,9 @@ export class DatabaseManager {
 
         return rows.map(row => {
             const summaryData = JSON.parse(row.summary_json || '{}');
+
+            // Format duration string if needed, but we typically store ms
+            // Let's recreate the 'duration' string "MM:SS" from duration_ms
             const minutes = Math.floor(row.duration_ms / 60000);
             const seconds = Math.floor((row.duration_ms % 60000) / 1000);
             const durationStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
@@ -297,45 +300,6 @@ export class DatabaseManager {
                 // We don't load full transcript/usage for list view to keep it light
                 transcript: [] as any[],
                 usage: [] as any[]
-            };
-        });
-    }
-
-    public searchMeetings(query: string, limit: number = 5): Meeting[] {
-        if (!this.db) return [];
-        const searchTerm = `%${query}%`;
-
-        // We join with transcripts to search content, but DISTINCT to avoid duplicates
-        const stmt = this.db.prepare(`
-            SELECT DISTINCT m.* 
-            FROM meetings m
-            LEFT JOIN transcripts t ON m.id = t.meeting_id
-            WHERE m.title LIKE ? 
-               OR m.summary_json LIKE ?
-               OR t.content LIKE ?
-            ORDER BY m.created_at DESC
-            LIMIT ?
-        `);
-
-        const rows = stmt.all(searchTerm, searchTerm, searchTerm, limit) as any[];
-
-        return rows.map(row => {
-            const summaryData = JSON.parse(row.summary_json || '{}');
-            const minutes = Math.floor(row.duration_ms / 60000);
-            const seconds = Math.floor((row.duration_ms % 60000) / 1000);
-            const durationStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-
-            return {
-                id: row.id,
-                title: row.title,
-                date: row.created_at,
-                duration: durationStr,
-                summary: summaryData.legacySummary || '',
-                detailedSummary: summaryData.detailedSummary,
-                calendarEventId: row.calendar_event_id,
-                source: row.source as any,
-                transcript: [],
-                usage: []
             };
         });
     }

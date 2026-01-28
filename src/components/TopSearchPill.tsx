@@ -1,0 +1,410 @@
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Search, Sparkles, FileText } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+
+// ============================================
+// Types
+// ============================================
+
+type PillState = 'idle' | 'focused' | 'typing' | 'results';
+
+interface Meeting {
+    id: string;
+    title: string;
+    date: string;
+    summary?: string;
+}
+
+interface SearchResult {
+    id: string;
+    type: 'meeting';
+    title: string;
+    subtitle?: string;
+    meetingId: string;
+}
+
+interface TopSearchPillProps {
+    meetings: Meeting[];
+    onAIQuery: (query: string) => void;
+    onLiteralSearch: (query: string) => void;
+    onOpenMeeting: (meetingId: string) => void;
+}
+
+// ============================================
+// Fuzzy Search Helper
+// ============================================
+
+function fuzzyMatch(text: string, query: string): boolean {
+    const normalizedText = text.toLowerCase();
+    const normalizedQuery = query.toLowerCase();
+
+    // Simple contains match for now
+    if (normalizedText.includes(normalizedQuery)) return true;
+
+    // Fuzzy character match
+    let queryIndex = 0;
+    for (let i = 0; i < normalizedText.length && queryIndex < normalizedQuery.length; i++) {
+        if (normalizedText[i] === normalizedQuery[queryIndex]) {
+            queryIndex++;
+        }
+    }
+    return queryIndex === normalizedQuery.length;
+}
+
+function searchMeetings(meetings: Meeting[], query: string): SearchResult[] {
+    if (!query.trim()) return [];
+
+    const results: SearchResult[] = [];
+    const seen = new Set<string>();
+
+    for (const meeting of meetings) {
+        if (seen.has(meeting.id)) continue;
+
+        // Match against title and summary
+        const titleMatch = fuzzyMatch(meeting.title, query);
+        const summaryMatch = meeting.summary && fuzzyMatch(meeting.summary, query);
+
+        if (titleMatch || summaryMatch) {
+            seen.add(meeting.id);
+            results.push({
+                id: meeting.id,
+                type: 'meeting',
+                title: meeting.title,
+                subtitle: new Date(meeting.date).toLocaleDateString('en-US', {
+                    month: 'short',
+                    day: 'numeric'
+                }),
+                meetingId: meeting.id
+            });
+        }
+
+        if (results.length >= 5) break;
+    }
+
+    return results;
+}
+
+// ============================================
+// Main Component
+// ============================================
+
+const TopSearchPill: React.FC<TopSearchPillProps> = ({
+    meetings,
+    onAIQuery,
+    onLiteralSearch,
+    onOpenMeeting
+}) => {
+    const [state, setState] = useState<PillState>('idle');
+    const [query, setQuery] = useState('');
+    const [selectedIndex, setSelectedIndex] = useState(0);
+
+    const inputRef = useRef<HTMLInputElement>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
+
+    // Compute results
+    const sessionResults = useMemo(() => {
+        if (state !== 'results' || !query.trim()) return [];
+        return searchMeetings(meetings, query);
+    }, [meetings, query, state]);
+
+    // Total selectable items: 2 (Explore section) + sessions
+    const totalItems = 2 + sessionResults.length;
+
+    // State transitions
+    const open = useCallback(() => {
+        setState('focused');
+        setTimeout(() => inputRef.current?.focus(), 50);
+    }, []);
+
+    const close = useCallback(() => {
+        setState('idle');
+        setQuery('');
+        setSelectedIndex(0);
+        inputRef.current?.blur();
+    }, []);
+
+    const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+        const value = e.target.value;
+        setQuery(value);
+        setSelectedIndex(0);
+
+        if (value.trim()) {
+            setState('results');
+        } else {
+            setState('focused');
+        }
+    }, []);
+
+    const handleSelect = useCallback((index: number) => {
+        if (index === 0) {
+            // AI Query
+            onAIQuery(query);
+            close();
+        } else if (index === 1) {
+            // Literal search
+            onLiteralSearch(query);
+            close();
+        } else {
+            // Session result
+            const sessionIndex = index - 2;
+            const result = sessionResults[sessionIndex];
+            if (result) {
+                onOpenMeeting(result.meetingId);
+                close();
+            }
+        }
+    }, [query, sessionResults, onAIQuery, onLiteralSearch, onOpenMeeting, close]);
+
+    // Keyboard handling
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            // ⌘K to open
+            if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+                e.preventDefault();
+                if (state === 'idle') {
+                    open();
+                } else {
+                    close();
+                }
+                return;
+            }
+
+            if (state === 'idle') return;
+
+            // ESC to close
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                close();
+                return;
+            }
+
+            // Arrow navigation
+            if (state === 'results') {
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    setSelectedIndex(prev => Math.min(prev + 1, totalItems - 1));
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setSelectedIndex(prev => Math.max(prev - 1, 0));
+                } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleSelect(selectedIndex);
+                }
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [state, open, close, selectedIndex, totalItems, handleSelect]);
+
+    // Click outside to close
+    useEffect(() => {
+        if (state === 'idle') return;
+
+        const handleClickOutside = (e: MouseEvent) => {
+            if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+                close();
+            }
+        };
+
+        // Delay to prevent immediate close on open click
+        const timer = setTimeout(() => {
+            document.addEventListener('mousedown', handleClickOutside);
+        }, 100);
+
+        return () => {
+            clearTimeout(timer);
+            document.removeEventListener('mousedown', handleClickOutside);
+        };
+    }, [state, close]);
+
+    const isExpanded = state !== 'idle';
+    const showResults = state === 'results' && query.trim();
+
+    return (
+        <>
+            {/* Backdrop blur overlay */}
+            <AnimatePresence>
+                {isExpanded && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.15 }}
+                        className="fixed inset-0 bg-black/30 backdrop-blur-[8px] z-30"
+                        onClick={close}
+                    />
+                )}
+            </AnimatePresence>
+
+            {/* Search Pill Container */}
+            <div
+                ref={containerRef}
+                className="absolute left-1/2 -translate-x-1/2 top-[3px] no-drag z-40"
+            >
+                <motion.div
+                    layout
+                    initial={false}
+                    animate={{
+                        width: isExpanded ? 480 : 340,
+                    }}
+                    transition={{
+                        duration: 0.25,
+                        ease: [0.32, 0.72, 0, 1]
+                    }}
+                    className="relative"
+                >
+                    {/* Main Pill */}
+                    <motion.div
+                        layout
+                        className={`
+                            relative overflow-hidden
+                            bg-[#1C1C1E] 
+                            ${showResults ? 'rounded-2xl' : 'rounded-full'}
+                            shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_4px_16px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.04)]
+                            transition-[border-radius] duration-200
+                        `}
+                    >
+                        {/* Input Row */}
+                        <div
+                            className="relative flex items-center"
+                            onClick={() => state === 'idle' && open()}
+                        >
+                            <div className="absolute left-3 flex items-center pointer-events-none">
+                                <Search size={14} className="text-[#636366]" />
+                            </div>
+                            <input
+                                ref={inputRef}
+                                type="text"
+                                value={query}
+                                onChange={handleInputChange}
+                                onFocus={() => state === 'idle' && setState('focused')}
+                                className={`
+                                    w-full bg-transparent
+                                    pl-9 pr-4 py-1
+                                    text-[13px] text-white
+                                    placeholder-[#636366]
+                                    focus:outline-none
+                                    ${state === 'idle' ? 'cursor-pointer' : 'cursor-text'}
+                                `}
+                                placeholder="Search or ask anything..."
+                            />
+                            {state === 'idle' && (
+                                <div className="absolute right-3 flex items-center pointer-events-none">
+                                    <span className="text-[11px] text-[#4A4A4C] font-medium px-1.5 py-0.5 rounded bg-[#2C2C2E]">
+                                        ⌘K
+                                    </span>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Results Panel */}
+                        <AnimatePresence>
+                            {showResults && (
+                                <motion.div
+                                    initial={{ height: 0, opacity: 0 }}
+                                    animate={{ height: 'auto', opacity: 1 }}
+                                    exit={{ height: 0, opacity: 0 }}
+                                    transition={{ duration: 0.2, ease: [0.32, 0.72, 0, 1] }}
+                                    className="overflow-hidden"
+                                >
+                                    <div className="border-t border-white/[0.06] py-2">
+                                        {/* Explore Section */}
+                                        <div className="px-3 py-1">
+                                            <div className="text-[10px] font-semibold text-[#636366] uppercase tracking-wider mb-1">
+                                                Explore
+                                            </div>
+
+                                            {/* AI Query Option */}
+                                            <button
+                                                className={`
+                                                    w-full flex items-center gap-3 px-2 py-1.5 rounded-lg text-left
+                                                    transition-colors duration-100
+                                                    ${selectedIndex === 0
+                                                        ? 'bg-[#2C2C2E]'
+                                                        : 'hover:bg-[#252528]'
+                                                    }
+                                                `}
+                                                onClick={() => handleSelect(0)}
+                                                onMouseEnter={() => setSelectedIndex(0)}
+                                            >
+                                                <div className="w-6 h-6 rounded-md bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center shrink-0">
+                                                    <Sparkles size={12} className="text-white" />
+                                                </div>
+                                                <span className="text-[13px] text-white truncate">
+                                                    {query}
+                                                </span>
+                                            </button>
+
+                                            {/* Literal Search Option */}
+                                            <button
+                                                className={`
+                                                    w-full flex items-center gap-3 px-2 py-1.5 rounded-lg text-left
+                                                    transition-colors duration-100
+                                                    ${selectedIndex === 1
+                                                        ? 'bg-[#2C2C2E]'
+                                                        : 'hover:bg-[#252528]'
+                                                    }
+                                                `}
+                                                onClick={() => handleSelect(1)}
+                                                onMouseEnter={() => setSelectedIndex(1)}
+                                            >
+                                                <div className="w-6 h-6 rounded-md bg-[#3A3A3C] flex items-center justify-center shrink-0">
+                                                    <Search size={12} className="text-[#A0A0A2]" />
+                                                </div>
+                                                <span className="text-[13px] text-[#A0A0A2]">
+                                                    Search for <span className="text-white">"{query}"</span>
+                                                </span>
+                                            </button>
+                                        </div>
+
+                                        {/* Sessions Section */}
+                                        {sessionResults.length > 0 && (
+                                            <div className="px-3 py-1 mt-1">
+                                                <div className="text-[10px] font-semibold text-[#636366] uppercase tracking-wider mb-1">
+                                                    Sessions
+                                                </div>
+
+                                                {sessionResults.map((result, index) => (
+                                                    <button
+                                                        key={result.id}
+                                                        className={`
+                                                            w-full flex items-center gap-3 px-2 py-1.5 rounded-lg text-left
+                                                            transition-colors duration-100
+                                                            ${selectedIndex === index + 2
+                                                                ? 'bg-[#2C2C2E]'
+                                                                : 'hover:bg-[#252528]'
+                                                            }
+                                                        `}
+                                                        onClick={() => handleSelect(index + 2)}
+                                                        onMouseEnter={() => setSelectedIndex(index + 2)}
+                                                    >
+                                                        <div className="w-6 h-6 rounded-md bg-[#3A3A3C] flex items-center justify-center shrink-0">
+                                                            <FileText size={12} className="text-[#A0A0A2]" />
+                                                        </div>
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="text-[13px] text-white truncate">
+                                                                {result.title}
+                                                            </div>
+                                                            {result.subtitle && (
+                                                                <div className="text-[11px] text-[#636366]">
+                                                                    {result.subtitle}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+                    </motion.div>
+                </motion.div>
+            </div>
+        </>
+    );
+};
+
+export default TopSearchPill;
