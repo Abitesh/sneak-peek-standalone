@@ -240,7 +240,7 @@ const TopSearchPill: React.FC<TopSearchPillProps> = ({
             {/* Search Pill Container */}
             <div
                 ref={containerRef}
-                className="absolute left-1/2 -translate-x-1/2 top-[3px] no-drag z-40"
+                className="absolute left-1/2 -translate-x-1/2 top-[6px] no-drag z-40"
             >
                 <motion.div
                     layout
@@ -255,31 +255,37 @@ const TopSearchPill: React.FC<TopSearchPillProps> = ({
                     className="relative"
                 >
                     {/* Main Pill */}
-                    <motion.div
-                        layout
-                        className={`
-                            relative overflow-hidden
-                            bg-[#1C1C1E] 
-                            ${showResults ? 'rounded-2xl' : 'rounded-full'}
-                            shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_4px_16px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.04)]
-                            transition-[border-radius] duration-200
-                        `}
-                    >
-                        {/* Input Row */}
-                        <div
-                            className="relative flex items-center"
-                            onClick={() => state === 'idle' && open()}
+                    <div className="relative">
+                        <motion.div
+                            initial={false}
+                            animate={{
+                                borderRadius: showResults ? 16 : 9999,
+                            }}
+                            transition={{
+                                duration: 0.25,
+                                ease: [0.32, 0.72, 0, 1]
+                            }}
+                            className={`
+                                relative overflow-hidden
+                                bg-[#1C1C1E] 
+                                shadow-[0_4px_16px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.04)]
+                            `}
                         >
-                            <div className="absolute left-3 flex items-center pointer-events-none">
-                                <Search size={14} className="text-[#636366]" />
-                            </div>
-                            <input
-                                ref={inputRef}
-                                type="text"
-                                value={query}
-                                onChange={handleInputChange}
-                                onFocus={() => state === 'idle' && setState('focused')}
-                                className={`
+                            {/* Input Row */}
+                            <div
+                                className="relative flex items-center"
+                                onClick={() => state === 'idle' && open()}
+                            >
+                                <div className="absolute left-3 flex items-center pointer-events-none">
+                                    <Search size={14} className="text-[#636366]" />
+                                </div>
+                                <input
+                                    ref={inputRef}
+                                    type="text"
+                                    value={query}
+                                    onChange={handleInputChange}
+                                    onFocus={() => state === 'idle' && setState('focused')}
+                                    className={`
                                     w-full bg-transparent
                                     pl-9 pr-4 py-1
                                     text-[13px] text-white
@@ -287,120 +293,114 @@ const TopSearchPill: React.FC<TopSearchPillProps> = ({
                                     focus:outline-none
                                     ${state === 'idle' ? 'cursor-pointer' : 'cursor-text'}
                                 `}
-                                placeholder="Search or ask anything..."
-                            />
-                            {state === 'idle' && (
-                                <div className="absolute right-3 flex items-center pointer-events-none">
-                                    <span className="text-[11px] text-[#4A4A4C] font-medium px-1.5 py-0.5 rounded bg-[#2C2C2E]">
-                                        ⌘K
-                                    </span>
-                                </div>
-                            )}
-                        </div>
+                                    placeholder="Search or ask anything..."
+                                />
+                            </div>
 
-                        {/* Results Panel */}
-                        <AnimatePresence>
-                            {showResults && (
-                                <motion.div
-                                    initial={{ height: 0, opacity: 0 }}
-                                    animate={{ height: 'auto', opacity: 1 }}
-                                    exit={{ height: 0, opacity: 0 }}
-                                    transition={{ duration: 0.2, ease: [0.32, 0.72, 0, 1] }}
-                                    className="overflow-hidden"
-                                >
-                                    <div className="border-t border-white/[0.06] py-2">
-                                        {/* Explore Section */}
-                                        <div className="px-3 py-1">
-                                            <div className="text-[10px] font-semibold text-[#636366] uppercase tracking-wider mb-1">
-                                                Explore
-                                            </div>
+                            {/* Results Panel */}
+                            <AnimatePresence>
+                                {showResults && (
+                                    <motion.div
+                                        initial={{ height: 0, opacity: 0 }}
+                                        animate={{ height: 'auto', opacity: 1 }}
+                                        exit={{ height: 0, opacity: 0 }}
+                                        transition={{ duration: 0.2, ease: [0.32, 0.72, 0, 1] }}
+                                        className="overflow-hidden"
+                                    >
+                                        <div className="border-t border-white/[0.06] py-2">
+                                            {/* Explore Section */}
+                                            <div className="px-3 py-1">
+                                                <div className="text-[10px] font-semibold text-[#636366] uppercase tracking-wider mb-1">
+                                                    Explore
+                                                </div>
 
-                                            {/* AI Query Option */}
-                                            <button
-                                                className={`
+                                                {/* AI Query Option */}
+                                                <button
+                                                    className={`
                                                     w-full flex items-center gap-3 px-2 py-1.5 rounded-lg text-left
                                                     transition-colors duration-100
                                                     ${selectedIndex === 0
-                                                        ? 'bg-[#2C2C2E]'
-                                                        : 'hover:bg-[#252528]'
-                                                    }
+                                                            ? 'bg-[#2C2C2E]'
+                                                            : 'hover:bg-[#252528]'
+                                                        }
                                                 `}
-                                                onClick={() => handleSelect(0)}
-                                                onMouseEnter={() => setSelectedIndex(0)}
-                                            >
-                                                <div className="w-6 h-6 rounded-md bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center shrink-0">
-                                                    <Sparkles size={12} className="text-white" />
-                                                </div>
-                                                <span className="text-[13px] text-white truncate">
-                                                    {query}
-                                                </span>
-                                            </button>
+                                                    onClick={() => handleSelect(0)}
+                                                    onMouseEnter={() => setSelectedIndex(0)}
+                                                >
+                                                    <div className="w-6 h-6 rounded-md bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center shrink-0">
+                                                        <Sparkles size={12} className="text-white" />
+                                                    </div>
+                                                    <span className="text-[13px] text-white truncate">
+                                                        {query}
+                                                    </span>
+                                                </button>
 
-                                            {/* Literal Search Option */}
-                                            <button
-                                                className={`
+                                                {/* Literal Search Option */}
+                                                <button
+                                                    className={`
                                                     w-full flex items-center gap-3 px-2 py-1.5 rounded-lg text-left
                                                     transition-colors duration-100
                                                     ${selectedIndex === 1
-                                                        ? 'bg-[#2C2C2E]'
-                                                        : 'hover:bg-[#252528]'
-                                                    }
+                                                            ? 'bg-[#2C2C2E]'
+                                                            : 'hover:bg-[#252528]'
+                                                        }
                                                 `}
-                                                onClick={() => handleSelect(1)}
-                                                onMouseEnter={() => setSelectedIndex(1)}
-                                            >
-                                                <div className="w-6 h-6 rounded-md bg-[#3A3A3C] flex items-center justify-center shrink-0">
-                                                    <Search size={12} className="text-[#A0A0A2]" />
-                                                </div>
-                                                <span className="text-[13px] text-[#A0A0A2]">
-                                                    Search for <span className="text-white">"{query}"</span>
-                                                </span>
-                                            </button>
-                                        </div>
+                                                    onClick={() => handleSelect(1)}
+                                                    onMouseEnter={() => setSelectedIndex(1)}
+                                                >
+                                                    <div className="w-6 h-6 rounded-md bg-[#3A3A3C] flex items-center justify-center shrink-0">
+                                                        <Search size={12} className="text-[#A0A0A2]" />
+                                                    </div>
+                                                    <span className="text-[13px] text-[#A0A0A2]">
+                                                        Search for <span className="text-white">"{query}"</span>
+                                                    </span>
+                                                </button>
+                                            </div>
 
-                                        {/* Sessions Section */}
-                                        {sessionResults.length > 0 && (
-                                            <div className="px-3 py-1 mt-1">
-                                                <div className="text-[10px] font-semibold text-[#636366] uppercase tracking-wider mb-1">
-                                                    Sessions
-                                                </div>
+                                            {/* Sessions Section */}
+                                            {sessionResults.length > 0 && (
+                                                <div className="px-3 py-1 mt-1">
+                                                    <div className="text-[10px] font-semibold text-[#636366] uppercase tracking-wider mb-1">
+                                                        Sessions
+                                                    </div>
 
-                                                {sessionResults.map((result, index) => (
-                                                    <button
-                                                        key={result.id}
-                                                        className={`
+                                                    {sessionResults.map((result, index) => (
+                                                        <button
+                                                            key={result.id}
+                                                            className={`
                                                             w-full flex items-center gap-3 px-2 py-1.5 rounded-lg text-left
                                                             transition-colors duration-100
                                                             ${selectedIndex === index + 2
-                                                                ? 'bg-[#2C2C2E]'
-                                                                : 'hover:bg-[#252528]'
-                                                            }
+                                                                    ? 'bg-[#2C2C2E]'
+                                                                    : 'hover:bg-[#252528]'
+                                                                }
                                                         `}
-                                                        onClick={() => handleSelect(index + 2)}
-                                                        onMouseEnter={() => setSelectedIndex(index + 2)}
-                                                    >
-                                                        <div className="w-6 h-6 rounded-md bg-[#3A3A3C] flex items-center justify-center shrink-0">
-                                                            <FileText size={12} className="text-[#A0A0A2]" />
-                                                        </div>
-                                                        <div className="flex-1 min-w-0">
-                                                            <div className="text-[13px] text-white truncate">
-                                                                {result.title}
+                                                            onClick={() => handleSelect(index + 2)}
+                                                            onMouseEnter={() => setSelectedIndex(index + 2)}
+                                                        >
+                                                            <div className="w-6 h-6 rounded-md bg-[#3A3A3C] flex items-center justify-center shrink-0">
+                                                                <FileText size={12} className="text-[#A0A0A2]" />
                                                             </div>
-                                                            {result.subtitle && (
-                                                                <div className="text-[11px] text-[#636366]">
-                                                                    {result.subtitle}
+                                                            <div className="flex-1 min-w-0">
+                                                                <div className="text-[13px] text-white truncate">
+                                                                    {result.title}
                                                                 </div>
-                                                            )}
-                                                        </div>
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        )}
-                                    </div>
-                                </motion.div>
-                            )}
-                        </AnimatePresence>
-                    </motion.div>
+                                                                {result.subtitle && (
+                                                                    <div className="text-[11px] text-[#636366]">
+                                                                        {result.subtitle}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
+                        </motion.div>
+                    </div>
                 </motion.div>
             </div>
         </>

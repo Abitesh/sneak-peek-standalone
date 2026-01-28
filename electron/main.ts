@@ -1,6 +1,5 @@
 import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain } from "electron"
 import path from "path"
-import fs from "fs"
 import { autoUpdater } from "electron-updater"
 require('dotenv').config();
 
@@ -806,17 +805,7 @@ function setMacDockIcon() {
     : path.resolve(__dirname, "../assets/natively.icns");
 
   console.log("[DockIcon] Using:", iconPath);
-  console.log("[DockIcon] Exists:", fs.existsSync(iconPath));
-
-  const image = nativeImage.createFromPath(iconPath);
-
-  if (image.isEmpty()) {
-    console.error("[DockIcon] nativeImage failed to load (image is empty)");
-    return;
-  }
-
-  app.dock.setIcon(image);
-  console.log("[DockIcon] Dock icon set via nativeImage");
+  app.dock.setIcon(iconPath);
 }
 
 async function initializeApp() {
