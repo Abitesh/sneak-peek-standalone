@@ -1,4 +1,5 @@
 import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain } from "electron"
+import path from "path"
 import { autoUpdater } from "electron-updater"
 require('dotenv').config();
 
@@ -48,6 +49,8 @@ import { IntelligenceManager } from "./IntelligenceManager"
 import { SystemAudioCapture } from "./audio/SystemAudioCapture"
 import { GoogleSTT } from "./audio/GoogleSTT"
 import { ThemeManager } from "./ThemeManager"
+import { RAGManager } from "./rag/RAGManager"
+import { DatabaseManager } from "./db/DatabaseManager"
 
 export class AppState {
   private static instance: AppState | null = null
@@ -61,12 +64,13 @@ export class AppState {
   private nativeServiceManager: NativeServiceManager
   private intelligenceManager: IntelligenceManager
   private themeManager: ThemeManager
+  private ragManager: RAGManager | null = null
   private tray: Tray | null = null
   private updateAvailable: boolean = false
 
   // View management
   private view: "queue" | "solutions" = "queue"
-  private isUndetectable: boolean = false
+  private isUndetectable: boolean = true
 
   private problemInfo: {
     problem_statement: string
@@ -122,6 +126,9 @@ export class AppState {
     // Initialize ThemeManager
     this.themeManager = ThemeManager.getInstance()
 
+    // Initialize RAGManager (requires database to be ready)
+    this.initializeRAGManager()
+
     this.setupNativeAudioEvents()
     this.setupIntelligenceEvents()
 
@@ -130,6 +137,23 @@ export class AppState {
 
     // Initialize Auto-Updater
     this.setupAutoUpdater()
+  }
+
+  private initializeRAGManager(): void {
+    try {
+      const db = DatabaseManager.getInstance();
+      // @ts-ignore - accessing private db for RAGManager
+      const sqliteDb = db['db'];
+
+      if (sqliteDb) {
+        const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
+        this.ragManager = new RAGManager({ db: sqliteDb, apiKey });
+        this.ragManager.setLLMHelper(this.processingHelper.getLLMHelper());
+        console.log('[AppState] RAGManager initialized');
+      }
+    } catch (error) {
+      console.error('[AppState] Failed to initialize RAGManager:', error);
+    }
   }
 
   private setupAutoUpdater(): void {
@@ -294,6 +318,45 @@ export class AppState {
 
     // 4. Reset Intelligence Context & Save
     await this.intelligenceManager.stopMeeting();
+
+    // 5. Process meeting for RAG (embeddings)
+    await this.processCompletedMeetingForRAG();
+  }
+
+  private async processCompletedMeetingForRAG(): Promise<void> {
+    if (!this.ragManager) return;
+
+    try {
+      // Get the most recent meeting from database
+      const meetings = DatabaseManager.getInstance().getRecentMeetings(1);
+      if (meetings.length === 0) return;
+
+      const meeting = DatabaseManager.getInstance().getMeetingDetails(meetings[0].id);
+      if (!meeting || !meeting.transcript || meeting.transcript.length === 0) return;
+
+      // Convert transcript to RAG format
+      const segments = meeting.transcript.map(t => ({
+        speaker: t.speaker,
+        text: t.text,
+        timestamp: t.timestamp
+      }));
+
+      // Generate summary from detailedSummary if available
+      let summary: string | undefined;
+      if (meeting.detailedSummary) {
+        summary = [
+          ...(meeting.detailedSummary.keyPoints || []),
+          ...(meeting.detailedSummary.actionItems || []).map(a => `Action: ${a}`)
+        ].join('. ');
+      }
+
+      // Process meeting for RAG
+      const result = await this.ragManager.processMeeting(meeting.id, segments, summary);
+      console.log(`[AppState] RAG processed meeting ${meeting.id}: ${result.chunkCount} chunks`);
+
+    } catch (error) {
+      console.error('[AppState] Failed to process meeting for RAG:', error);
+    }
   }
 
   private setupIntelligenceEvents(): void {
@@ -513,6 +576,10 @@ export class AppState {
 
   public getThemeManager(): ThemeManager {
     return this.themeManager
+  }
+
+  public getRAGManager(): RAGManager | null {
+    return this.ragManager;
   }
 
   public getView(): "queue" | "solutions" {
@@ -736,6 +803,28 @@ async function initializeApp() {
 
   app.whenReady().then(() => {
     app.setName("Natively"); // Fix App Name in Menu
+
+    // macOS Dock icon (IMPORTANT) - Must be set BEFORE windows are created
+    if (process.platform === "darwin") {
+      const iconPath = path.join(
+        app.isPackaged
+          ? process.resourcesPath
+          : process.cwd(),
+        "electron/assets/natively.icns"
+      );
+
+      console.log("[Main] Setting Dock icon:", iconPath);
+      console.log("[Main] isPackaged:", app.isPackaged);
+      console.log("[Main] cwd:", process.cwd());
+
+      try {
+        app.dock.setIcon(iconPath);
+        console.log("[Main] Dock icon set successfully");
+      } catch (err) {
+        console.error("[Main] Failed to set Dock icon:", err);
+      }
+    }
+
     console.log("App is ready")
     appState.createWindow()
     appState.createTray()
@@ -779,6 +868,9 @@ async function initializeApp() {
     // We will rely on Electron's default for Dev, and package.json for Build.
 
     if (process.platform === 'darwin') {
+      // Set the dock icon purely for development (in prod it comes from the bundle)
+      const iconPath = path.join(process.cwd(), 'electron/assets/natively.icns');
+      app.dock.setIcon(iconPath);
       app.dock.show(); // Ensure dock is visible
     }
   })

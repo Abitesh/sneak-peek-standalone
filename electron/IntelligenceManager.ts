@@ -5,7 +5,7 @@
 import { EventEmitter } from 'events';
 import { TranscriptSegment, SuggestionTrigger } from './NativeAudioClient';
 import { LLMHelper } from './LLMHelper';
-import { AnswerLLM, AssistLLM, FollowUpLLM, RecapLLM, FollowUpQuestionsLLM, WhatToAnswerLLM, prepareTranscriptForWhatToAnswer, GROQ_TITLE_PROMPT, GROQ_SUMMARY_JSON_PROMPT } from './llm';
+import { AnswerLLM, AssistLLM, FollowUpLLM, RecapLLM, FollowUpQuestionsLLM, WhatToAnswerLLM, prepareTranscriptForWhatToAnswer, GROQ_TITLE_PROMPT, GROQ_SUMMARY_JSON_PROMPT, buildTemporalContext, AssistantResponse, classifyIntent } from './llm';
 import { desktopCapturer } from 'electron';
 import { DatabaseManager, Meeting } from './db/DatabaseManager';
 const crypto = require('crypto');
@@ -84,6 +84,9 @@ export class IntelligenceManager extends EventEmitter {
 
     // Last assistant message for follow-up mode
     private lastAssistantMessage: string | null = null;
+
+    // Temporal RAG: Track all assistant responses in session for anti-repetition
+    private assistantResponseHistory: AssistantResponse[] = [];
 
     private currentMeetingMetadata: {
         title?: string;
@@ -238,7 +241,20 @@ export class IntelligenceManager extends EventEmitter {
         });
 
         this.lastAssistantMessage = cleanText;
-        console.log(`[IntelligenceManager] lastAssistantMessage updated`);
+
+        // Temporal RAG: Track response history for anti-repetition
+        this.assistantResponseHistory.push({
+            text: cleanText,
+            timestamp: Date.now(),
+            questionContext: this.getLastInterviewerTurn() || 'unknown'
+        });
+
+        // Keep history bounded (last 10 responses)
+        if (this.assistantResponseHistory.length > 10) {
+            this.assistantResponseHistory = this.assistantResponseHistory.slice(-10);
+        }
+
+        console.log(`[IntelligenceManager] lastAssistantMessage updated, history size: ${this.assistantResponseHistory.length}`);
         this.evictOldEntries();
     }
 
@@ -407,14 +423,31 @@ export class IntelligenceManager extends EventEmitter {
             // Clean, sparsify, format in one call
             const preparedTranscript = prepareTranscriptForWhatToAnswer(transcriptTurns, 12);
 
-            // Single-pass LLM call: question inference + answer generation
+            // Build temporal context for anti-repetition (Temporal RAG)
+            const temporalContext = buildTemporalContext(
+                contextItems,
+                this.assistantResponseHistory,
+                180 // 3 minute window
+            );
+
+            // Classify intent for answer shaping (lightweight, ~0-5ms)
+            const lastInterviewerTurn = this.getLastInterviewerTurn();
+            const intentResult = classifyIntent(
+                lastInterviewerTurn,
+                preparedTranscript,
+                this.assistantResponseHistory.length
+            );
+
+            console.log(`[IntelligenceManager] Temporal RAG: ${temporalContext.previousResponses.length} responses, tone: ${temporalContext.toneSignals[0]?.type || 'neutral'}, intent: ${intentResult.intent}`);
+
+            // Single-pass LLM call: question inference + answer generation with temporal context + intent
             // NOW STREAMING
 
             // Emit start event if needed (optional)
             // this.emit('suggested_answer_started');
 
             let fullAnswer = "";
-            const stream = this.whatToAnswerLLM.generateStream(preparedTranscript);
+            const stream = this.whatToAnswerLLM.generateStream(preparedTranscript, temporalContext, intentResult);
 
             for await (const token of stream) {
                 this.emit('suggested_answer_token', token, question || 'inferred', confidence);
@@ -861,6 +894,7 @@ ${data.context.substring(0, 10000)}`;
         this.fullUsage = [];
         this.sessionStartTime = Date.now();
         this.lastAssistantMessage = null;
+        this.assistantResponseHistory = []; // Reset temporal RAG history
         this.activeMode = 'idle';
         if (this.assistCancellationToken) {
             this.assistCancellationToken.abort();

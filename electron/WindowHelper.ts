@@ -112,7 +112,13 @@ export class WindowHelper {
       focusable: true,
       resizable: true,
       movable: true,
-      center: true
+      center: true,
+      icon: path.join(
+        app.isPackaged
+          ? process.resourcesPath
+          : process.cwd(),
+        "electron/assets/natively.icns"
+      )
     }
 
     this.launcherWindow = new BrowserWindow(launcherSettings)

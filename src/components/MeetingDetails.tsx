@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ArrowLeft, Search, Mail, Link, ChevronDown, Play, ArrowUp, Copy, Check, MoreHorizontal, Settings, ArrowRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import MeetingChatOverlay from './MeetingChatOverlay';
 
 const formatTime = (ms: number) => {
     const date = new Date(ms);
@@ -44,9 +45,63 @@ interface MeetingDetailsProps {
     onOpenSettings: () => void;
 }
 
-const MeetingDetails: React.FC<MeetingDetailsProps> = ({ meeting, onBack, onOpenSettings }) => {
+const MeetingDetails: React.FC<MeetingDetailsProps> = ({ meeting }) => {
     const [activeTab, setActiveTab] = useState<'summary' | 'transcript' | 'usage'>('summary');
     const [query, setQuery] = useState('');
+    const [isCopied, setIsCopied] = useState(false);
+    const [isChatOpen, setIsChatOpen] = useState(false);
+    const [submittedQuery, setSubmittedQuery] = useState('');
+
+    const handleSubmitQuestion = () => {
+        if (query.trim()) {
+            setSubmittedQuery(query);
+            if (!isChatOpen) {
+                setIsChatOpen(true);
+            }
+            setQuery('');
+        }
+    };
+
+    const handleInputKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter' && query.trim()) {
+            e.preventDefault();
+            handleSubmitQuestion();
+        }
+    };
+
+    const handleCopy = async () => {
+        let textToCopy = '';
+
+        if (activeTab === 'summary' && meeting.detailedSummary) {
+            textToCopy = `
+Meeting: ${meeting.title}
+Date: ${new Date(meeting.date).toLocaleDateString()}
+
+OVERVIEW:
+${meeting.detailedSummary.overview || ''}
+
+ACTION ITEMS:
+${meeting.detailedSummary.actionItems?.map(item => `- ${item}`).join('\n') || 'None'}
+
+KEY POINTS:
+${meeting.detailedSummary.keyPoints?.map(item => `- ${item}`).join('\n') || 'None'}
+            `.trim();
+        } else if (activeTab === 'transcript' && meeting.transcript) {
+            textToCopy = meeting.transcript.map(t => `[${formatTime(t.timestamp)}] ${t.speaker === 'user' ? 'Me' : 'Them'}: ${t.text}`).join('\n');
+        } else if (activeTab === 'usage' && meeting.usage) {
+            textToCopy = meeting.usage.map(u => `Q: ${u.question || ''}\nA: ${u.answer || ''}`).join('\n\n');
+        }
+
+        if (!textToCopy) return;
+
+        try {
+            await navigator.clipboard.writeText(textToCopy);
+            setIsCopied(true);
+            setTimeout(() => setIsCopied(false), 2000);
+        } catch (err) {
+            console.error('Failed to copy content:', err);
+        }
+    };
 
     return (
         <div className="h-full w-full flex flex-col bg-[#0C0C0D] text-[#A4A4A7] font-sans overflow-hidden">
@@ -68,41 +123,44 @@ const MeetingDetails: React.FC<MeetingDetailsProps> = ({ meeting, onBack, onOpen
                             <h1 className="text-3xl font-bold text-[#E9E9E9] tracking-tight">{meeting.title}</h1>
                         </div>
 
-                        {/* Moved Actions: Follow-up & Share */}
-                        <div className="flex items-center gap-2 mt-1">
-                            <button className="flex items-center gap-2 px-3 py-1.5 bg-bg-input hover:bg-bg-elevated border border-border-subtle rounded-md text-xs font-medium text-text-primary transition-colors">
-                                <Mail size={14} />
-                                Follow-up email
-                                <span className="w-1.5 h-1.5 rounded-full bg-blue-500 ml-1"></span>
-                            </button>
-                            <button className="flex items-center gap-2 px-3 py-1.5 bg-bg-input hover:bg-bg-elevated border border-border-subtle rounded-md text-xs font-medium text-text-primary transition-colors">
-                                <Link size={14} />
-                                Share
-                                <ChevronDown size={12} className="text-text-secondary" />
-                            </button>
-                        </div>
+                        {/* Moved Actions: Follow-up & Share (REMOVED per user request) */}
+                        {/* <div className="flex items-center gap-2 mt-1"> ... </div> */}
                     </div>
 
                     {/* Tabs */}
-                    <div className="flex items-center gap-1 mb-8 border-b border-border-subtle pb-0">
-                        {['summary', 'transcript', 'usage'].map((tab) => (
-                            <button
-                                key={tab}
-                                onClick={() => setActiveTab(tab as any)}
-                                className={`
-                                    px-4 py-2 text-xs font-medium rounded-t-lg transition-colors relative
-                                    ${activeTab === tab ? 'text-text-primary bg-bg-input' : 'text-text-secondary hover:text-text-primary'}
-                                `}
-                            >
-                                {tab.charAt(0).toUpperCase() + tab.slice(1)}
-                                {activeTab === tab && (
-                                    <motion.div
-                                        layoutId="activeTabIndicator"
-                                        className="absolute bottom-0 left-0 right-0 h-px bg-accent-primary"
-                                    />
-                                )}
-                            </button>
-                        ))}
+                    {/* Designing Tabs to match reference 1:1 (Dark Pill Container) */}
+                    <div className="flex items-center justify-between mb-8">
+                        <div className="bg-[#121214] p-1 rounded-xl inline-flex items-center gap-0.5 border border-white/[0.08]">
+                            {['summary', 'transcript', 'usage'].map((tab) => (
+                                <button
+                                    key={tab}
+                                    onClick={() => setActiveTab(tab as any)}
+                                    className={`
+                                        relative px-3 py-1 text-[13px] font-medium rounded-lg transition-all duration-200 z-10
+                                        ${activeTab === tab ? 'text-[#E9E9E9]' : 'text-[#888889] hover:text-[#B0B0B1]'}
+                                    `}
+                                >
+                                    {activeTab === tab && (
+                                        <motion.div
+                                            layoutId="activeTabBackground"
+                                            className="absolute inset-0 bg-[#3A3A3C] rounded-lg -z-10 shadow-sm"
+                                            initial={false}
+                                            transition={{ type: "spring", stiffness: 400, damping: 30 }}
+                                        />
+                                    )}
+                                    {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                                </button>
+                            ))}
+                        </div>
+
+                        {/* Copy Button - Inline with Tabs (Always visible) */}
+                        <button
+                            onClick={handleCopy}
+                            className="flex items-center gap-2 text-xs font-medium text-[#A4A4A7] hover:text-white transition-colors"
+                        >
+                            {isCopied ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
+                            {isCopied ? 'Copied' : activeTab === 'summary' ? 'Copy full summary' : activeTab === 'transcript' ? 'Copy full transcript' : 'Copy usage'}
+                        </button>
                     </div>
 
                     {/* Tab Content */}
@@ -121,10 +179,6 @@ const MeetingDetails: React.FC<MeetingDetailsProps> = ({ meeting, onBack, onOpen
                                 <section className="mb-8">
                                     <div className="flex items-center justify-between mb-4">
                                         <h2 className="text-lg font-semibold text-[#E9E9E9]">Action Items</h2>
-                                        <button className="flex items-center gap-1.5 text-xs text-text-tertiary hover:text-[#E9E9E9] transition-colors">
-                                            <Copy size={12} />
-                                            Copy full summary
-                                        </button>
                                     </div>
                                     <ul className="space-y-3">
                                         {meeting.detailedSummary?.actionItems?.length ? meeting.detailedSummary.actionItems.map((item, i) => (
@@ -153,12 +207,6 @@ const MeetingDetails: React.FC<MeetingDetailsProps> = ({ meeting, onBack, onOpen
 
                         {activeTab === 'transcript' && (
                             <motion.section initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                                <div className="flex items-center justify-end mb-6">
-                                    <button className="flex items-center gap-1.5 text-xs text-text-tertiary hover:text-text-primary transition-colors">
-                                        <Copy size={12} />
-                                        Copy full transcript
-                                    </button>
-                                </div>
                                 <div className="space-y-6">
                                     {meeting.transcript?.map((entry, i) => (
                                         <div key={i} className="group">
@@ -218,17 +266,41 @@ const MeetingDetails: React.FC<MeetingDetailsProps> = ({ meeting, onBack, onOpen
                         type="text"
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
+                        onKeyDown={handleInputKeyDown}
                         placeholder="Ask about this meeting..."
-                        className="w-full pl-5 pr-12 py-3 bg-[#1C1C1E]/40 backdrop-blur-md border border-white/[0.08] rounded-full text-sm text-[#E9E9E9] placeholder-text-tertiary/70 focus:outline-none focus:ring-1 focus:ring-white/10 focus:bg-[#1C1C1E]/60 transition-all shadow-xl"
+                        className="w-full pl-5 pr-12 py-3 bg-[#1C1C1E]/20 backdrop-blur-xl border border-white/[0.08] rounded-full text-sm text-[#E9E9E9] placeholder-text-tertiary/70 focus:outline-none transition-all shadow-xl"
                     />
                     <button
-                        className={`absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full transition-all duration-200 border border-white/5 ${query ? 'bg-white text-black hover:scale-105' : 'bg-[#2C2C2E] text-[#E9E9E9] hover:bg-[#3A3A3C]'
+                        onClick={handleSubmitQuestion}
+                        className={`absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full transition-all duration-200 border border-white/5 ${query.trim() ? 'bg-white text-black hover:scale-105' : 'bg-[#2C2C2E] text-[#E9E9E9] hover:bg-[#3A3A3C]'
                             }`}
                     >
                         <ArrowUp size={16} className="transform rotate-45" />
                     </button>
                 </div>
             </div>
+
+            {/* Chat Overlay */}
+            <MeetingChatOverlay
+                isOpen={isChatOpen}
+                onClose={() => {
+                    setIsChatOpen(false);
+                    setQuery('');
+                    setSubmittedQuery('');
+                }}
+                meetingContext={{
+                    id: meeting.id,  // Required for RAG queries
+                    title: meeting.title,
+                    summary: meeting.detailedSummary?.overview,
+                    keyPoints: meeting.detailedSummary?.keyPoints,
+                    actionItems: meeting.detailedSummary?.actionItems,
+                    transcript: meeting.transcript
+                }}
+                initialQuery={submittedQuery}
+                onNewQuery={(newQuery) => {
+                    setSubmittedQuery(newQuery);
+                }}
+            />
         </div>
     );
 };

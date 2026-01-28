@@ -5,6 +5,7 @@ import mainui from "../UI_comp/mainui.png";
 import calender from "../UI_comp/calender.png";
 import ConnectCalendarButton from './ui/ConnectCalendarButton';
 import MeetingDetails from './MeetingDetails';
+import GlobalChatOverlay from './GlobalChatOverlay';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface Meeting {
@@ -65,7 +66,7 @@ const formatTime = (dateStr: string) => {
 
 const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) => {
     const [meetings, setMeetings] = useState<Meeting[]>([]);
-    const [isDetectable, setIsDetectable] = useState(true);
+    const [isDetectable, setIsDetectable] = useState(false);
     const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
     const [upcomingEvents, setUpcomingEvents] = useState<any[]>([]);
     const [isPrepared, setIsPrepared] = useState(false);
@@ -73,6 +74,11 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
     const [isCalendarConnected, setIsCalendarConnected] = useState(false);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [showNotification, setShowNotification] = useState(false);
+
+    // Global search state
+    const [globalSearchQuery, setGlobalSearchQuery] = useState('');
+    const [isGlobalChatOpen, setIsGlobalChatOpen] = useState(false);
+    const [submittedGlobalQuery, setSubmittedGlobalQuery] = useState('');
 
     const fetchMeetings = () => {
         if (window.electronAPI && window.electronAPI.getRecentMeetings) {
@@ -289,6 +295,16 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
                         </div>
                         <input
                             type="text"
+                            value={globalSearchQuery}
+                            onChange={(e) => setGlobalSearchQuery(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' && globalSearchQuery.trim()) {
+                                    e.preventDefault();
+                                    setSubmittedGlobalQuery(globalSearchQuery);
+                                    setIsGlobalChatOpen(true);
+                                    setGlobalSearchQuery('');
+                                }
+                            }}
                             className="block w-full pl-9 pr-3 py-1 bg-bg-input border border-border-subtle rounded-full text-xs text-text-primary placeholder-text-tertiary focus:outline-none focus:ring-1 focus:ring-border-muted focus:bg-bg-elevated transition-all"
                             placeholder="Search or ask anything..."
                         />
@@ -545,7 +561,7 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
                                         <div className="md:col-span-1 rounded-xl overflow-hidden bg-bg-elevated relative group flex flex-col items-center pt-6 text-center">
                                             {/* Backdrop Image */}
                                             <div className="absolute inset-0">
-                                                <img src={calender} alt="" className="w-full h-full object-cover opacity-100 transition-opacity duration-500 translate-x-1 translate-y-[-2px] scale-110" />
+                                                <img src={calender} alt="" className="w-full h-full object-cover opacity-100 transition-opacity duration-500 translate-x--1 translate-y-[1px] scale-105" />
                                             </div>
 
                                             {/* Content Layer */}
@@ -717,6 +733,16 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
                     </motion.div>
                 )}
             </AnimatePresence>
+
+            {/* Global Chat Overlay */}
+            <GlobalChatOverlay
+                isOpen={isGlobalChatOpen}
+                onClose={() => {
+                    setIsGlobalChatOpen(false);
+                    setSubmittedGlobalQuery('');
+                }}
+                initialQuery={submittedGlobalQuery}
+            />
         </div >
     );
 };

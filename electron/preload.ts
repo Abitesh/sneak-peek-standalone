@@ -114,6 +114,17 @@ interface ElectronAPI {
   onUpdateError: (callback: (err: string) => void) => () => void
   restartAndInstall: () => Promise<void>
   checkForUpdates: () => Promise<void>
+
+  // RAG (Retrieval-Augmented Generation) API
+  ragQueryMeeting: (meetingId: string, query: string) => Promise<{ success?: boolean; fallback?: boolean; error?: string }>
+  ragQueryGlobal: (query: string) => Promise<{ success?: boolean; fallback?: boolean; error?: string }>
+  ragCancelQuery: (options: { meetingId?: string; global?: boolean }) => Promise<{ success: boolean }>
+  ragIsMeetingProcessed: (meetingId: string) => Promise<boolean>
+  ragGetQueueStatus: () => Promise<{ pending: number; processing: number; completed: number; failed: number }>
+  ragRetryEmbeddings: () => Promise<{ success: boolean }>
+  onRAGStreamChunk: (callback: (data: { meetingId?: string; global?: boolean; chunk: string }) => void) => () => void
+  onRAGStreamComplete: (callback: (data: { meetingId?: string; global?: boolean }) => void) => () => void
+  onRAGStreamError: (callback: (data: { meetingId?: string; global?: boolean; error: string }) => void) => () => void
 }
 
 export const PROCESSING_EVENTS = {
@@ -361,6 +372,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   startMeeting: () => ipcRenderer.invoke("start-meeting"),
   endMeeting: () => ipcRenderer.invoke("end-meeting"),
   getRecentMeetings: () => ipcRenderer.invoke("get-recent-meetings"),
+  searchMeetings: (query: string) => ipcRenderer.invoke("meetings:search", query),
   getMeetingDetails: (id: string) => ipcRenderer.invoke("get-meeting-details", id),
   deleteMeeting: (id: string) => ipcRenderer.invoke("delete-meeting", id),
 
@@ -562,4 +574,34 @@ contextBridge.exposeInMainWorld("electronAPI", {
   },
   restartAndInstall: () => ipcRenderer.invoke("quit-and-install-update"),
   checkForUpdates: () => ipcRenderer.invoke("check-for-updates"),
+
+  // RAG API
+  ragQueryMeeting: (meetingId: string, query: string) => ipcRenderer.invoke('rag:query-meeting', { meetingId, query }),
+  ragQueryGlobal: (query: string) => ipcRenderer.invoke('rag:query-global', { query }),
+  ragCancelQuery: (options: { meetingId?: string; global?: boolean }) => ipcRenderer.invoke('rag:cancel-query', options),
+  ragIsMeetingProcessed: (meetingId: string) => ipcRenderer.invoke('rag:is-meeting-processed', meetingId),
+  ragGetQueueStatus: () => ipcRenderer.invoke('rag:get-queue-status'),
+  ragRetryEmbeddings: () => ipcRenderer.invoke('rag:retry-embeddings'),
+
+  onRAGStreamChunk: (callback: (data: { meetingId?: string; global?: boolean; chunk: string }) => void) => {
+    const subscription = (_: any, data: any) => callback(data)
+    ipcRenderer.on('rag:stream-chunk', subscription)
+    return () => {
+      ipcRenderer.removeListener('rag:stream-chunk', subscription)
+    }
+  },
+  onRAGStreamComplete: (callback: (data: { meetingId?: string; global?: boolean }) => void) => {
+    const subscription = (_: any, data: any) => callback(data)
+    ipcRenderer.on('rag:stream-complete', subscription)
+    return () => {
+      ipcRenderer.removeListener('rag:stream-complete', subscription)
+    }
+  },
+  onRAGStreamError: (callback: (data: { meetingId?: string; global?: boolean; error: string }) => void) => {
+    const subscription = (_: any, data: any) => callback(data)
+    ipcRenderer.on('rag:stream-error', subscription)
+    return () => {
+      ipcRenderer.removeListener('rag:stream-error', subscription)
+    }
+  },
 } as ElectronAPI)

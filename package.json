@@ -46,7 +46,7 @@
           ]
         }
       ],
-      "icon": "assets/icons/mac/icon.icns",
+      "icon": "electron/assets/natively.icns",
       "hardenedRuntime": true,
       "entitlements": "assets/entitlements.mac.plist"
     },

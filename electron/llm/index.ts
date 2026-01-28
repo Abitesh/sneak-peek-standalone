@@ -15,6 +15,16 @@ export {
     prepareTranscriptForWhatToAnswer
 } from "./transcriptCleaner";
 export type { TranscriptTurn } from "./transcriptCleaner";
+export {
+    buildTemporalContext,
+    formatTemporalContextForPrompt
+} from "./TemporalContextBuilder";
+export type { TemporalContext, AssistantResponse } from "./TemporalContextBuilder";
+export {
+    classifyIntent,
+    getAnswerShapeGuidance
+} from "./IntentClassifier";
+export type { ConversationIntent, IntentResult } from "./IntentClassifier";
 export { MODE_CONFIGS } from "./types";
 export type { GenerationConfig, GeminiContent, LLMClient } from "./types";
 export {
@@ -24,7 +34,9 @@ export {
     FOLLOWUP_MODE_PROMPT,
     RECAP_MODE_PROMPT,
     WHAT_TO_ANSWER_PROMPT,
+    TEMPORAL_CONTEXT_TEMPLATE,
     GROQ_TITLE_PROMPT,
-    GROQ_SUMMARY_JSON_PROMPT
+    GROQ_SUMMARY_JSON_PROMPT,
+    FOLLOWUP_EMAIL_PROMPT,
+    GROQ_FOLLOWUP_EMAIL_PROMPT
 } from "./prompts";
-

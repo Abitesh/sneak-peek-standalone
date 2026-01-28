@@ -404,6 +404,10 @@ export function initializeIpcHandlers(appState: AppState): void {
     return DatabaseManager.getInstance().getRecentMeetings(50);
   });
 
+  ipcMain.handle("meetings:search", async (event, query: string) => {
+    return DatabaseManager.getInstance().searchMeetings(query);
+  });
+
   ipcMain.handle("get-meeting-details", async (event, id) => {
     // Helper to fetch full details
     return DatabaseManager.getInstance().getMeetingDetails(id);
@@ -594,6 +598,192 @@ export function initializeIpcHandlers(appState: AppState): void {
   ipcMain.handle("calendar-refresh", async () => {
     const { CalendarManager } = require('./services/CalendarManager');
     await CalendarManager.getInstance().refreshState();
+    return { success: true };
+  });
+
+  // ==========================================
+  // Follow-up Email Handlers
+  // ==========================================
+
+  ipcMain.handle("generate-followup-email", async (_, input: any) => {
+    try {
+      const { FOLLOWUP_EMAIL_PROMPT, GROQ_FOLLOWUP_EMAIL_PROMPT } = require('./llm/prompts');
+      const { buildFollowUpEmailPromptInput } = require('./utils/emailUtils');
+
+      const llmHelper = appState.processingHelper.getLLMHelper();
+
+      // Build the context string from input
+      const contextString = buildFollowUpEmailPromptInput(input);
+
+      // Build prompts
+      const geminiPrompt = `${FOLLOWUP_EMAIL_PROMPT}\n\nMEETING DETAILS:\n${contextString}`;
+      const groqPrompt = `${GROQ_FOLLOWUP_EMAIL_PROMPT}\n\nMEETING DETAILS:\n${contextString}`;
+
+      // Use chatWithGemini with alternateGroqMessage for fallback
+      const emailBody = await llmHelper.chatWithGemini(geminiPrompt, undefined, undefined, true, groqPrompt);
+
+      return emailBody;
+    } catch (error: any) {
+      console.error("Error generating follow-up email:", error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle("extract-emails-from-transcript", async (_, transcript: Array<{ text: string }>) => {
+    try {
+      const { extractEmailsFromTranscript } = require('./utils/emailUtils');
+      return extractEmailsFromTranscript(transcript);
+    } catch (error: any) {
+      console.error("Error extracting emails:", error);
+      return [];
+    }
+  });
+
+  ipcMain.handle("get-calendar-attendees", async (_, eventId: string) => {
+    try {
+      const { CalendarManager } = require('./services/CalendarManager');
+      const cm = CalendarManager.getInstance();
+
+      // Try to get attendees from the event
+      const events = await cm.getUpcomingEvents();
+      const event = events?.find((e: any) => e.id === eventId);
+
+      if (event && event.attendees) {
+        return event.attendees.map((a: any) => ({
+          email: a.email,
+          name: a.displayName || a.email?.split('@')[0] || ''
+        })).filter((a: any) => a.email);
+      }
+
+      return [];
+    } catch (error: any) {
+      console.error("Error getting calendar attendees:", error);
+      return [];
+    }
+  });
+
+  ipcMain.handle("open-mailto", async (_, { to, subject, body }: { to: string; subject: string; body: string }) => {
+    try {
+      const { buildMailtoLink } = require('./utils/emailUtils');
+      const mailtoUrl = buildMailtoLink(to, subject, body);
+      await shell.openExternal(mailtoUrl);
+      return { success: true };
+    } catch (error: any) {
+      console.error("Error opening mailto:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // ==========================================
+  // RAG (Retrieval-Augmented Generation) Handlers
+  // ==========================================
+
+  // Store active query abort controllers for cancellation
+  const activeRAGQueries = new Map<string, AbortController>();
+
+  // Query meeting with RAG (meeting-scoped)
+  ipcMain.handle("rag:query-meeting", async (event, { meetingId, query }: { meetingId: string; query: string }) => {
+    const ragManager = appState.getRAGManager();
+
+    if (!ragManager || !ragManager.isReady()) {
+      // Fallback to regular chat if RAG not available
+      console.log("[RAG] Not ready, falling back to regular chat");
+      return { fallback: true };
+    }
+
+    const abortController = new AbortController();
+    const queryKey = `meeting-${meetingId}`;
+    activeRAGQueries.set(queryKey, abortController);
+
+    try {
+      const stream = ragManager.queryMeeting(meetingId, query, abortController.signal);
+
+      for await (const chunk of stream) {
+        if (abortController.signal.aborted) break;
+        event.sender.send("rag:stream-chunk", { meetingId, chunk });
+      }
+
+      event.sender.send("rag:stream-complete", { meetingId });
+      return { success: true };
+
+    } catch (error: any) {
+      if (error.name !== 'AbortError') {
+        console.error("[RAG] Query error:", error);
+        event.sender.send("rag:stream-error", { meetingId, error: error.message });
+      }
+      return { success: false, error: error.message };
+    } finally {
+      activeRAGQueries.delete(queryKey);
+    }
+  });
+
+  // Query global (cross-meeting search)
+  ipcMain.handle("rag:query-global", async (event, { query }: { query: string }) => {
+    const ragManager = appState.getRAGManager();
+
+    if (!ragManager || !ragManager.isReady()) {
+      return { fallback: true };
+    }
+
+    const abortController = new AbortController();
+    const queryKey = `global-${Date.now()}`;
+    activeRAGQueries.set(queryKey, abortController);
+
+    try {
+      const stream = ragManager.queryGlobal(query, abortController.signal);
+
+      for await (const chunk of stream) {
+        if (abortController.signal.aborted) break;
+        event.sender.send("rag:stream-chunk", { global: true, chunk });
+      }
+
+      event.sender.send("rag:stream-complete", { global: true });
+      return { success: true };
+
+    } catch (error: any) {
+      if (error.name !== 'AbortError') {
+        event.sender.send("rag:stream-error", { global: true, error: error.message });
+      }
+      return { success: false, error: error.message };
+    } finally {
+      activeRAGQueries.delete(queryKey);
+    }
+  });
+
+  // Cancel active RAG query
+  ipcMain.handle("rag:cancel-query", async (_, { meetingId, global }: { meetingId?: string; global?: boolean }) => {
+    const queryKey = global ? 'global' : `meeting-${meetingId}`;
+
+    // Cancel any matching key
+    for (const [key, controller] of activeRAGQueries) {
+      if (key.startsWith(queryKey) || (global && key.startsWith('global'))) {
+        controller.abort();
+        activeRAGQueries.delete(key);
+      }
+    }
+
+    return { success: true };
+  });
+
+  // Check if meeting has RAG embeddings
+  ipcMain.handle("rag:is-meeting-processed", async (_, meetingId: string) => {
+    const ragManager = appState.getRAGManager();
+    if (!ragManager) return false;
+    return ragManager.isMeetingProcessed(meetingId);
+  });
+
+  // Get RAG queue status
+  ipcMain.handle("rag:get-queue-status", async () => {
+    const ragManager = appState.getRAGManager();
+    if (!ragManager) return { pending: 0, processing: 0, completed: 0, failed: 0 };
+    return ragManager.getQueueStatus();
+  });
+
+  // Retry pending embeddings
+  ipcMain.handle("rag:retry-embeddings", async () => {
+    const ragManager = appState.getRAGManager();
+    if (!ragManager) return { success: false };
+    await ragManager.retryPendingEmbeddings();
     return { success: true };
   });
 }

@@ -6,7 +6,9 @@
 
 import { GoogleGenAI } from "@google/genai";
 import Groq from "groq-sdk";
-import { WHAT_TO_ANSWER_PROMPT, GROQ_WHAT_TO_ANSWER_PROMPT, buildWhatToAnswerContents } from "./prompts";
+import { WHAT_TO_ANSWER_PROMPT, GROQ_WHAT_TO_ANSWER_PROMPT, TEMPORAL_CONTEXT_TEMPLATE, buildWhatToAnswerContents } from "./prompts";
+import { TemporalContext, formatTemporalContextForPrompt } from "./TemporalContextBuilder";
+import { IntentResult, ConversationIntent } from "./IntentClassifier";
 
 const GEMINI_FLASH_MODEL = "gemini-3-flash-preview";
 const GROQ_MODEL = "llama-3.3-70b-versatile";
@@ -25,10 +27,70 @@ export class WhatToAnswerLLM {
     }
 
     /**
+     * Build the prompt with temporal context and intent guidance injected
+     */
+    private buildEnrichedPrompt(temporalContext?: TemporalContext, intentResult?: IntentResult): string {
+        let basePrompt = GROQ_WHAT_TO_ANSWER_PROMPT;
+
+        // Build sections to inject
+        const sections: string[] = [];
+
+        // 1. Intent + Answer Shape guidance (CRITICAL for quality)
+        if (intentResult) {
+            sections.push(`<intent_and_shape>
+DETECTED INTENT: ${intentResult.intent}
+ANSWER SHAPE: ${intentResult.answerShape}
+</intent_and_shape>`);
+        }
+
+        // 2. Temporal context (anti-repetition)
+        if (temporalContext && temporalContext.hasRecentResponses) {
+            let temporalSection = TEMPORAL_CONTEXT_TEMPLATE;
+
+            // Inject previous responses
+            if (temporalContext.previousResponses.length > 0) {
+                const responsesText = temporalContext.previousResponses
+                    .map((r, i) => `${i + 1}. "${r}"`)
+                    .join('\n');
+                temporalSection = temporalSection.replace('{PREVIOUS_RESPONSES}', responsesText);
+            } else {
+                temporalSection = temporalSection.replace('{PREVIOUS_RESPONSES}', '(none yet)');
+            }
+
+            // Inject tone guidance
+            if (temporalContext.toneSignals.length > 0) {
+                const primary = temporalContext.toneSignals.sort((a, b) => b.confidence - a.confidence)[0];
+                temporalSection = temporalSection.replace(
+                    '{TONE_GUIDANCE}',
+                    `Maintain ${primary.type} tone to stay consistent with your previous responses.`
+                );
+            } else {
+                temporalSection = temporalSection.replace(
+                    '{TONE_GUIDANCE}',
+                    'Match the natural tone of the conversation.'
+                );
+            }
+
+            sections.push(temporalSection);
+        }
+
+        // Inject all sections into the TEMPORAL_CONTEXT placeholder
+        const contextInjection = sections.length > 0 ? sections.join('\n\n') : '';
+        return basePrompt.replace('{TEMPORAL_CONTEXT}', contextInjection);
+    }
+
+    /**
      * Generate a spoken interview answer from transcript context (Streamed)
      * Uses Groq first if available, falls back to Gemini
+     * @param cleanedTranscript - The cleaned and formatted transcript
+     * @param temporalContext - Optional temporal context for anti-repetition
+     * @param intentResult - Optional intent classification for answer shaping
      */
-    async *generateStream(cleanedTranscript: string): AsyncGenerator<string> {
+    async *generateStream(
+        cleanedTranscript: string,
+        temporalContext?: TemporalContext,
+        intentResult?: IntentResult
+    ): AsyncGenerator<string> {
         try {
             // Handle empty/thin transcript gracefully
             if (!cleanedTranscript || cleanedTranscript.trim().length < 10) {
@@ -40,8 +102,9 @@ export class WhatToAnswerLLM {
             // Try Groq first if available
             if (this.groqClient) {
                 try {
-                    console.log(`[WhatToAnswerLLM] 🚀 Using Groq (${GROQ_MODEL})...`);
-                    const groqMessage = `${GROQ_WHAT_TO_ANSWER_PROMPT}\n\nCONVERSATION:\n${cleanedTranscript}`;
+                    console.log(`[WhatToAnswerLLM] 🚀 Using Groq (${GROQ_MODEL}), intent: ${intentResult?.intent || 'general'}...`);
+                    const enrichedPrompt = this.buildEnrichedPrompt(temporalContext, intentResult);
+                    const groqMessage = `${enrichedPrompt}\n\nCONVERSATION:\n${cleanedTranscript}`;
 
                     const stream = await this.groqClient.chat.completions.create({
                         model: GROQ_MODEL,

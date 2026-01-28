@@ -73,6 +73,7 @@ export interface ElectronAPI {
   startMeeting: () => Promise<{ success: boolean; error?: string }>
   endMeeting: () => Promise<{ success: boolean; error?: string }>
   getRecentMeetings: () => Promise<Array<{ id: string; title: string; date: string; duration: string; summary: string }>>
+  searchMeetings: (query: string) => Promise<Array<{ id: string; title: string; date: string; duration: string; summary: string }>>
   getMeetingDetails: (id: string) => Promise<any>
   deleteMeeting: (id: string) => Promise<boolean>
   setWindowMode: (mode: 'launcher' | 'overlay') => Promise<void>
@@ -122,6 +123,17 @@ export interface ElectronAPI {
   onUpdateError: (callback: (err: string) => void) => () => void
   restartAndInstall: () => Promise<void>
   checkForUpdates: () => Promise<void>
+
+  // RAG (Retrieval-Augmented Generation) API
+  ragQueryMeeting: (meetingId: string, query: string) => Promise<{ success?: boolean; fallback?: boolean; error?: string }>
+  ragQueryGlobal: (query: string) => Promise<{ success?: boolean; fallback?: boolean; error?: string }>
+  ragCancelQuery: (options: { meetingId?: string; global?: boolean }) => Promise<{ success: boolean }>
+  ragIsMeetingProcessed: (meetingId: string) => Promise<boolean>
+  ragGetQueueStatus: () => Promise<{ pending: number; processing: number; completed: number; failed: number }>
+  ragRetryEmbeddings: () => Promise<{ success: boolean }>
+  onRAGStreamChunk: (callback: (data: { meetingId?: string; global?: boolean; chunk: string }) => void) => () => void
+  onRAGStreamComplete: (callback: (data: { meetingId?: string; global?: boolean }) => void) => () => void
+  onRAGStreamError: (callback: (data: { meetingId?: string; global?: boolean; error: string }) => void) => () => void
 }
 
 declare global {
