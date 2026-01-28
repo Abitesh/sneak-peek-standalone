@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import Vapor
+import CoreAudio
 
 // MARK: - Service Configuration
 
@@ -111,6 +112,9 @@ final class CopilotAudioService: AudioCaptureDelegate, STTStreamDelegate, IPCSer
     private var lastTranscriptTime: TimeInterval = 0
     private var silenceTimer: DispatchSourceTimer?
     
+    // Audio Restoration
+    private var originalDefaultOutputDeviceID: AudioDeviceID?
+    
     // MARK: - Initialization
     
     init(config: ServiceConfig = .load()) {
@@ -126,6 +130,13 @@ final class CopilotAudioService: AudioCaptureDelegate, STTStreamDelegate, IPCSer
         Logger.log("Starting Natively Audio Service...", level: .info)
         
         checkSystemAudioRouting()
+        
+        // Save current default output device before any changes (or before Multi-Output might take over if external)
+        if let originalID = SystemAudioHelper.getDefaultOutputDeviceID() {
+            self.originalDefaultOutputDeviceID = originalID
+            let name = SystemAudioHelper.getDeviceName(deviceID: originalID)
+            Logger.log("Saved original default output device: \(name) (ID: \(originalID))", level: .info)
+        }
         
         // Request microphone permission
         requestMicrophonePermission { [weak self] granted in
@@ -149,6 +160,13 @@ final class CopilotAudioService: AudioCaptureDelegate, STTStreamDelegate, IPCSer
         ipcServer.stop()
         
         updateState(.stopped)
+        
+        // Restore original audio device
+        if let originalID = self.originalDefaultOutputDeviceID {
+            SystemAudioHelper.setDefaultOutputDevice(deviceID: originalID)
+            let name = SystemAudioHelper.getDeviceName(deviceID: originalID)
+            Logger.log("Restored original output device: \(name)", level: .info)
+        }
     }
     
     // MARK: - Private Methods

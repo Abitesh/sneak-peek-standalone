@@ -96,7 +96,7 @@ const TopSearchPill: React.FC<TopSearchPillProps> = ({
 }) => {
     const [state, setState] = useState<PillState>('idle');
     const [query, setQuery] = useState('');
-    const [selectedIndex, setSelectedIndex] = useState(0);
+    const [selectedIndex, setSelectedIndex] = useState(-1);
 
     const inputRef = useRef<HTMLInputElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
@@ -118,15 +118,18 @@ const TopSearchPill: React.FC<TopSearchPillProps> = ({
 
     const close = useCallback(() => {
         setState('idle');
-        setQuery('');
-        setSelectedIndex(0);
+        // Delay clearing query to allow exit animation to complete
+        setTimeout(() => {
+            setQuery('');
+            setSelectedIndex(-1);
+        }, 150);
         inputRef.current?.blur();
     }, []);
 
     const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
         const value = e.target.value;
         setQuery(value);
-        setSelectedIndex(0);
+        setSelectedIndex(-1);
 
         if (value.trim()) {
             setState('results');
@@ -185,7 +188,7 @@ const TopSearchPill: React.FC<TopSearchPillProps> = ({
                     setSelectedIndex(prev => Math.min(prev + 1, totalItems - 1));
                 } else if (e.key === 'ArrowUp') {
                     e.preventDefault();
-                    setSelectedIndex(prev => Math.max(prev - 1, 0));
+                    setSelectedIndex(prev => Math.max(prev - 1, -1));
                 } else if (e.key === 'Enter') {
                     e.preventDefault();
                     handleSelect(selectedIndex);
@@ -242,167 +245,189 @@ const TopSearchPill: React.FC<TopSearchPillProps> = ({
                 ref={containerRef}
                 className="absolute left-1/2 -translate-x-1/2 top-[6px] no-drag z-40"
             >
-                <motion.div
-                    layout
-                    initial={false}
-                    animate={{
-                        width: isExpanded ? 480 : 340,
-                    }}
-                    transition={{
-                        duration: 0.25,
-                        ease: [0.32, 0.72, 0, 1]
-                    }}
-                    className="relative"
-                >
-                    {/* Main Pill */}
-                    <div className="relative">
-                        <motion.div
-                            initial={false}
-                            animate={{
-                                borderRadius: showResults ? 16 : 9999,
-                            }}
-                            transition={{
-                                duration: 0.25,
-                                ease: [0.32, 0.72, 0, 1]
-                            }}
-                            className={`
-                                relative overflow-hidden
-                                bg-[#1C1C1E] 
-                                shadow-[0_4px_16px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.04)]
-                            `}
-                        >
-                            {/* Input Row */}
-                            <div
-                                className="relative flex items-center"
-                                onClick={() => state === 'idle' && open()}
-                            >
-                                <div className="absolute left-3 flex items-center pointer-events-none">
-                                    <Search size={14} className="text-[#636366]" />
-                                </div>
-                                <input
-                                    ref={inputRef}
-                                    type="text"
-                                    value={query}
-                                    onChange={handleInputChange}
-                                    onFocus={() => state === 'idle' && setState('focused')}
-                                    className={`
-                                    w-full bg-transparent
-                                    pl-9 pr-4 py-1
-                                    text-[13px] text-white
-                                    placeholder-[#636366]
-                                    focus:outline-none
-                                    ${state === 'idle' ? 'cursor-pointer' : 'cursor-text'}
+                <div className="relative">
+                    <motion.div
+                        initial={false}
+                        animate={{
+                            width: isExpanded ? 480 : 340,
+                        }}
+                        transition={{
+                            type: "spring",
+                            stiffness: 400,
+                            damping: 30
+                        }}
+                        className="relative"
+                    >
+                        {/* Main Pill */}
+                        <div className="relative">
+                            <motion.div
+                                initial={false}
+                                transition={{
+                                    type: "spring",
+                                    stiffness: 400,
+                                    damping: 30
+                                }}
+                                className={`
+                                    relative overflow-hidden
+                                    bg-[#1C1C1E]/90
+                                    backdrop-blur-xl backdrop-saturate-150
+                                    rounded-2xl
+                                    shadow-[0_20px_40px_-12px_rgba(0,0,0,0.6),0_0_0_1px_rgba(255,255,255,0.08),inset_0_1px_0_rgba(255,255,255,0.1)]
                                 `}
-                                    placeholder="Search or ask anything..."
-                                />
-                            </div>
+                            >
+                                {/* Input Row */}
+                                <div
+                                    className="relative flex items-center"
+                                    onClick={() => state === 'idle' && open()}
+                                >
+                                    <div className="absolute left-3 flex items-center pointer-events-none">
+                                        <Search size={14} className="text-[#636366]" />
+                                    </div>
+                                    <input
+                                        ref={inputRef}
+                                        type="text"
+                                        value={query}
+                                        onChange={handleInputChange}
+                                        onFocus={() => state === 'idle' && setState('focused')}
+                                        className={`
+                                        w-full bg-transparent
+                                        pl-9 pr-4 py-1
+                                        text-[13px] text-white
+                                        placeholder-[#636366]
+                                        focus:outline-none
+                                        ${state === 'idle' ? 'cursor-pointer' : 'cursor-text'}
+                                    `}
+                                        placeholder="Search or ask anything..."
+                                    />
+                                </div>
 
-                            {/* Results Panel */}
-                            <AnimatePresence>
-                                {showResults && (
-                                    <motion.div
-                                        initial={{ height: 0, opacity: 0 }}
-                                        animate={{ height: 'auto', opacity: 1 }}
-                                        exit={{ height: 0, opacity: 0 }}
-                                        transition={{ duration: 0.2, ease: [0.32, 0.72, 0, 1] }}
-                                        className="overflow-hidden"
-                                    >
-                                        <div className="border-t border-white/[0.06] py-2">
-                                            {/* Explore Section */}
-                                            <div className="px-3 py-1">
-                                                <div className="text-[10px] font-semibold text-[#636366] uppercase tracking-wider mb-1">
-                                                    Explore
-                                                </div>
+                                {/* Results Panel */}
+                                <AnimatePresence>
+                                    {showResults && (
+                                        <motion.div
+                                            initial={{ height: 0, opacity: 0 }}
+                                            animate={{ height: 'auto', opacity: 1 }}
+                                            exit={{ height: 0, opacity: 0 }}
+                                            transition={{
+                                                type: "spring",
+                                                stiffness: 400,
+                                                damping: 30,
+                                                opacity: { duration: 0.2 }
+                                            }}
+                                            className="overflow-hidden"
+                                        >
+                                            <div className="w-[480px]">
+                                                <div className="border-t border-white/[0.06] py-2">
+                                                    {/* Explore Section */}
+                                                    <div className="px-3 py-1">
+                                                        <div className="text-[10px] font-semibold text-[#636366] uppercase tracking-wider mb-1">
+                                                            Explore
+                                                        </div>
 
-                                                {/* AI Query Option */}
-                                                <button
-                                                    className={`
-                                                    w-full flex items-center gap-3 px-2 py-1.5 rounded-lg text-left
-                                                    transition-colors duration-100
-                                                    ${selectedIndex === 0
-                                                            ? 'bg-[#2C2C2E]'
-                                                            : 'hover:bg-[#252528]'
-                                                        }
-                                                `}
-                                                    onClick={() => handleSelect(0)}
-                                                    onMouseEnter={() => setSelectedIndex(0)}
-                                                >
-                                                    <div className="w-6 h-6 rounded-md bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center shrink-0">
-                                                        <Sparkles size={12} className="text-white" />
-                                                    </div>
-                                                    <span className="text-[13px] text-white truncate">
-                                                        {query}
-                                                    </span>
-                                                </button>
-
-                                                {/* Literal Search Option */}
-                                                <button
-                                                    className={`
-                                                    w-full flex items-center gap-3 px-2 py-1.5 rounded-lg text-left
-                                                    transition-colors duration-100
-                                                    ${selectedIndex === 1
-                                                            ? 'bg-[#2C2C2E]'
-                                                            : 'hover:bg-[#252528]'
-                                                        }
-                                                `}
-                                                    onClick={() => handleSelect(1)}
-                                                    onMouseEnter={() => setSelectedIndex(1)}
-                                                >
-                                                    <div className="w-6 h-6 rounded-md bg-[#3A3A3C] flex items-center justify-center shrink-0">
-                                                        <Search size={12} className="text-[#A0A0A2]" />
-                                                    </div>
-                                                    <span className="text-[13px] text-[#A0A0A2]">
-                                                        Search for <span className="text-white">"{query}"</span>
-                                                    </span>
-                                                </button>
-                                            </div>
-
-                                            {/* Sessions Section */}
-                                            {sessionResults.length > 0 && (
-                                                <div className="px-3 py-1 mt-1">
-                                                    <div className="text-[10px] font-semibold text-[#636366] uppercase tracking-wider mb-1">
-                                                        Sessions
-                                                    </div>
-
-                                                    {sessionResults.map((result, index) => (
-                                                        <button
-                                                            key={result.id}
+                                                        {/* AI Query Option */}
+                                                        <motion.button
+                                                            initial={{ opacity: 0, scale: 0.95 }}
+                                                            animate={{ opacity: 1, scale: 1 }}
+                                                            transition={{ duration: 0.2 }}
                                                             className={`
                                                             w-full flex items-center gap-3 px-2 py-1.5 rounded-lg text-left
                                                             transition-colors duration-100
-                                                            ${selectedIndex === index + 2
+                                                            ${selectedIndex === 0
                                                                     ? 'bg-[#2C2C2E]'
                                                                     : 'hover:bg-[#252528]'
                                                                 }
                                                         `}
-                                                            onClick={() => handleSelect(index + 2)}
-                                                            onMouseEnter={() => setSelectedIndex(index + 2)}
+                                                            onClick={() => handleSelect(0)}
+                                                            onMouseEnter={() => setSelectedIndex(0)}
+                                                        >
+                                                            <div className="w-6 h-6 rounded-md bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center shrink-0">
+                                                                <Sparkles size={12} className="text-white" />
+                                                            </div>
+                                                            <span className="text-[13px] text-white truncate">
+                                                                {query}
+                                                            </span>
+                                                        </motion.button>
+
+                                                        {/* Literal Search Option */}
+                                                        <motion.button
+                                                            initial={{ opacity: 0, scale: 0.95 }}
+                                                            animate={{ opacity: 1, scale: 1 }}
+                                                            transition={{ duration: 0.2 }}
+                                                            className={`
+                                                            w-full flex items-center gap-3 px-2 py-1.5 rounded-lg text-left
+                                                            transition-colors duration-100
+                                                            ${selectedIndex === 1
+                                                                    ? 'bg-[#2C2C2E]'
+                                                                    : 'hover:bg-[#252528]'
+                                                                }
+                                                        `}
+                                                            onClick={() => handleSelect(1)}
+                                                            onMouseEnter={() => setSelectedIndex(1)}
                                                         >
                                                             <div className="w-6 h-6 rounded-md bg-[#3A3A3C] flex items-center justify-center shrink-0">
-                                                                <FileText size={12} className="text-[#A0A0A2]" />
+                                                                <Search size={12} className="text-[#A0A0A2]" />
                                                             </div>
-                                                            <div className="flex-1 min-w-0">
-                                                                <div className="text-[13px] text-white truncate">
-                                                                    {result.title}
-                                                                </div>
-                                                                {result.subtitle && (
-                                                                    <div className="text-[11px] text-[#636366]">
-                                                                        {result.subtitle}
-                                                                    </div>
-                                                                )}
+                                                            <span className="text-[13px] text-[#A0A0A2]">
+                                                                Search for <span className="text-white">"{query}"</span>
+                                                            </span>
+                                                        </motion.button>
+                                                    </div>
+
+                                                    {/* Sessions Section */}
+                                                    {sessionResults.length > 0 && (
+                                                        <div className="px-3 py-1 mt-1">
+                                                            <div className="text-[10px] font-semibold text-[#636366] uppercase tracking-wider mb-1">
+                                                                Sessions
                                                             </div>
-                                                        </button>
-                                                    ))}
+
+                                                            <AnimatePresence initial={false} mode="popLayout">
+                                                                {sessionResults.map((result, index) => (
+                                                                    <motion.button
+                                                                        layout="position"
+                                                                        key={result.id}
+                                                                        initial={{ opacity: 0, height: 0 }}
+                                                                        animate={{ opacity: 1, height: 'auto' }}
+                                                                        exit={{ opacity: 0, height: 0 }}
+                                                                        transition={{ duration: 0.2 }}
+                                                                        className={`
+                                                                        w-full flex items-center gap-3 px-2 py-1.5 rounded-lg text-left
+                                                                        transition-colors duration-100
+                                                                        ${selectedIndex === index + 2
+                                                                                ? 'bg-[#2C2C2E]'
+                                                                                : 'hover:bg-[#252528]'
+                                                                            }
+                                                                    `}
+                                                                        onClick={() => handleSelect(index + 2)}
+                                                                        onMouseEnter={() => setSelectedIndex(index + 2)}
+                                                                    >
+                                                                        <div className="w-6 h-6 rounded-md bg-[#3A3A3C] flex items-center justify-center shrink-0">
+                                                                            <FileText size={12} className="text-[#A0A0A2]" />
+                                                                        </div>
+                                                                        <div className="flex-1 min-w-0">
+                                                                            <div className="text-[13px] text-white truncate">
+                                                                                {result.title}
+                                                                            </div>
+                                                                            {result.subtitle && (
+                                                                                <div className="text-[11px] text-[#636366]">
+                                                                                    {result.subtitle}
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                    </motion.button>
+                                                                ))}
+                                                            </AnimatePresence>
+                                                        </div>
+                                                    )}
                                                 </div>
-                                            )}
-                                        </div>
-                                    </motion.div>
-                                )}
-                            </AnimatePresence>
-                        </motion.div>
-                    </div>
-                </motion.div>
-            </div>
+                                            </div>
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
+                            </motion.div>
+                        </div>
+                    </motion.div>
+                </div >
+            </div >
         </>
     );
 };

@@ -409,6 +409,14 @@ export function initializeIpcHandlers(appState: AppState): void {
     return DatabaseManager.getInstance().getMeetingDetails(id);
   });
 
+  ipcMain.handle("update-meeting-title", async (_, { id, title }: { id: string; title: string }) => {
+    return DatabaseManager.getInstance().updateMeetingTitle(id, title);
+  });
+
+  ipcMain.handle("update-meeting-summary", async (_, { id, updates }: { id: string; updates: any }) => {
+    return DatabaseManager.getInstance().updateMeetingSummary(id, updates);
+  });
+
   ipcMain.handle("seed-demo", async () => {
     DatabaseManager.getInstance().seedDemoMeeting();
     return { success: true };

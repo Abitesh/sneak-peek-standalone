@@ -296,8 +296,8 @@ export class AppState {
     await this.connectNativeAudio();
 
     // 3. Start System Audio (Speaker)
-    this.googleSTT?.start();
-    this.systemAudioCapture?.start();
+    // this.googleSTT?.start();
+    // this.systemAudioCapture?.start();
 
     // 4. Update Window State if needed
     // this.setView("meeting"); // Frontend handles this via state, but backend could enforce
@@ -313,8 +313,8 @@ export class AppState {
     this.nativeServiceManager.stop();
 
     // 3. Stop System Audio
-    this.systemAudioCapture?.stop();
-    this.googleSTT?.stop();
+    // this.systemAudioCapture?.stop();
+    // this.googleSTT?.stop();
 
     // 4. Reset Intelligence Context & Save
     await this.intelligenceManager.stopMeeting();

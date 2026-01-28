@@ -153,12 +153,14 @@ struct Main {
         // Handle SIGINT (Ctrl+C)
         signal(SIGINT) { _ in
             Logger.log("Received SIGINT, shutting down...", level: .info)
+            service.stop()
             exit(0)
         }
         
         // Handle SIGTERM
         signal(SIGTERM) { _ in
             Logger.log("Received SIGTERM, shutting down...", level: .info)
+            service.stop()
             exit(0)
         }
     }

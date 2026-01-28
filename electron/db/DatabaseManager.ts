@@ -268,6 +268,60 @@ export class DatabaseManager {
         }
     }
 
+    public updateMeetingTitle(id: string, title: string): boolean {
+        if (!this.db) return false;
+        try {
+            const stmt = this.db.prepare('UPDATE meetings SET title = ? WHERE id = ?');
+            const info = stmt.run(title, id);
+            return info.changes > 0;
+        } catch (error) {
+            console.error(`[DatabaseManager] Failed to update title for meeting ${id}:`, error);
+            return false;
+        }
+    }
+
+    public updateMeetingSummary(id: string, updates: { overview?: string, actionItems?: string[], keyPoints?: string[], actionItemsTitle?: string, keyPointsTitle?: string }): boolean {
+        if (!this.db) return false;
+
+        try {
+            // 1. Get current summary_json
+            const row = this.db.prepare('SELECT summary_json FROM meetings WHERE id = ?').get(id) as any;
+            if (!row) return false;
+
+            const existingData = JSON.parse(row.summary_json || '{}');
+            const currentDetailed = existingData.detailedSummary || {};
+
+            // 2. Merge updates
+            const newDetailed = {
+                ...currentDetailed,
+                ...updates
+            };
+
+            // Should likely filter out undefined updates if spread doesn't handle them how we want, 
+            // but spread over undefined is fine. We want to overwrite if provided.
+            // If updates.overview is empty string, it overwrites. 
+            // If updates.overview is undefined, we use ...updates trick:
+            // Actually spread only includes own enumerable properties. If I pass { overview: "new" }, it works.
+
+            // However, we need to be careful not to wipe legacySummary if it exists
+            const newData = {
+                ...existingData,
+                detailedSummary: newDetailed
+            };
+
+            const jsonStr = JSON.stringify(newData);
+
+            // 3. Write back
+            const stmt = this.db.prepare('UPDATE meetings SET summary_json = ? WHERE id = ?');
+            const info = stmt.run(jsonStr, id);
+            return info.changes > 0;
+
+        } catch (error) {
+            console.error(`[DatabaseManager] Failed to update summary for meeting ${id}:`, error);
+            return false;
+        }
+    }
+
     public getRecentMeetings(limit: number = 50): Meeting[] {
         if (!this.db) return [];
 
