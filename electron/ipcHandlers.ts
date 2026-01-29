@@ -6,6 +6,7 @@ import { GEMINI_FLASH_MODEL, GEMINI_PRO_MODEL } from "./IntelligenceManager"
 import { DatabaseManager } from "./db/DatabaseManager"; // Import Database Manager
 import * as path from "path";
 import * as fs from "fs";
+import { AudioDevices } from "./audio/AudioDevices";
 
 export function initializeIpcHandlers(appState: AppState): void {
   ipcMain.handle(
@@ -351,28 +352,18 @@ export function initializeIpcHandlers(appState: AppState): void {
   });
 
   // Native Audio Service Handlers
-  ipcMain.handle("native-audio-connect", async () => {
-    await appState.connectNativeAudio();
-    return { success: true };
-  });
-
-  ipcMain.handle("native-audio-disconnect", async () => {
-    appState.disconnectNativeAudio();
-    return { success: true };
-  });
-
-  ipcMain.handle("native-audio-pause", async () => {
-    appState.pauseNativeAudio();
-    return { success: true };
-  });
-
-  ipcMain.handle("native-audio-resume", async () => {
-    appState.resumeNativeAudio();
-    return { success: true };
-  });
-
+  // Native Audio handlers removed as part of migration to driverless architecture
   ipcMain.handle("native-audio-status", async () => {
-    return { connected: appState.isNativeAudioConnected() };
+    // Always return true or pseudo-status since it's "driverless"
+    return { connected: true };
+  });
+
+  ipcMain.handle("get-input-devices", async () => {
+    return AudioDevices.getInputDevices();
+  });
+
+  ipcMain.handle("get-output-devices", async () => {
+    return AudioDevices.getOutputDevices();
   });
 
   // ==========================================

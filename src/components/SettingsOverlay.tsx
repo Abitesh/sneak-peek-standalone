@@ -195,17 +195,47 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
             }
 
             // Load settings
-            window.navigator.mediaDevices.enumerateDevices().then(devices => {
-                const inputs = devices.filter(d => d.kind === 'audioinput');
-                const outputs = devices.filter(d => d.kind === 'audiooutput');
+            const loadDevices = async () => {
+                try {
+                    const [inputs, outputs] = await Promise.all([
+                        // @ts-ignore
+                        window.electronAPI?.getInputDevices() || Promise.resolve([]),
+                        // @ts-ignore
+                        window.electronAPI?.getOutputDevices() || Promise.resolve([])
+                    ]);
 
-                setInputDevices(inputs);
-                setOutputDevices(outputs);
+                    // Map to shape compatible with CustomSelect (which expects MediaDeviceInfo-like objects)
+                    const formatDevices = (devs: any[]) => devs.map(d => ({
+                        deviceId: d.id,
+                        label: d.name,
+                        kind: 'audioinput' as MediaDeviceKind,
+                        groupId: '',
+                        toJSON: () => d
+                    }));
 
-                // Set initial selected devices if not already set
-                if (inputs.length > 0 && !selectedInput) setSelectedInput(inputs[0].deviceId);
-                if (outputs.length > 0 && !selectedOutput) setSelectedOutput(outputs[0].deviceId);
-            });
+                    setInputDevices(formatDevices(inputs));
+                    setOutputDevices(formatDevices(outputs));
+
+                    // Load saved preferences
+                    const savedInput = localStorage.getItem('preferredInputDeviceId');
+                    const savedOutput = localStorage.getItem('preferredOutputDeviceId');
+
+                    if (savedInput && inputs.find((d: any) => d.id === savedInput)) {
+                        setSelectedInput(savedInput);
+                    } else if (inputs.length > 0 && !selectedInput) {
+                        setSelectedInput(inputs[0].id);
+                    }
+
+                    if (savedOutput && outputs.find((d: any) => d.id === savedOutput)) {
+                        setSelectedOutput(savedOutput);
+                    } else if (outputs.length > 0 && !selectedOutput) {
+                        setSelectedOutput(outputs[0].id);
+                    }
+                } catch (e) {
+                    console.error("Error loading native devices:", e);
+                }
+            };
+            loadDevices();
 
             // Load Calendar Status
             if (window.electronAPI?.getCalendarStatus) {
@@ -669,7 +699,10 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                         icon={<Mic size={16} />}
                                         value={selectedInput}
                                         options={inputDevices}
-                                        onChange={setSelectedInput}
+                                        onChange={(id) => {
+                                            setSelectedInput(id);
+                                            localStorage.setItem('preferredInputDeviceId', id);
+                                        }}
                                         placeholder="Default Microphone"
                                     />
 
@@ -692,7 +725,10 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                         icon={<Speaker size={16} />}
                                         value={selectedOutput}
                                         options={outputDevices}
-                                        onChange={setSelectedOutput}
+                                        onChange={(id) => {
+                                            setSelectedOutput(id);
+                                            localStorage.setItem('preferredOutputDeviceId', id);
+                                        }}
                                         placeholder="Default Speakers"
                                     />
 

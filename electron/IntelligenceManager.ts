@@ -3,8 +3,23 @@
 // Uses mode-specific LLMs for Natively-style interview copilot
 
 import { EventEmitter } from 'events';
-import { TranscriptSegment, SuggestionTrigger } from './NativeAudioClient';
 import { LLMHelper } from './LLMHelper';
+
+export interface TranscriptSegment {
+    marker?: string;
+    speaker: string;
+    text: string;
+    timestamp: number;
+    final: boolean;
+    confidence?: number;
+}
+
+export interface SuggestionTrigger {
+    context: string;
+    lastQuestion: string;
+    confidence: number;
+}
+
 import { AnswerLLM, AssistLLM, FollowUpLLM, RecapLLM, FollowUpQuestionsLLM, WhatToAnswerLLM, prepareTranscriptForWhatToAnswer, GROQ_TITLE_PROMPT, GROQ_SUMMARY_JSON_PROMPT, buildTemporalContext, AssistantResponse, classifyIntent } from './llm';
 import { desktopCapturer } from 'electron';
 import { DatabaseManager, Meeting } from './db/DatabaseManager';

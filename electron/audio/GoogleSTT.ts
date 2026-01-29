@@ -55,6 +55,18 @@ export class GoogleSTT extends EventEmitter {
         });
     }
 
+    public setSampleRate(rate: number): void {
+        if (this.sampleRateHertz === rate) return;
+        console.log(`[GoogleSTT] Updating Sample Rate to: ${rate}Hz`);
+        this.sampleRateHertz = rate;
+        // If streaming, restart? For now, assume this is called before start().
+        if (this.isStreaming) {
+            console.warn('[GoogleSTT] Sample rate changed while streaming. Restarting stream...');
+            this.stop();
+            this.start();
+        }
+    }
+
     public start(): void {
         if (this.isStreaming) return;
 
@@ -139,6 +151,6 @@ export class GoogleSTT extends EventEmitter {
                 }
             });
 
-        console.log('[GoogleSTT] Stream created and ready.');
+        console.log('[GoogleSTT] Stream created. Waiting for events...');
     }
 }

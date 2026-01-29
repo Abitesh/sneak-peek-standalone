@@ -2,17 +2,18 @@ import { EventEmitter } from 'events';
 import { app } from 'electron';
 import path from 'path';
 
+// Load the native module
 let NativeModule: any = null;
 
 try {
     NativeModule = require('../../native-module/index.node');
 } catch (e) {
-    console.error('[SystemAudioCapture] Failed to load native module:', e);
+    console.error('[MicrophoneCapture] Failed to load native module:', e);
 }
 
-const { SystemAudioCapture: RustAudioCapture } = NativeModule || {};
+const { MicrophoneCapture: RustMicCapture } = NativeModule || {};
 
-export class SystemAudioCapture extends EventEmitter {
+export class MicrophoneCapture extends EventEmitter {
     private monitor: any = null;
     private isRecording: boolean = false;
     private deviceId: string | null = null;
@@ -20,11 +21,11 @@ export class SystemAudioCapture extends EventEmitter {
     constructor(deviceId?: string | null) {
         super();
         this.deviceId = deviceId || null;
-        if (!RustAudioCapture) {
-            console.error('[SystemAudioCapture] Rust class implementation not found.');
+        if (!RustMicCapture) {
+            console.error('[MicrophoneCapture] Rust class implementation not found.');
         } else {
-            console.log(`[SystemAudioCapture] Initialized with device: ${this.deviceId || 'default'}`);
-            this.monitor = new RustAudioCapture(this.deviceId);
+            console.log(`[MicrophoneCapture] Initialized with device: ${this.deviceId || 'default'}`);
+            this.monitor = new RustMicCapture(this.deviceId);
         }
     }
 
@@ -33,23 +34,22 @@ export class SystemAudioCapture extends EventEmitter {
     }
 
     /**
-     * Start capturing audio
+     * Start capturing microphone audio
      */
     public start(): void {
         if (this.isRecording) return;
 
         if (!this.monitor) {
-            console.error('[SystemAudioCapture] Monitor not initialized');
+            console.error('[MicrophoneCapture] Monitor not initialized');
             return;
         }
 
         try {
-            console.log('[SystemAudioCapture] Starting native capture...');
+            console.log('[MicrophoneCapture] Starting native capture...');
 
             this.monitor.start((chunk: Buffer) => {
-                // The native module sends raw PCM bytes (Buffer)
                 if (chunk && chunk.length > 0) {
-                    console.log(`[SystemAudioCapture] Received chunk: ${chunk.length} bytes`);
+                    // console.log(`[MicrophoneCapture] Received chunk: ${chunk.length} bytes`);
                     this.emit('data', chunk);
                 }
             });
@@ -57,7 +57,7 @@ export class SystemAudioCapture extends EventEmitter {
             this.isRecording = true;
             this.emit('start');
         } catch (error) {
-            console.error('[SystemAudioCapture] Failed to start:', error);
+            console.error('[MicrophoneCapture] Failed to start:', error);
             this.emit('error', error);
         }
     }
@@ -68,13 +68,14 @@ export class SystemAudioCapture extends EventEmitter {
     public stop(): void {
         if (!this.isRecording) return;
 
-        console.log('[SystemAudioCapture] Stopping capture...');
+        console.log('[MicrophoneCapture] Stopping capture...');
         try {
             this.monitor?.stop();
         } catch (e) {
-            console.error('[SystemAudioCapture] Error stopping:', e);
+            console.error('[MicrophoneCapture] Error stopping:', e);
         }
 
+        this.monitor = null;
         this.isRecording = false;
         this.emit('stop');
     }

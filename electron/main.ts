@@ -43,8 +43,7 @@ import { SettingsWindowHelper } from "./SettingsWindowHelper"
 import { ScreenshotHelper } from "./ScreenshotHelper"
 import { ShortcutsHelper } from "./shortcuts"
 import { ProcessingHelper } from "./ProcessingHelper"
-import { NativeAudioClient, TranscriptSegment, SuggestionTrigger, ServiceStatus } from "./NativeAudioClient"
-import { NativeServiceManager } from "./NativeServiceManager"
+
 import { IntelligenceManager } from "./IntelligenceManager"
 import { SystemAudioCapture } from "./audio/SystemAudioCapture"
 import { GoogleSTT } from "./audio/GoogleSTT"
@@ -60,8 +59,7 @@ export class AppState {
   private screenshotHelper: ScreenshotHelper
   public shortcutsHelper: ShortcutsHelper
   public processingHelper: ProcessingHelper
-  private nativeAudioClient: NativeAudioClient
-  private nativeServiceManager: NativeServiceManager
+
   private intelligenceManager: IntelligenceManager
   private themeManager: ThemeManager
   private ragManager: RAGManager | null = null
@@ -114,11 +112,7 @@ export class AppState {
     // Initialize ShortcutsHelper
     this.shortcutsHelper = new ShortcutsHelper(this)
 
-    // Initialize NativeAudioClient for real-time transcription
-    this.nativeAudioClient = new NativeAudioClient()
 
-    // Initialize Service Manager
-    this.nativeServiceManager = new NativeServiceManager()
 
     // Initialize IntelligenceManager with LLMHelper
     this.intelligenceManager = new IntelligenceManager(this.processingHelper.getLLMHelper())
@@ -129,7 +123,7 @@ export class AppState {
     // Initialize RAGManager (requires database to be ready)
     this.initializeRAGManager()
 
-    this.setupNativeAudioEvents()
+
     this.setupIntelligenceEvents()
 
     // --- NEW SYSTEM AUDIO PIPELINE (SOX + NODE GOOGLE STT) ---
@@ -215,34 +209,33 @@ export class AppState {
     await autoUpdater.checkForUpdatesAndNotify()
   }
 
-  // New Property for System Audio
+  // New Property for System Audio & Microphone
   private systemAudioCapture: SystemAudioCapture | null = null;
-  private googleSTT: GoogleSTT | null = null;
+  private microphoneCapture: any | null = null; // Typing loosely to avoid import issues
+  private googleSTT: GoogleSTT | null = null; // Interviewer
+  private googleSTT_User: GoogleSTT | null = null; // User
 
   private setupSystemAudioPipeline(): void {
     try {
       const { SystemAudioCapture } = require('./audio/SystemAudioCapture');
+      const { MicrophoneCapture } = require('./audio/MicrophoneCapture');
       const { GoogleSTT } = require('./audio/GoogleSTT');
 
       this.systemAudioCapture = new SystemAudioCapture();
+      this.microphoneCapture = new MicrophoneCapture();
       this.googleSTT = new GoogleSTT();
+      this.googleSTT_User = new GoogleSTT();
 
-      // Wire Capture -> STT
+      // --- Wire Capture -> STT (System Audio -> Interviewer) ---
       this.systemAudioCapture?.on('data', (chunk: Buffer) => {
         this.googleSTT?.write(chunk);
-      });
-
-      this.systemAudioCapture?.on('audio_active', () => {
-        // Optional: Update UI to show "System Audio Active"
       });
 
       this.systemAudioCapture?.on('error', (err: Error) => {
         console.error('[Main] SystemAudioCapture Error:', err);
       });
 
-      // Wire STT -> IntelligenceManager
       this.googleSTT?.on('transcript', (segment: { text: string, isFinal: boolean, confidence: number }) => {
-        // Inject as INTERVIEWER (system audio)
         this.intelligenceManager.handleTranscript({
           speaker: 'interviewer',
           text: segment.text,
@@ -251,7 +244,6 @@ export class AppState {
           confidence: segment.confidence
         });
 
-        // Forward to Renderer for UI (Broadcast to both if available)
         const helper = this.getWindowHelper();
         const payload = {
           speaker: 'interviewer',
@@ -265,17 +257,137 @@ export class AppState {
       });
 
       this.googleSTT?.on('error', (err: Error) => {
-        console.error('[Main] GoogleSTT Error:', err);
+        console.error('[Main] GoogleSTT (Interviewer) Error:', err);
       });
 
-      // DO NOT Start the pipeline automatically
-      // this.googleSTT?.start();
-      // this.systemAudioCapture?.start();
 
-      console.log('[Main] System Audio Pipeline (SoX + GoogleNode) Initialized (Paused)');
+      // --- Wire Capture -> STT (Microphone -> User) ---
+      this.microphoneCapture?.on('data', (chunk: Buffer) => {
+        // console.log(`[Main] Mic data: ${chunk.length}`);
+        this.googleSTT_User?.write(chunk);
+      });
+
+      this.microphoneCapture?.on('error', (err: Error) => {
+        console.error('[Main] MicrophoneCapture Error:', err);
+      });
+
+      this.googleSTT_User?.on('transcript', (segment: { text: string, isFinal: boolean, confidence: number }) => {
+        this.intelligenceManager.handleTranscript({
+          speaker: 'user', // Identified as User
+          text: segment.text,
+          timestamp: Date.now(),
+          final: segment.isFinal,
+          confidence: segment.confidence
+        });
+
+        // Forward User transcript to UI too
+        const helper = this.getWindowHelper();
+        const payload = {
+          speaker: 'user',
+          text: segment.text,
+          timestamp: Date.now(),
+          final: segment.isFinal,
+          confidence: segment.confidence
+        };
+        helper.getLauncherWindow()?.webContents.send('native-audio-transcript', payload);
+        helper.getOverlayWindow()?.webContents.send('native-audio-transcript', payload);
+      });
+
+      this.googleSTT_User?.on('error', (err: Error) => {
+        console.error('[Main] GoogleSTT (User) Error:', err);
+      });
+
+      console.log('[Main] Full Audio Pipeline (System + Mic) Initialized (Paused)');
 
     } catch (err) {
       console.error('[Main] Failed to setup System Audio Pipeline:', err);
+    }
+  }
+
+  private async reconfigureAudio(inputDeviceId?: string, outputDeviceId?: string): Promise<void> {
+    console.log(`[Main] Reconfiguring Audio: Input=${inputDeviceId}, Output=${outputDeviceId}`);
+
+    const { SystemAudioCapture } = require('./audio/SystemAudioCapture');
+    const { MicrophoneCapture } = require('./audio/MicrophoneCapture');
+
+    // 1. System Audio (Output Capture)
+    if (this.systemAudioCapture) {
+      this.systemAudioCapture.stop();
+      this.systemAudioCapture = null;
+    }
+
+    try {
+      console.log('[Main] Initializing SystemAudioCapture...');
+      this.systemAudioCapture = new SystemAudioCapture(outputDeviceId || undefined);
+      const rate = this.systemAudioCapture.getSampleRate();
+      console.log(`[Main] SystemAudioCapture rate: ${rate}Hz`);
+      this.googleSTT?.setSampleRate(rate);
+
+      this.systemAudioCapture.on('data', (chunk: Buffer) => {
+        // console.log('[Main] SysAudio chunk', chunk.length);
+        this.googleSTT?.write(chunk);
+      });
+      this.systemAudioCapture.on('error', (err: Error) => {
+        console.error('[Main] SystemAudioCapture Error:', err);
+      });
+      console.log('[Main] SystemAudioCapture initialized.');
+    } catch (err) {
+      console.warn('[Main] Failed to initialize SystemAudioCapture with preferred ID. Falling back to default.', err);
+      try {
+        this.systemAudioCapture = new SystemAudioCapture(); // Default
+        const rate = this.systemAudioCapture.getSampleRate();
+        console.log(`[Main] SystemAudioCapture (Default) rate: ${rate}Hz`);
+        this.googleSTT?.setSampleRate(rate);
+
+        this.systemAudioCapture.on('data', (chunk: Buffer) => {
+          this.googleSTT?.write(chunk);
+        });
+        this.systemAudioCapture.on('error', (err: Error) => {
+          console.error('[Main] SystemAudioCapture (Default) Error:', err);
+        });
+      } catch (err2) {
+        console.error('[Main] Failed to initialize SystemAudioCapture (Default):', err2);
+      }
+    }
+
+    // 2. Microphone (Input Capture)
+    if (this.microphoneCapture) {
+      this.microphoneCapture.stop();
+      this.microphoneCapture = null;
+    }
+
+    try {
+      console.log('[Main] Initializing MicrophoneCapture...');
+      this.microphoneCapture = new MicrophoneCapture(inputDeviceId || undefined);
+      const rate = this.microphoneCapture.getSampleRate();
+      console.log(`[Main] MicrophoneCapture rate: ${rate}Hz`);
+      this.googleSTT_User?.setSampleRate(rate);
+
+      this.microphoneCapture.on('data', (chunk: Buffer) => {
+        // console.log('[Main] Mic chunk', chunk.length);
+        this.googleSTT_User?.write(chunk);
+      });
+      this.microphoneCapture.on('error', (err: Error) => {
+        console.error('[Main] MicrophoneCapture Error:', err);
+      });
+      console.log('[Main] MicrophoneCapture initialized.');
+    } catch (err) {
+      console.warn('[Main] Failed to initialize MicrophoneCapture with preferred ID. Falling back to default.', err);
+      try {
+        this.microphoneCapture = new MicrophoneCapture(); // Default
+        const rate = this.microphoneCapture.getSampleRate();
+        console.log(`[Main] MicrophoneCapture (Default) rate: ${rate}Hz`);
+        this.googleSTT_User?.setSampleRate(rate);
+
+        this.microphoneCapture.on('data', (chunk: Buffer) => {
+          this.googleSTT_User?.write(chunk);
+        });
+        this.microphoneCapture.on('error', (err: Error) => {
+          console.error('[Main] MicrophoneCapture (Default) Error:', err);
+        });
+      } catch (err2) {
+        console.error('[Main] Failed to initialize MicrophoneCapture (Default):', err2);
+      }
     }
   }
 
@@ -283,38 +395,33 @@ export class AppState {
     console.log('[Main] Starting Meeting...', metadata);
     if (metadata) {
       this.intelligenceManager.setMeetingMetadata(metadata);
+
+      // Check for audio configuration preference
+      if (metadata.audio) {
+        await this.reconfigureAudio(metadata.audio.inputDeviceId, metadata.audio.outputDeviceId);
+      }
     }
 
 
-    // 1. Start Native Audio Service Process
-    this.nativeServiceManager.start();
+    // 3. Start System Audio
+    this.systemAudioCapture?.start();
+    this.googleSTT?.start();
 
-    // Give it a moment to spin up and open socket
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
-    // 2. Start Native Audio Client (Connect to it)
-    await this.connectNativeAudio();
-
-    // 3. Start System Audio (Speaker)
-    // this.googleSTT?.start();
-    // this.systemAudioCapture?.start();
-
-    // 4. Update Window State if needed
-    // this.setView("meeting"); // Frontend handles this via state, but backend could enforce
+    // 4. Start Microphone
+    this.microphoneCapture?.start();
+    this.googleSTT_User?.start();
   }
 
   public async endMeeting(): Promise<void> {
     console.log('[Main] Ending Meeting...');
 
-    // 1. Stop Native Audio Client
-    this.disconnectNativeAudio();
-
-    // 2. Stop Native Service Process
-    this.nativeServiceManager.stop();
-
     // 3. Stop System Audio
-    // this.systemAudioCapture?.stop();
-    // this.googleSTT?.stop();
+    this.systemAudioCapture?.stop();
+    this.googleSTT?.stop();
+
+    // 4. Stop Microphone
+    this.microphoneCapture?.stop();
+    this.googleSTT_User?.stop();
 
     // 4. Reset Intelligence Context & Save
     await this.intelligenceManager.stopMeeting();
@@ -375,8 +482,7 @@ export class AppState {
       if (win) {
         win.webContents.send('intelligence-suggested-answer', { answer, question, confidence })
       }
-      // Also send to native service for context storage
-      this.nativeAudioClient.sendAssistantSuggestion(answer)
+
     })
 
     this.intelligenceManager.on('suggested_answer_token', (token: string, question: string, confidence: number) => {
@@ -398,8 +504,7 @@ export class AppState {
       if (win) {
         win.webContents.send('intelligence-refined-answer', { answer, intent })
       }
-      // Also send to native service for context storage
-      this.nativeAudioClient.sendAssistantSuggestion(answer)
+
     })
 
     this.intelligenceManager.on('recap', (summary: string) => {
@@ -442,8 +547,7 @@ export class AppState {
       if (win) {
         win.webContents.send('intelligence-manual-result', { answer, question })
       }
-      // Also send to native service for context storage
-      this.nativeAudioClient.sendAssistantSuggestion(answer)
+
     })
 
     this.intelligenceManager.on('mode_changed', (mode: string) => {
@@ -462,89 +566,9 @@ export class AppState {
     })
   }
 
-  private setupNativeAudioEvents(): void {
-    // Forward transcripts to renderer AND to IntelligenceManager
-    this.nativeAudioClient.on('transcript', (transcript: TranscriptSegment) => {
-      // Feed to IntelligenceManager for context building
-      this.intelligenceManager.handleTranscript(transcript)
 
-      const mainWindow = this.getMainWindow()
-      if (mainWindow) {
-        mainWindow.webContents.send('native-audio-transcript', transcript)
-      }
-    })
 
-    // Forward suggestion triggers to IntelligenceManager for proper mode handling
-    this.nativeAudioClient.on('suggestion', async (suggestion: SuggestionTrigger) => {
-      const mainWindow = this.getMainWindow()
 
-      // Notify renderer that we're processing a suggestion
-      if (mainWindow) {
-        mainWindow.webContents.send('native-audio-suggestion', suggestion)
-        mainWindow.webContents.send('suggestion-processing-start')
-      }
-
-      // Use IntelligenceManager for proper mode-specific handling
-      try {
-        console.log('[NativeAudio] Triggering WhatShouldISay mode for:', suggestion.lastQuestion.substring(0, 50) + '...')
-        await this.intelligenceManager.handleSuggestionTrigger(suggestion)
-        // Events are emitted by IntelligenceManager and forwarded via setupIntelligenceEvents
-      } catch (error) {
-        console.error('[NativeAudio] Error handling suggestion trigger:', error)
-        if (mainWindow) {
-          mainWindow.webContents.send('suggestion-error', { error: String(error) })
-        }
-      }
-    })
-
-    // Forward status updates to renderer
-    this.nativeAudioClient.on('status', (status: ServiceStatus) => {
-      const mainWindow = this.getMainWindow()
-      if (mainWindow) {
-        mainWindow.webContents.send('native-audio-status', status)
-      }
-    })
-
-    this.nativeAudioClient.on('connected', () => {
-      console.log('[NativeAudio] Connected to native audio service')
-      const mainWindow = this.getMainWindow()
-      if (mainWindow) {
-        mainWindow.webContents.send('native-audio-connected')
-      }
-    })
-
-    this.nativeAudioClient.on('disconnected', () => {
-      console.log('[NativeAudio] Disconnected from native audio service')
-      const mainWindow = this.getMainWindow()
-      if (mainWindow) {
-        mainWindow.webContents.send('native-audio-disconnected')
-      }
-    })
-  }
-
-  public async connectNativeAudio(): Promise<boolean> {
-    return this.nativeAudioClient.connect()
-  }
-
-  public disconnectNativeAudio(): void {
-    this.nativeAudioClient.disconnect()
-  }
-
-  public isNativeAudioConnected(): boolean {
-    return this.nativeAudioClient.isConnected()
-  }
-
-  public pauseNativeAudio(): void {
-    this.nativeAudioClient.pause()
-  }
-
-  public resumeNativeAudio(): void {
-    this.nativeAudioClient.resume()
-  }
-
-  public sendAssistantSuggestion(suggestion: string): void {
-    this.nativeAudioClient.sendAssistantSuggestion(suggestion)
-  }
 
   public updateGoogleCredentials(keyPath: string): void {
     if (this.googleSTT) {
@@ -817,7 +841,11 @@ async function initializeApp() {
   app.whenReady().then(() => {
     app.setName("Natively"); // Fix App Name in Menu
 
-    setMacDockIcon(); // 🔴 MUST be first, before any window
+    try {
+      setMacDockIcon(); // 🔴 MUST be first, before any window
+    } catch (e) {
+      console.error("Failed to set dock icon:", e);
+    }
 
     console.log("App is ready")
     appState.createWindow()

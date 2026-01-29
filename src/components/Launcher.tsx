@@ -154,10 +154,14 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
     const handleStartPreparedMeeting = async () => {
         if (!preparedEvent) return;
         try {
+            const inputDeviceId = localStorage.getItem('preferredInputDeviceId');
+            const outputDeviceId = localStorage.getItem('preferredOutputDeviceId');
+
             await window.electronAPI.invoke('start-meeting', {
                 title: preparedEvent.title,
                 calendarEventId: preparedEvent.id,
-                source: 'calendar'
+                source: 'calendar',
+                audio: { inputDeviceId, outputDeviceId }
             });
             setIsPrepared(false);
         } catch (e) {

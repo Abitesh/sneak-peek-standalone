@@ -28,7 +28,12 @@ const App: React.FC = () => {
   // Handlers
   const handleStartMeeting = async () => {
     try {
-      const result = await window.electronAPI.startMeeting();
+      const inputDeviceId = localStorage.getItem('preferredInputDeviceId');
+      const outputDeviceId = localStorage.getItem('preferredOutputDeviceId');
+
+      const result = await window.electronAPI.startMeeting({
+        audio: { inputDeviceId, outputDeviceId }
+      });
       if (result.success) {
         // Switch to Overlay Mode via IPC
         // The main process handles window switching, but we can reinforce it or just trust main.

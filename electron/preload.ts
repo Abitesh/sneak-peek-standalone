@@ -54,7 +54,8 @@ interface ElectronAPI {
   onSuggestionProcessingStart: (callback: () => void) => () => void
   onSuggestionError: (callback: (error: { error: string }) => void) => () => void
   generateSuggestion: (context: string, lastQuestion: string) => Promise<{ suggestion: string }>
-  getNativeAudioStatus: () => Promise<{ connected: boolean }>
+  getInputDevices: () => Promise<Array<{ id: string; name: string }>>
+  getOutputDevices: () => Promise<Array<{ id: string; name: string }>>
 
   // Intelligence Mode IPC
   generateAssist: () => Promise<{ insight: string | null }>
@@ -66,7 +67,7 @@ interface ElectronAPI {
   resetIntelligence: () => Promise<{ success: boolean; error?: string }>
 
   // Meeting Lifecycle
-  startMeeting: () => Promise<{ success: boolean; error?: string }>
+  startMeeting: (metadata?: any) => Promise<{ success: boolean; error?: string }>
   endMeeting: () => Promise<{ success: boolean; error?: string }>
   getRecentMeetings: () => Promise<Array<{ id: string; title: string; date: string; duration: string; summary: string }>>
   getMeetingDetails: (id: string) => Promise<any>
@@ -359,6 +360,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke("generate-suggestion", context, lastQuestion),
 
   getNativeAudioStatus: () => ipcRenderer.invoke("native-audio-status"),
+  getInputDevices: () => ipcRenderer.invoke("get-input-devices"),
+  getOutputDevices: () => ipcRenderer.invoke("get-output-devices"),
 
   // Intelligence Mode IPC
   generateAssist: () => ipcRenderer.invoke("generate-assist"),
@@ -371,7 +374,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   resetIntelligence: () => ipcRenderer.invoke("reset-intelligence"),
 
   // Meeting Lifecycle
-  startMeeting: () => ipcRenderer.invoke("start-meeting"),
+  startMeeting: (metadata?: any) => ipcRenderer.invoke("start-meeting", metadata),
   endMeeting: () => ipcRenderer.invoke("end-meeting"),
   getRecentMeetings: () => ipcRenderer.invoke("get-recent-meetings"),
   getMeetingDetails: (id: string) => ipcRenderer.invoke("get-meeting-details", id),

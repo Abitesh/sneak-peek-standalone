@@ -777,7 +777,8 @@ Provide only the answer, nothing else.`;
 
             // Ensure native audio is connected
             try {
-                await window.electronAPI.invoke('native-audio-connect');
+                // Native audio is now managed by main process
+                // await window.electronAPI.invoke('native-audio-connect');
             } catch (err) {
                 // Already connected, that's fine
             }
