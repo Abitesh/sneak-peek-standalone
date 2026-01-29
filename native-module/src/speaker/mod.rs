@@ -4,7 +4,10 @@ use anyhow::Result;
 pub mod macos;
 #[cfg(target_os = "macos")]
 #[cfg(target_os = "macos")]
+#[cfg(target_os = "macos")]
 pub use macos::SpeakerInput;
+#[cfg(target_os = "macos")]
+pub use macos::SpeakerStream;
 #[cfg(target_os = "macos")]
 pub use macos::list_output_devices;
 

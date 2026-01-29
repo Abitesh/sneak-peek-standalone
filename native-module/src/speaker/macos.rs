@@ -102,7 +102,7 @@ struct WakerState {
 }
 
 pub struct SpeakerStream {
-    consumer: HeapCons<f32>,
+    consumer: Option<HeapCons<f32>>,
     _device: ca::hardware::StartedDevice<ca::AggregateDevice>,
     _ctx: Box<Ctx>,
     _tap: ca::TapGuard,
@@ -115,20 +115,11 @@ impl SpeakerStream {
         self.current_sample_rate.load(Ordering::Acquire)
     }
     
-    // Helper to read data synchronously for NAPI callback interactions
-    pub fn read_chunk(&mut self, max_samples: usize) -> Vec<f32> {
-         let mut samples = Vec::with_capacity(max_samples);
-         // Try popping up to max_samples
-         for _ in 0..max_samples {
-             if let Some(s) = self.consumer.try_pop() {
-                 samples.push(s);
-             } else {
-                 break;
-             }
-         }
-         samples
+    pub fn take_consumer(&mut self) -> Option<HeapCons<f32>> {
+        self.consumer.take()
     }
 }
+
 
 struct Ctx {
     format: arc::R<av::AudioFormat>,
@@ -276,7 +267,7 @@ impl SpeakerInput {
         let device = self.start_device(&mut ctx).expect("Failed to start device");
 
         SpeakerStream {
-            consumer,
+            consumer: Some(consumer),
             _device: device,
             _ctx: ctx,
             _tap: self.tap,

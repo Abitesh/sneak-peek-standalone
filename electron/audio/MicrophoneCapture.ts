@@ -24,12 +24,13 @@ export class MicrophoneCapture extends EventEmitter {
         if (!RustMicCapture) {
             console.error('[MicrophoneCapture] Rust class implementation not found.');
         } else {
-            console.log(`[MicrophoneCapture] Initialized with device: ${this.deviceId || 'default'}`);
-            this.monitor = new RustMicCapture(this.deviceId);
+            console.log(`[MicrophoneCapture] Initialized wrapper. Device ID: ${this.deviceId || 'default'}`);
+            // Lazy init: Do not create monitor here to prevent mic activation
         }
     }
 
     public getSampleRate(): number {
+        // Return 16000 default as we effectively downsample to this now
         return this.monitor?.getSampleRate() || 16000;
     }
 
@@ -39,9 +40,21 @@ export class MicrophoneCapture extends EventEmitter {
     public start(): void {
         if (this.isRecording) return;
 
-        if (!this.monitor) {
-            console.error('[MicrophoneCapture] Monitor not initialized');
+        if (!RustMicCapture) {
+            console.error('[MicrophoneCapture] Cannot start: Rust module missing');
             return;
+        }
+
+        // Lazy initialization
+        if (!this.monitor) {
+            try {
+                console.log('[MicrophoneCapture] Creating native monitor...');
+                this.monitor = new RustMicCapture(this.deviceId);
+            } catch (e) {
+                console.error('[MicrophoneCapture] Failed to create native monitor:', e);
+                this.emit('error', e);
+                return;
+            }
         }
 
         try {
@@ -49,7 +62,6 @@ export class MicrophoneCapture extends EventEmitter {
 
             this.monitor.start((chunk: Buffer) => {
                 if (chunk && chunk.length > 0) {
-                    // console.log(`[MicrophoneCapture] Received chunk: ${chunk.length} bytes`);
                     this.emit('data', chunk);
                 }
             });
@@ -75,6 +87,7 @@ export class MicrophoneCapture extends EventEmitter {
             console.error('[MicrophoneCapture] Error stopping:', e);
         }
 
+        // Destroy monitor to release microphone access fully
         this.monitor = null;
         this.isRecording = false;
         this.emit('stop');

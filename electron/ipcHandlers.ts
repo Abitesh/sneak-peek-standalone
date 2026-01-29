@@ -366,6 +366,16 @@ export function initializeIpcHandlers(appState: AppState): void {
     return AudioDevices.getOutputDevices();
   });
 
+  ipcMain.handle("start-audio-test", async (event, deviceId?: string) => {
+    appState.startAudioTest(deviceId);
+    return { success: true };
+  });
+
+  ipcMain.handle("stop-audio-test", async () => {
+    appState.stopAudioTest();
+    return { success: true };
+  });
+
   // ==========================================
   // Meeting Lifecycle Handlers
   // ==========================================

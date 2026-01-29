@@ -19,18 +19,16 @@ export class GoogleSTT extends EventEmitter {
     // Config
     private encoding = 'LINEAR16' as const;
     private sampleRateHertz = 16000;
+    private audioChannelCount = 1; // Default to Mono
     private languageCode = 'en-US';
 
     constructor() {
         super();
-
-        // Ensure credentials are loaded from project root
+        // ... (credentials setup) ...
         const path = require('path');
-        const dotenvPath = path.resolve(__dirname, '../../.env'); // Walk up from dist-electron/audio into input root... wait, dist structure.
-        // Easier: Just try loading from CWD which is usually root in npm start
+        const dotenvPath = path.resolve(__dirname, '../../.env');
         require('dotenv').config();
 
-        // If that failed (e.g. Electron packaged mode), try explicit path
         if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
             require('dotenv').config({ path: path.join(process.cwd(), '.env') });
         }
@@ -59,9 +57,19 @@ export class GoogleSTT extends EventEmitter {
         if (this.sampleRateHertz === rate) return;
         console.log(`[GoogleSTT] Updating Sample Rate to: ${rate}Hz`);
         this.sampleRateHertz = rate;
-        // If streaming, restart? For now, assume this is called before start().
         if (this.isStreaming) {
-            console.warn('[GoogleSTT] Sample rate changed while streaming. Restarting stream...');
+            console.warn('[GoogleSTT] Config changed while streaming. Restarting stream...');
+            this.stop();
+            this.start();
+        }
+    }
+
+    public setAudioChannelCount(count: number): void {
+        if (this.audioChannelCount === count) return;
+        console.log(`[GoogleSTT] Updating Channel Count to: ${count}`);
+        this.audioChannelCount = count;
+        if (this.isStreaming) {
+            console.warn('[GoogleSTT] Config changed while streaming. Restarting stream...');
             this.stop();
             this.start();
         }
@@ -101,8 +109,14 @@ export class GoogleSTT extends EventEmitter {
 
         try {
             if (this.stream.command && this.stream.command.writable) { // gRPC stream internal check
+                if (audioData.length !== 320 && audioData.length !== 640) {
+                    console.warn('[GoogleSTT] Unexpected audio frame size:', audioData.length);
+                }
                 this.stream.write(audioData);
             } else if (this.stream.writable) {
+                if (audioData.length !== 320 && audioData.length !== 640) {
+                    console.warn('[GoogleSTT] Unexpected audio frame size:', audioData.length);
+                }
                 this.stream.write(audioData);
             }
         } catch (err) {
@@ -119,6 +133,7 @@ export class GoogleSTT extends EventEmitter {
                 config: {
                     encoding: this.encoding,
                     sampleRateHertz: this.sampleRateHertz,
+                    audioChannelCount: this.audioChannelCount,
                     languageCode: this.languageCode,
                     enableAutomaticPunctuation: true,
                     model: 'latest_long', // Optimized for long form
