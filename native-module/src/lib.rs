@@ -22,6 +22,7 @@ pub struct SystemAudioCapture {
     stop_signal: Arc<Mutex<bool>>,
     capture_thread: Option<thread::JoinHandle<()>>,
     sample_rate: u32,
+    device_id: Option<String>,  // Store for lazy init
     input: Option<speaker::SpeakerInput>,
     stream: Option<speaker::SpeakerStream>,
 }
@@ -30,17 +31,16 @@ pub struct SystemAudioCapture {
 impl SystemAudioCapture {
     #[napi(constructor)]
     pub fn new(device_id: Option<String>) -> napi::Result<Self> {
-        let input = match speaker::SpeakerInput::new(device_id) {
-            Ok(i) => i,
-            Err(e) => return Err(napi::Error::from_reason(format!("Failed to create speaker input: {}", e))),
-        };
-        let sample_rate = input.sample_rate() as u32;
+        // LAZY INIT: Don't create SpeakerInput here - it creates CoreAudio tap
+        // and causes 1-second audio mute + quality degradation at app launch
+        println!("[SystemAudioCapture] Created with lazy init (device: {:?})", device_id);
         
         Ok(SystemAudioCapture {
             stop_signal: Arc::new(Mutex::new(false)),
             capture_thread: None,
             sample_rate: 16000, // Fixed output rate from Resampler
-            input: Some(input),
+            device_id,
+            input: None,  // Will be created in start()
             stream: None,
         })
     }
@@ -69,8 +69,18 @@ impl SystemAudioCapture {
         *self.stop_signal.lock().unwrap() = false;
         let stop_signal = self.stop_signal.clone();
         
-        // Take input
-        let input = self.input.take().ok_or_else(|| napi::Error::from_reason("Capture already started or input missing"))?;
+        // LAZY INIT: Create SpeakerInput NOW (when meeting starts), not at app launch
+        // This is where the CoreAudio tap gets created - the 1-second mute happens here
+        // but only when the user actually starts a meeting, not when the app launches
+        let input = if let Some(existing) = self.input.take() {
+            existing
+        } else {
+            println!("[SystemAudioCapture] Creating audio tap now (lazy init)...");
+            match speaker::SpeakerInput::new(self.device_id.take()) {
+                Ok(i) => i,
+                Err(e) => return Err(napi::Error::from_reason(format!("Failed to create speaker input: {}", e))),
+            }
+        };
         
         let mut stream = input.stream();
         let input_sample_rate = stream.sample_rate() as f64;

@@ -24,13 +24,9 @@ export class SystemAudioCapture extends EventEmitter {
         if (!RustAudioCapture) {
             console.error('[SystemAudioCapture] Rust class implementation not found.');
         } else {
-            console.log(`[SystemAudioCapture] Initialized wrapper. Device ID: ${this.deviceId || 'default'}`);
-            try {
-                console.log('[SystemAudioCapture] Creating native monitor (Eager Init)...');
-                this.monitor = new RustAudioCapture(this.deviceId);
-            } catch (e) {
-                console.error('[SystemAudioCapture] Failed to create native monitor:', e);
-            }
+            // LAZY INIT: Don't create native monitor here - it causes 1-second audio mute + quality drop
+            // The monitor will be created in start() when the meeting actually begins
+            console.log(`[SystemAudioCapture] Initialized (lazy). Device ID: ${this.deviceId || 'default'}`);
         }
     }
 
@@ -51,12 +47,14 @@ export class SystemAudioCapture extends EventEmitter {
             return;
         }
 
-        // Monitor should be ready from constructor
+        // LAZY INIT: Create monitor here when meeting starts (not in constructor)
+        // This prevents the 1-second audio mute + quality drop at app launch
         if (!this.monitor) {
-            console.error('[SystemAudioCapture] Monitor not initialized.');
+            console.log('[SystemAudioCapture] Creating native monitor (lazy init)...');
             try {
                 this.monitor = new RustAudioCapture(this.deviceId);
             } catch (e) {
+                console.error('[SystemAudioCapture] Failed to create native monitor:', e);
                 this.emit('error', e);
                 return;
             }

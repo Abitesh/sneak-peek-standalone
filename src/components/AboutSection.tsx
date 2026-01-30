@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
     Github, Twitter, Info, Shield, Cpu, Zap, Database,
-    RefreshCw, ExternalLink, Heart, Server, Globe, Key, Linkedin, Instagram
+    RefreshCw, ExternalLink, Heart, Server, Globe, Key, Linkedin, Instagram, Mail, MicOff
 } from 'lucide-react';
 import evinProfile from '../assets/evin.png';
 
@@ -74,7 +74,7 @@ export const AboutSection: React.FC<AboutSectionProps> = () => {
                         </div>
                     </div>
                     <div className="flex items-start gap-3">
-                        <Server size={16} className="text-text-tertiary mt-0.5" />
+                        <MicOff size={16} className="text-red-500 mt-0.5" />
                         <div>
                             <h5 className="text-sm font-medium text-text-primary">No Recording</h5>
                             <p className="text-xs text-text-secondary mt-1 leading-relaxed">
@@ -85,46 +85,83 @@ export const AboutSection: React.FC<AboutSectionProps> = () => {
                 </div>
             </div>
 
-            {/* Maintainer */}
             <div>
-                <h4 className="text-xs font-bold text-text-tertiary uppercase tracking-wider mb-4 px-1">Maintainer</h4>
-                <div className="bg-bg-item-surface rounded-xl border border-border-subtle p-5 flex items-center gap-5">
-                    <div className="w-14 h-14 rounded-full bg-bg-elevated border border-border-subtle flex items-center justify-center text-text-tertiary shadow-sm overflow-hidden">
-                        <img src={evinProfile} alt="Evin" className="w-full h-full object-cover" />
-                    </div>
-                    <div className="flex-1">
-                        <h5 className="text-base font-bold text-text-primary">Evin</h5>
-                        <p className="text-xs text-text-secondary mb-3">Creator & Lead Engineer</p>
-                        <div className="flex flex-wrap items-center gap-3">
-                            <a
-                                href="https://github.com/evinjohnn/natively-cluely-ai-assistant"
-                                onClick={(e) => handleOpenLink(e, "https://github.com/evinjohnn/natively-cluely-ai-assistant")}
-                                className="text-xs flex items-center gap-1.5 text-text-secondary hover:text-text-primary transition-colors bg-bg-input px-2.5 py-1.5 rounded-md border border-border-subtle hover:bg-bg-elevated"
-                            >
-                                <Github size={12} /> GitHub
-                            </a>
-                            <a
-                                href="https://x.com/evinjohnn"
-                                onClick={(e) => handleOpenLink(e, "https://x.com/evinjohnn")}
-                                className="text-xs flex items-center gap-1.5 text-text-secondary hover:text-text-primary transition-colors bg-bg-input px-2.5 py-1.5 rounded-md border border-border-subtle hover:bg-bg-elevated"
-                            >
-                                <Twitter size={12} /> Twitter
-                            </a>
-                            <a
-                                href="https://www.linkedin.com/in/evinjohn"
-                                onClick={(e) => handleOpenLink(e, "https://www.linkedin.com/in/evinjohn")}
-                                className="text-xs flex items-center gap-1.5 text-text-secondary hover:text-text-primary transition-colors bg-bg-input px-2.5 py-1.5 rounded-md border border-border-subtle hover:bg-bg-elevated"
-                            >
-                                <Linkedin size={12} /> LinkedIn
-                            </a>
-                            <a
-                                href="https://www.instagram.com/evinjohnn/"
-                                onClick={(e) => handleOpenLink(e, "https://www.instagram.com/evinjohnn/")}
-                                className="text-xs flex items-center gap-1.5 text-text-secondary hover:text-text-primary transition-colors bg-bg-input px-2.5 py-1.5 rounded-md border border-border-subtle hover:bg-bg-elevated"
-                            >
-                                <Instagram size={12} /> Instagram
-                            </a>
+                <div className="bg-bg-item-surface rounded-xl border border-border-subtle p-5 flex flex-col md:flex-row items-center justify-between gap-4">
+                    <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-500 shadow-sm shadow-blue-500/5">
+                            <Mail size={18} className="opacity-80" />
                         </div>
+                        <div>
+                            <h5 className="text-sm font-bold text-text-primary">Get in Touch</h5>
+                            <p className="text-xs text-text-secondary mt-0.5">Open for professional collaborations and job offers.</p>
+                        </div>
+                    </div>
+                    <a
+                        href="mailto:evinjohnignatious@gmail.com"
+                        onClick={(e) => handleOpenLink(e, "mailto:evinjohnignatious@gmail.com")}
+                        className="whitespace-nowrap px-4 py-2 bg-text-primary hover:bg-white/90 text-bg-main text-xs font-bold rounded-lg transition-all shadow hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0 flex items-center gap-2"
+                    >
+                        <Mail size={14} />
+                        Contact Me
+                    </a>
+                </div>
+            </div>
+
+            {/* Founder Profile - Streamlined */}
+            <div className="bg-bg-item-surface rounded-xl p-5">
+                <div className="flex flex-col gap-4">
+                    {/* Identity & Bio */}
+                    <div className="flex items-start gap-4">
+                        <div className="w-12 h-12 rounded-full bg-bg-elevated border border-border-subtle flex items-center justify-center overflow-hidden shrink-0">
+                            <img src={evinProfile} alt="Evin John" className="w-full h-full object-cover" />
+                        </div>
+                        <div className="pt-0.5">
+                            <div className="flex items-center gap-2 mb-1">
+                                <h5 className="text-sm font-bold text-text-primary">Evin John</h5>
+                                <span className="text-[10px] font-medium px-1.5 py-[1px] rounded-full bg-yellow-400/10 text-yellow-200 border border-yellow-400/5">Creator</span>
+                            </div>
+                            <p className="text-xs text-text-secondary leading-relaxed max-w-lg">
+                                I build software that stays out of the way.
+                                <br />
+                                <span className="font-bold text-text-primary">Natively</span> is made to feel fast, quiet, and respectful of your privacy.
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* Socials & Status */}
+                    <div className="flex items-center gap-4 pl-[60px]">
+                        <a
+                            href="https://github.com/evinjohnn/natively-cluely-ai-assistant"
+                            onClick={(e) => handleOpenLink(e, "https://github.com/evinjohnn/natively-cluely-ai-assistant")}
+                            className="text-text-tertiary hover:text-text-primary transition-colors"
+                            title="GitHub"
+                        >
+                            <Github size={18} />
+                        </a>
+                        <a
+                            href="https://x.com/evinjohnn"
+                            onClick={(e) => handleOpenLink(e, "https://x.com/evinjohnn")}
+                            className="text-text-tertiary hover:text-text-primary transition-colors"
+                            title="Twitter"
+                        >
+                            <Twitter size={18} />
+                        </a>
+                        <a
+                            href="https://www.linkedin.com/in/evinjohn"
+                            onClick={(e) => handleOpenLink(e, "https://www.linkedin.com/in/evinjohn")}
+                            className="text-text-tertiary hover:text-text-primary transition-colors"
+                            title="LinkedIn"
+                        >
+                            <Linkedin size={18} />
+                        </a>
+                        <a
+                            href="https://www.instagram.com/evinjohnn/"
+                            onClick={(e) => handleOpenLink(e, "https://www.instagram.com/evinjohnn/")}
+                            className="text-text-tertiary hover:text-text-primary transition-colors"
+                            title="Instagram"
+                        >
+                            <Instagram size={18} />
+                        </a>
                     </div>
                 </div>
             </div>
