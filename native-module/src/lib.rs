@@ -11,7 +11,7 @@ use std::thread;
 use std::time::Duration;
 
 pub mod speaker;
-pub mod resampler;
+pub mod resampler; // Expose resampler
 
 #[napi]
 pub struct SystemAudioCapture {
@@ -48,12 +48,15 @@ impl SystemAudioCapture {
 
     #[napi]
     pub fn start(&mut self, callback: JsFunction) -> napi::Result<()> {
+        use crate::vad::VadGate;
+        use crate::resampler::Resampler;
+
         let tsfn: ThreadsafeFunction<Vec<i16>, ErrorStrategy::Fatal> = callback
             .create_threadsafe_function(0, |ctx| {
                 let vec: Vec<i16> = ctx.value;
                 let mut pcm_bytes = Vec::with_capacity(vec.len() * 2);
-                for s in vec {
-                    pcm_bytes.extend_from_slice(&s.to_le_bytes());
+                for sample in vec {
+                    pcm_bytes.extend_from_slice(&sample.to_le_bytes());
                 }
                 Ok(vec![pcm_bytes])
             })?;
@@ -65,7 +68,7 @@ impl SystemAudioCapture {
         
         // Create stream on main thread (NOT Send safe)
         let mut stream = input.stream();
-        let sample_rate = stream.sample_rate() as f64;
+        let input_sample_rate = stream.sample_rate() as f64;
         
         // Extract consumer (IS Send safe)
         let mut consumer = stream.take_consumer().ok_or_else(|| napi::Error::from_reason("Failed to get consumer"))?;
@@ -73,25 +76,18 @@ impl SystemAudioCapture {
         self.stream = Some(stream);
 
         self.capture_thread = Some(thread::spawn(move || {
-            // Initialize Resampler
-            let mut resampler = match resampler::Resampler::new(sample_rate) {
-                Ok(r) => r,
-                Err(e) => {
-                    eprintln!("Failed to create resampler: {}", e);
-                    return;
-                }
-            };
-            
-            // Target 10ms latency
-            let chunk_capacity = (sample_rate / 100.0).ceil() as usize;
+            // System Audio VAD: 20 chunks pre-roll (~2s)
+            let mut vad = VadGate::new_with_config(20);
+            // Resampler: Input Rate -> 16000
+            let mut resampler = Resampler::new(input_sample_rate).expect("Failed to create resampler"); // TODO: Handle error better?
 
             loop {
                 if *stop_signal.lock().unwrap() {
                     break;
                 }
                 
-                let mut chunk = Vec::with_capacity(chunk_capacity);
-                for _ in 0..chunk_capacity {
+                let mut chunk = Vec::with_capacity(4800);
+                for _ in 0..4800 {
                     if let Some(s) = consumer.try_pop() {
                         chunk.push(s);
                     } else {
@@ -100,16 +96,21 @@ impl SystemAudioCapture {
                 }
                 
                 if !chunk.is_empty() {
-                    match resampler.resample(&chunk) {
-                        Ok(resampled) => {
-                             let _ = tsfn.call(resampled, ThreadsafeFunctionCallMode::Blocking);
-                        },
-                        Err(e) => eprintln!("Mic resample error: {}", e),
+                    // Resample f32 -> i16
+                    if let Ok(resampled_chunk) = resampler.resample(&chunk) {
+                        if !resampled_chunk.is_empty() {
+                             // Pass through VAD
+                             let speech_chunks = vad.process(resampled_chunk);
+                             for speech in speech_chunks {
+                                 if !speech.is_empty() {
+                                     tsfn.call(speech, ThreadsafeFunctionCallMode::Blocking);
+                                 }
+                             }
+                        }
                     }
                 }
                 
-                // Sleep less to maintain low latency, rely on blocking call or tight loop with small sleep
-                thread::sleep(Duration::from_millis(5)); 
+                thread::sleep(Duration::from_millis(10));
             }
         }));
 
@@ -138,6 +139,7 @@ pub struct MicrophoneCapture {
 }
 
 #[napi]
+#[napi]
 impl MicrophoneCapture {
     #[napi(constructor)]
     pub fn new(device_id: Option<String>) -> napi::Result<Self> {
@@ -162,12 +164,16 @@ impl MicrophoneCapture {
 
     #[napi]
     pub fn start(&mut self, callback: JsFunction) -> napi::Result<()> {
+        use crate::vad::VadGate; // Import VAD
+
+        // Callback now receives Vec<i16> (s16le PCM samples)
+        // We will output Buffer (byte array) to JS
         let tsfn: ThreadsafeFunction<Vec<i16>, ErrorStrategy::Fatal> = callback
             .create_threadsafe_function(0, |ctx| {
                 let vec: Vec<i16> = ctx.value;
                 let mut pcm_bytes = Vec::with_capacity(vec.len() * 2);
-                for s in vec {
-                    pcm_bytes.extend_from_slice(&s.to_le_bytes());
+                for sample in vec {
+                    pcm_bytes.extend_from_slice(&sample.to_le_bytes());
                 }
                 Ok(vec![pcm_bytes])
             })?;
@@ -182,53 +188,43 @@ impl MicrophoneCapture {
              return Err(napi::Error::from_reason(format!("Failed to start stream: {}", e)));
         }
         
-        let sample_rate = input.sample_rate() as f64;
-        
         // Get consumer for thread
         let consumer = input.get_consumer();
 
         self.capture_thread = Some(thread::spawn(move || {
-             // Initialize Resampler
-            let mut resampler = match resampler::Resampler::new(sample_rate) {
-                Ok(r) => r,
-                Err(e) => {
-                    eprintln!("Mic Resampler init failed: {}", e);
-                    return;
-                }
-            };
-
-            // Target 10ms
-            let chunk_capacity = (sample_rate / 100.0).ceil() as usize;
-
-            println!("Mic Capture Thread Started. Rate: {}, Chunk Cap: {}", sample_rate, chunk_capacity);
-
+            let mut vad = VadGate::new(); // Initialize VAD
+            
             loop {
                 if *stop_signal.lock().unwrap() {
                     break;
                 }
                 
-                let mut chunk = Vec::with_capacity(chunk_capacity);
+                let mut chunk = Vec::new();
                 {
                     let mut cons = consumer.lock().unwrap();
+                    // Consume available samples
+                    // Chunk size target: ~100ms at 16kHz = 1600 samples
+                    // The swift code used 0.1s buffer.
+                    // Let's grab whatever is available up to a limit to avoid latency
                     while let Some(s) = cons.try_pop() {
                         chunk.push(s);
-                        if chunk.len() >= chunk_capacity { break; }
+                        if chunk.len() >= 1600 { break; } // Process in ~100ms chunks for VAD
                     }
                 }
                 
                 if !chunk.is_empty() {
-                    match resampler.resample(&chunk) {
-                         Ok(resampled) => {
-                             if resampled.len() != 160 && resampled.len() != 320 { // Expect 160 (10ms) or maybe 320? No 160 samples. 320 bytes.
-                                  // println!("Mic Resample Out: {} samples", resampled.len());
-                             }
-                             let _ = tsfn.call(resampled, ThreadsafeFunctionCallMode::Blocking);
-                         },
-                         Err(e) => eprintln!("Mic resample error: {}", e),
+                    // Pass through VAD
+                    let speech_chunks = vad.process(chunk);
+                    
+                    for speech_chunk in speech_chunks {
+                        if !speech_chunk.is_empty() {
+                           tsfn.call(speech_chunk, ThreadsafeFunctionCallMode::Blocking);
+                        }
                     }
+                } else {
+                    // Small sleep to prevent busy loop if buffer empty
+                    thread::sleep(Duration::from_millis(5));
                 }
-                
-                thread::sleep(Duration::from_millis(5));
             }
         }));
 

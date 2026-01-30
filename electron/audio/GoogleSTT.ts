@@ -94,29 +94,30 @@ export class GoogleSTT extends EventEmitter {
         }
     }
 
+    private buffer: Buffer[] = [];
+    private isConnecting = false;
+
     public write(audioData: Buffer): void {
         if (!this.isStreaming || !this.stream) {
+            // Buffer if we are in connecting state or just started
+            if (this.isConnecting || this.isStreaming) {
+                // console.log(`[GoogleSTT] Buffering ${audioData.length} bytes (Stream not ready)`);
+                this.buffer.push(audioData);
+            }
             return;
         }
 
         // Safety check to prevent "write after destroyed" error
         if (this.stream.destroyed) {
-            // console.warn('[GoogleSTT] Attempted to write to destroyed stream, stopping...');
             this.isStreaming = false;
             this.stream = null;
             return;
         }
 
         try {
-            if (this.stream.command && this.stream.command.writable) { // gRPC stream internal check
-                if (audioData.length !== 320 && audioData.length !== 640) {
-                    console.warn('[GoogleSTT] Unexpected audio frame size:', audioData.length);
-                }
+            if (this.stream.command && this.stream.command.writable) {
                 this.stream.write(audioData);
             } else if (this.stream.writable) {
-                if (audioData.length !== 320 && audioData.length !== 640) {
-                    console.warn('[GoogleSTT] Unexpected audio frame size:', audioData.length);
-                }
                 this.stream.write(audioData);
             }
         } catch (err) {
@@ -125,8 +126,24 @@ export class GoogleSTT extends EventEmitter {
         }
     }
 
+    private flushBuffer(): void {
+        if (!this.stream) return;
+
+        while (this.buffer.length > 0) {
+            const data = this.buffer.shift();
+            if (data) {
+                try {
+                    this.stream.write(data);
+                } catch (e) {
+                    console.error('[GoogleSTT] Failed to flush buffer chunk:', e);
+                }
+            }
+        }
+    }
+
     private startStream(): void {
         this.isStreaming = true;
+        this.isConnecting = true;
 
         this.stream = this.client
             .streamingRecognize({
@@ -136,20 +153,18 @@ export class GoogleSTT extends EventEmitter {
                     audioChannelCount: this.audioChannelCount,
                     languageCode: this.languageCode,
                     enableAutomaticPunctuation: true,
-                    model: 'latest_long', // Optimized for long form
+                    model: 'latest_long',
                     useEnhanced: true,
                 },
-                interimResults: true, // We want real-time feedback
+                interimResults: true,
             })
             .on('error', (err: Error) => {
                 console.error('[GoogleSTT] Stream error:', err);
                 this.emit('error', err);
-
-                // Simple auto-reconnect strategy could go here
-                // For now, we notify parent to decide.
+                this.isConnecting = false;
             })
             .on('data', (data: any) => {
-                // Parse results
+                // ... (existing data handler)
                 if (data.results[0] && data.results[0].alternatives[0]) {
                     const result = data.results[0];
                     const alt = result.alternatives[0];
@@ -165,6 +180,12 @@ export class GoogleSTT extends EventEmitter {
                     }
                 }
             });
+
+        // Initialize writeable check or wait for 'open'? 
+        // gRPC streams are usually writeable immediately.
+        // We can flush immediately after creation.
+        this.isConnecting = false;
+        this.flushBuffer();
 
         console.log('[GoogleSTT] Stream created. Waiting for events...');
     }

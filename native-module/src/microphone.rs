@@ -1,121 +1,171 @@
 use anyhow::Result;
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cidre::{arc, av, core_audio, cf, dispatch, ns};
+use cidre::core_audio::Object; // Add this trait import
 use ringbuf::{traits::{Consumer, Producer, Split}, HeapRb, HeapProd, HeapCons};
 use std::sync::{Arc, Mutex};
+// Reuse the existing robust Resampler
+use crate::resampler::Resampler;
 
 pub struct MicrophoneStream {
-    stream: cpal::Stream,
-    consumer: Arc<Mutex<HeapCons<f32>>>,
+    engine: arc::R<av::AudioEngine>,
+    consumer: Arc<Mutex<HeapCons<i16>>>, // Now yields i16 directly (16kHz)
     sample_rate: u32,
+    _queue: arc::R<dispatch::Queue>, // Keep queue alive
 }
 
 pub fn list_input_devices() -> Result<Vec<(String, String)>> {
-    let host = cpal::default_host();
-    let devices = host.input_devices()?;
+    // Use explicit core_audio
+    let devices = core_audio::System::devices()?;
     let mut list = Vec::new();
-    
-    // Add Default option
     list.push(("default".to_string(), "Default Microphone".to_string()));
 
     for device in devices {
-        if let Ok(name) = device.name() {
-            // Use name as ID for simplicity in CPAL, or handle index if needed
-            list.push((name.clone(), name));
+        // Check if device supports input
+        if let Ok(cfg) = device.input_stream_cfg() {
+             if cfg.number_buffers() > 0 {
+                 // Fix closure signature: map receives Retained<String> (R<String>)
+                 let uid = device.uid().map(|u: cidre::arc::R<cidre::cf::String>| u.to_string()).unwrap_or_default();
+                 let name = device.name().map(|n: cidre::arc::R<cidre::cf::String>| n.to_string()).unwrap_or_default();
+                 if !uid.is_empty() {
+                     list.push((uid, name));
+                 }
+             }
         }
     }
     Ok(list)
 }
 
 impl MicrophoneStream {
-    pub fn new(device_id: Option<String>) -> Result<Self> {
-        let host = cpal::default_host();
+    pub fn new(_device_id: Option<String>) -> Result<Self> {
+        let mut engine = av::AudioEngine::new();
+        let mut input_node = engine.input_node();
         
-        // Find input device or use default
-        let device = if let Some(id) = device_id.filter(|s| s != "default") {
-            host.input_devices()?
-                .find(|d| d.name().map(|n| n == id).unwrap_or(false))
-                .ok_or_else(|| anyhow::anyhow!("Microphone not found: {}", id))?
+        // --- DEVICE SELECTION LOGIC ---
+        if let Some(req_id) = _device_id.as_ref() {
+             if req_id != "default" {
+                 let devices = core_audio::System::devices()?;
+                 let mut found_device_id: Option<u32> = None;
+                 
+                 for dev in devices {
+                     let uid = dev.uid().map(|u| u.to_string()).unwrap_or_default();
+                     if &uid == req_id {
+                          found_device_id = Some(dev.id());
+                          println!("[Microphone] Found requested device: {} (ID: {})", uid, dev.id());
+                          break;
+                     }
+                 }
+                 
+                if let Some(dev_id) = found_device_id {
+                     // AudioUnit is Retained, not Option
+                     let mut au = input_node.audio_unit();
+                     // kAudioOutputUnitProperty_CurrentDevice = 2000
+                     // Scope Global = 0
+                     match au.set_prop(2000, 0, 0, &dev_id) {
+                         Ok(_) => println!("[Microphone] Successfully switched Input Node to device ID {}", dev_id),
+                         Err(e) => println!("[Microphone] Failed to set device: {:?}", e),
+                     }
+                } else {
+                     println!("[Microphone] Requested device {} not found, using default", req_id);
+                }
+             }
+        }
+        // -----------------------------
+
+        println!("[Microphone] Using input node configuration");
+
+        // Get hardware format
+        let input_format = input_node.output_format_for_bus(0);
+        
+        // Dynamically retrieve sample rate to prevent pitch shift
+        // Workaround: Parse debug string since direct access methods are failing
+        let format_str = format!("{:?}", input_format);
+        let mut parsed_rate = 48000.0;
+        
+        // Search for "sample_rate" or "mSampleRate" in the format description
+        // Example: "... sample_rate: 44100.0 ..."
+        if let Some(pos) = format_str.find("sample_rate: ") {
+            if let Some(slice) = format_str.get(pos + 13..) {
+                if let Some(end) = slice.find(',') {
+                     if let Ok(rate) = slice[..end].trim().parse::<f64>() {
+                         parsed_rate = rate;
+                     }
+                }
+            }
+        } 
+        
+        // Fallback or override
+        let sample_rate = if parsed_rate < 100.0 {
+            println!("[Microphone] Warning: Parsed sample rate {} looks invalid. using 48000.0. Debug: {}", parsed_rate, format_str);
+            48000.0 
         } else {
-            host.default_input_device()
-                .ok_or_else(|| anyhow::anyhow!("No default microphone found"))?
+            parsed_rate
+        };
+        
+        println!("[Microphone] Detected Input Format: {} Hz (Parsed), {} ch", 
+            sample_rate, 
+            input_format.channel_count()
+        );
+
+        // Prepare Ring Buffer for 16kHz Int16 Output
+        // 16000 * 2 (seconds) buffer
+        let buffer_len = 32000; 
+        let rb = HeapRb::<i16>::new(buffer_len);
+        let (producer, consumer) = rb.split();
+        let producer = Arc::new(Mutex::new(producer));
+        
+        // Initialize Resampler
+        // If sample_rate is 0 (unlikely), error out or default
+        let use_rate = if sample_rate < 100.0 { 48000.0 } else { sample_rate };
+        let resampler = Resampler::new(use_rate).map_err(|e| anyhow::anyhow!(e))?;
+        let resampler = Arc::new(Mutex::new(resampler));
+        
+        // Install Tap
+        // Swift: bufferSize = inputRate * 0.1 (100ms)
+        let buffer_size = (use_rate * 0.1) as u32; // 100ms
+        
+        // Logic for tap block
+        let producer_clone = producer.clone();
+        let resampler_clone = resampler.clone();
+        
+        let block = move |buffer: &av::AudioPcmBuf, _time: &av::AudioTime| {
+            let mut producer = producer_clone.lock().unwrap();
+            let mut resampler = resampler_clone.lock().unwrap();
+            
+            // Extract f32 data from buffer
+            if let Some(data) = buffer.data_f32_at(0) {
+                 // Resample to 16kHz Int16
+                 if let Ok(output) = resampler.resample(data) {
+                     // Push to ringbuffer
+                     let _ = producer.push_slice(&output);
+                 }
+            }
         };
 
-        let config = device.default_input_config()?;
-        let sample_rate = config.sample_rate().0;
-        let channels = config.channels() as usize;
+        // Install tap on bus 0
+        input_node.install_tap_on_bus(0, buffer_size, Some(&input_format), block);
 
-        println!("[Microphone] Using device: {}", device.name().unwrap_or_default());
-        println!("[Microphone] Sample Rate: {}, Channels: {}", sample_rate, channels);
+        // Prepare engine
+        engine.prepare();
+        println!("[Microphone] Engine Prepared");
 
-        // Ring buffer (approx 0.5 sec buffer)
-        let buffer_len = 48000; 
-        let rb = HeapRb::<f32>::new(buffer_len);
-        let (mut producer, consumer) = rb.split();
-        
-        let consumer = Arc::new(Mutex::new(consumer));
-        
-        let err_fn = |err| eprintln!("an error occurred on stream: {}", err);
-        
-        // Helpers to convert various formats to f32 and mix down to Mono if needed
-        fn write_input_data_f32(input: &[f32], channels: usize, producer: &mut HeapProd<f32>) {
-            for frame in input.chunks(channels) {
-                let sample = frame[0]; // Take first channel (Left) for simplicity
-                let _ = producer.try_push(sample);
-            }
-        }
-
-        fn write_input_data_i16(input: &[i16], channels: usize, producer: &mut HeapProd<f32>) {
-            for frame in input.chunks(channels) {
-                let sample = frame[0].to_f32();
-                let _ = producer.try_push(sample);
-            }
-        }
-
-        fn write_input_data_u16(input: &[u16], channels: usize, producer: &mut HeapProd<f32>) {
-            for frame in input.chunks(channels) {
-                let sample = frame[0].to_f32();
-                let _ = producer.try_push(sample);
-            }
-        }
-        
-        let stream = match config.sample_format() {
-            cpal::SampleFormat::F32 => device.build_input_stream(
-                &config.into(),
-                move |data: &[f32], _: &_| write_input_data_f32(data, channels, &mut producer),
-                err_fn,
-                None
-            )?,
-            cpal::SampleFormat::I16 => device.build_input_stream(
-                &config.into(),
-                move |data: &[i16], _: &_| write_input_data_i16(data, channels, &mut producer),
-                err_fn,
-                None
-            )?,
-            cpal::SampleFormat::U16 => device.build_input_stream(
-                &config.into(),
-                move |data: &[u16], _: &_| write_input_data_u16(data, channels, &mut producer),
-                err_fn,
-                None
-            )?,
-            _ => return Err(anyhow::anyhow!("Unsupported sample format")),
-        };
-
-        // Note: We don't call play() here yet. We let the caller decide when to start.
+        let queue = dispatch::Queue::new();
 
         Ok(Self {
-            stream,
-            consumer,
-            sample_rate
+            engine,
+            consumer: Arc::new(Mutex::new(consumer)),
+            sample_rate: 16000, // Fixed output rate
+            _queue: queue,
         })
     }
 
-    pub fn play(&self) -> Result<()> {
-        self.stream.play()?;
+    pub fn play(&mut self) -> Result<()> {
+        self.engine.start()?;
+        println!("[Microphone] Engine Started");
         Ok(())
     }
 
-    pub fn pause(&self) -> Result<()> {
-        self.stream.pause()?;
+    pub fn pause(&mut self) -> Result<()> {
+        self.engine.pause();
         Ok(())
     }
 
@@ -123,23 +173,7 @@ impl MicrophoneStream {
         self.sample_rate
     }
     
-    pub fn get_consumer(&self) -> Arc<Mutex<HeapCons<f32>>> {
+    pub fn get_consumer(&self) -> Arc<Mutex<HeapCons<i16>>> {
         self.consumer.clone()
-    }
-}
-
-trait SampleToF32 {
-    fn to_f32(&self) -> f32;
-}
-
-impl SampleToF32 for i16 {
-    fn to_f32(&self) -> f32 {
-        (*self as f32) / (i16::MAX as f32)
-    }
-}
-
-impl SampleToF32 for u16 {
-    fn to_f32(&self) -> f32 {
-        ((*self as f32) - (u16::MAX as f32 / 2.0)) / (u16::MAX as f32 / 2.0)
     }
 }

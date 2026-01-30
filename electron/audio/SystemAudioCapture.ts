@@ -25,7 +25,12 @@ export class SystemAudioCapture extends EventEmitter {
             console.error('[SystemAudioCapture] Rust class implementation not found.');
         } else {
             console.log(`[SystemAudioCapture] Initialized wrapper. Device ID: ${this.deviceId || 'default'}`);
-            // Lazy init: Do not create monitor here
+            try {
+                console.log('[SystemAudioCapture] Creating native monitor (Eager Init)...');
+                this.monitor = new RustAudioCapture(this.deviceId);
+            } catch (e) {
+                console.error('[SystemAudioCapture] Failed to create native monitor:', e);
+            }
         }
     }
 
@@ -45,13 +50,12 @@ export class SystemAudioCapture extends EventEmitter {
             return;
         }
 
-        // Lazy initialization
+        // Monitor should be ready from constructor
         if (!this.monitor) {
+            console.error('[SystemAudioCapture] Monitor not initialized.');
             try {
-                console.log('[SystemAudioCapture] Creating native monitor...');
                 this.monitor = new RustAudioCapture(this.deviceId);
             } catch (e) {
-                console.error('[SystemAudioCapture] Failed to create native monitor:', e);
                 this.emit('error', e);
                 return;
             }
@@ -60,14 +64,15 @@ export class SystemAudioCapture extends EventEmitter {
         try {
             console.log('[SystemAudioCapture] Starting native capture...');
 
-            this.monitor.start((chunk: Buffer) => {
-                // The native module sends raw PCM bytes (Buffer)
+            this.monitor.start((chunk: Uint8Array) => {
+                // The native module sends raw PCM bytes (Uint8Array)
                 if (chunk && chunk.length > 0) {
+                    const buffer = Buffer.from(chunk);
                     if (Math.random() < 0.05) {
-                        const prefix = chunk.slice(0, 10).toString('hex');
-                        console.log(`[SystemAudioCapture] Chunk: ${chunk.length}b, Rate: ${this.detectedSampleRate}, Data(hex): ${prefix}...`);
+                        const prefix = buffer.slice(0, 10).toString('hex');
+                        console.log(`[SystemAudioCapture] Chunk: ${buffer.length}b, Rate: ${this.detectedSampleRate}, Data(hex): ${prefix}...`);
                     }
-                    this.emit('data', chunk);
+                    this.emit('data', buffer);
                 }
             });
 
