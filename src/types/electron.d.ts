@@ -92,7 +92,9 @@ export interface ElectronAPI {
   onIntelligenceManualStarted: (callback: () => void) => () => void
   onIntelligenceManualResult: (callback: (data: { answer: string; question: string }) => void) => () => void
   onIntelligenceModeChanged: (callback: (data: { mode: string }) => void) => () => void
-  onIntelligenceError: (callback: (data: { error: string; mode: string }) => void) => () => void
+  onIntelligenceError: (callback: (data: { error: string, mode: string }) => void) => () => void;
+  // Session Management
+  onSessionReset: (callback: () => void) => () => void;
 
   // Streaming listeners
   streamGeminiChat: (message: string, imagePath?: string, context?: string, options?: { skipSystemPrompt?: boolean }) => Promise<void>

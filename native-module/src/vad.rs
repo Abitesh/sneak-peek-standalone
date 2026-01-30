@@ -8,6 +8,8 @@ enum VadState {
     Hangover,
 }
 
+use crate::audio_config::{VAD_START_RMS, VAD_END_RMS, VAD_HANGOVER_MS, VAD_PREROLL_CHUNKS};
+
 pub struct VadGate {
     state: VadState,
     start_threshold: f32,
@@ -25,16 +27,12 @@ pub struct VadGate {
 
 impl VadGate {
     pub fn new() -> Self {
-        Self::new_with_config(3) // Default 3 (300ms)
-    }
-
-    pub fn new_with_config(max_preroll_chunks: usize) -> Self {
         Self {
             state: VadState::Idle,
-            start_threshold: 185.0,
-            end_threshold: 100.0,
-            hangover_duration_ms: 500,
-            max_preroll_chunks,
+            start_threshold: VAD_START_RMS,
+            end_threshold: VAD_END_RMS,
+            hangover_duration_ms: VAD_HANGOVER_MS,
+            max_preroll_chunks: VAD_PREROLL_CHUNKS,
             hangover_start_time: 0,
             preroll_buffer: VecDeque::new(),
             last_rms: 0.0,

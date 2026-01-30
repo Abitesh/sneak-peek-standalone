@@ -36,7 +36,8 @@ export class SystemAudioCapture extends EventEmitter {
 
     public getSampleRate(): number {
         // Return 16000 default as we effectively downsample to this now
-        return this.monitor?.getSampleRate() || 16000;
+        // Force return 16000 to avoid stale binary issues reporting device rate
+        return 16000;
     }
 
     /**

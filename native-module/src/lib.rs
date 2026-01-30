@@ -3,15 +3,19 @@
 #[macro_use]
 extern crate napi_derive;
 
-use napi::threadsafe_function::{ErrorStrategy, ThreadsafeFunction, ThreadsafeFunctionCallMode};
-use napi::{Env, JsFunction};
-use ringbuf::traits::Consumer;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+use napi::bindgen_prelude::*;
+use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode, ErrorStrategy};
+use ringbuf::traits::{Consumer, Observer};
+
+pub mod vad; 
+pub mod microphone;
 pub mod speaker;
-pub mod resampler; // Expose resampler
+pub mod resampler; 
+pub mod audio_config;
 
 #[napi]
 pub struct SystemAudioCapture {
@@ -35,7 +39,7 @@ impl SystemAudioCapture {
         Ok(SystemAudioCapture {
             stop_signal: Arc::new(Mutex::new(false)),
             capture_thread: None,
-            sample_rate,
+            sample_rate: 16000, // Fixed output rate from Resampler
             input: Some(input),
             stream: None,
         })
@@ -50,6 +54,7 @@ impl SystemAudioCapture {
     pub fn start(&mut self, callback: JsFunction) -> napi::Result<()> {
         use crate::vad::VadGate;
         use crate::resampler::Resampler;
+        use crate::audio_config::CHUNK_SAMPLES;
 
         let tsfn: ThreadsafeFunction<Vec<i16>, ErrorStrategy::Fatal> = callback
             .create_threadsafe_function(0, |ctx| {
@@ -64,53 +69,67 @@ impl SystemAudioCapture {
         *self.stop_signal.lock().unwrap() = false;
         let stop_signal = self.stop_signal.clone();
         
+        // Take input
         let input = self.input.take().ok_or_else(|| napi::Error::from_reason("Capture already started or input missing"))?;
         
-        // Create stream on main thread (NOT Send safe)
         let mut stream = input.stream();
         let input_sample_rate = stream.sample_rate() as f64;
-        
-        // Extract consumer (IS Send safe)
         let mut consumer = stream.take_consumer().ok_or_else(|| napi::Error::from_reason("Failed to get consumer"))?;
         
         self.stream = Some(stream);
 
-        self.capture_thread = Some(thread::spawn(move || {
-            // System Audio VAD: 20 chunks pre-roll (~2s)
-            let mut vad = VadGate::new_with_config(20);
-            // Resampler: Input Rate -> 16000
-            let mut resampler = Resampler::new(input_sample_rate).expect("Failed to create resampler"); // TODO: Handle error better?
+        self.capture_thread = Some(thread::spawn(move || { // AUDIO THREAD
+            let mut vad = VadGate::new();
+            let mut resampler = Resampler::new(input_sample_rate).expect("Failed to create resampler"); 
+            
+            // Accumulators
+            let mut raw_batch = Vec::with_capacity(4096);
+            let mut i16_accumulator: Vec<i16> = Vec::with_capacity(CHUNK_SAMPLES * 4); // ample headroom
 
             loop {
                 if *stop_signal.lock().unwrap() {
                     break;
                 }
                 
-                let mut chunk = Vec::with_capacity(4800);
-                for _ in 0..4800 {
-                    if let Some(s) = consumer.try_pop() {
-                        chunk.push(s);
-                    } else {
-                        break;
+                // 1. Drain raw audio from RingBuffer (Non-blocking)
+                {
+                    // No lock needed since we own the consumer in this thread
+                    while let Some(s) = consumer.try_pop() {
+                        raw_batch.push(s);
+                        if raw_batch.len() >= 4800 { break; } 
                     }
                 }
                 
-                if !chunk.is_empty() {
-                    // Resample f32 -> i16
-                    if let Ok(resampled_chunk) = resampler.resample(&chunk) {
-                        if !resampled_chunk.is_empty() {
-                             // Pass through VAD
-                             let speech_chunks = vad.process(resampled_chunk);
-                             for speech in speech_chunks {
-                                 if !speech.is_empty() {
-                                     tsfn.call(speech, ThreadsafeFunctionCallMode::Blocking);
-                                 }
-                             }
+                // 2. Resample if we have data
+                if !raw_batch.is_empty() {
+                    if let Ok(resampled) = resampler.resample(&raw_batch) {
+                        i16_accumulator.extend(resampled);
+                    }
+                    raw_batch.clear();
+                }
+
+                // 3. Emit detailed 1600-sample chunks
+                while i16_accumulator.len() >= CHUNK_SAMPLES {
+                    let chunk: Vec<i16> = i16_accumulator.drain(0..CHUNK_SAMPLES).collect();
+                    
+                    // VAD
+                    let speech_chunks = vad.process(chunk);
+                    for speech in speech_chunks {
+                        if !speech.is_empty() {
+                            // NonBlocking call to JS
+                            tsfn.call(speech, ThreadsafeFunctionCallMode::NonBlocking);
                         }
                     }
                 }
-                
-                thread::sleep(Duration::from_millis(10));
+
+                // 4. Yield/Sleep strategies
+                // If we didn't have enough data to fill a chunk, we yield to avoid busy loop
+                // "No guessed sleeps" -> but we must not consume 100% CPU.
+                // 1ms sleep is acceptable if we are waiting for hardware.
+                // Or yield_now().
+                if i16_accumulator.len() < CHUNK_SAMPLES {
+                     thread::sleep(Duration::from_millis(1));
+                }
             }
         }));
 
@@ -124,11 +143,10 @@ impl SystemAudioCapture {
             let _ = handle.join();
         }
         // Drop stream to stop capture
-        self.stream = None;
+        self.stream = None; 
     }
 }
 
-pub mod microphone;
 
 #[napi]
 pub struct MicrophoneCapture {
@@ -147,7 +165,8 @@ impl MicrophoneCapture {
             Ok(i) => i,
             Err(e) => return Err(napi::Error::from_reason(format!("Failed to create microphone input: {}", e))),
         };
-        let sample_rate = input.sample_rate();
+        // We will resample to 16000
+        let sample_rate = 16000;
 
         Ok(MicrophoneCapture {
             stop_signal: Arc::new(Mutex::new(false)),
@@ -164,7 +183,9 @@ impl MicrophoneCapture {
 
     #[napi]
     pub fn start(&mut self, callback: JsFunction) -> napi::Result<()> {
-        use crate::vad::VadGate; // Import VAD
+        use crate::vad::VadGate; 
+        use crate::resampler::Resampler;
+        use crate::audio_config::CHUNK_SAMPLES;
 
         // Callback now receives Vec<i16> (s16le PCM samples)
         // We will output Buffer (byte array) to JS
@@ -181,49 +202,62 @@ impl MicrophoneCapture {
         *self.stop_signal.lock().unwrap() = false;
         let stop_signal = self.stop_signal.clone();
         
-        let input = self.input.as_mut().ok_or_else(|| napi::Error::from_reason("Capture already started or input missing"))?;
+        let input_ref = self.input.as_mut().ok_or_else(|| napi::Error::from_reason("Capture already started or input missing"))?;
         
         // Play on main thread
-        if let Err(e) = input.play() {
+        if let Err(e) = input_ref.play() {
              return Err(napi::Error::from_reason(format!("Failed to start stream: {}", e)));
         }
         
+        let input_sample_rate = input_ref.sample_rate() as f64;
         // Get consumer for thread
-        let consumer = input.get_consumer();
+        let consumer = input_ref.get_consumer();
 
-        self.capture_thread = Some(thread::spawn(move || {
-            let mut vad = VadGate::new(); // Initialize VAD
-            
+        self.capture_thread = Some(thread::spawn(move || { 
+            let mut vad = VadGate::new(); 
+            // Initialize Resampler with actual input rate
+            let mut resampler = Resampler::new(input_sample_rate).expect("Failed to create resampler for mic");
+
+            let mut raw_batch = Vec::with_capacity(4096);
+            let mut i16_accumulator: Vec<i16> = Vec::with_capacity(CHUNK_SAMPLES * 4);
+
             loop {
                 if *stop_signal.lock().unwrap() {
                     break;
                 }
                 
-                let mut chunk = Vec::new();
+                // 1. Drain RingBuffer (f32)
                 {
                     let mut cons = consumer.lock().unwrap();
-                    // Consume available samples
-                    // Chunk size target: ~100ms at 16kHz = 1600 samples
-                    // The swift code used 0.1s buffer.
-                    // Let's grab whatever is available up to a limit to avoid latency
                     while let Some(s) = cons.try_pop() {
-                        chunk.push(s);
-                        if chunk.len() >= 1600 { break; } // Process in ~100ms chunks for VAD
+                        raw_batch.push(s);
+                        if raw_batch.len() >= 4800 { break; }
                     }
                 }
                 
-                if !chunk.is_empty() {
-                    // Pass through VAD
-                    let speech_chunks = vad.process(chunk);
+                // 2. Resample (f32 -> i16 at 16k)
+                if !raw_batch.is_empty() {
+                    if let Ok(resampled) = resampler.resample(&raw_batch) {
+                        i16_accumulator.extend(resampled);
+                    }
+                    raw_batch.clear();
+                }
+
+                // 3. Emit Chunks
+                while i16_accumulator.len() >= CHUNK_SAMPLES {
+                    let chunk: Vec<i16> = i16_accumulator.drain(0..CHUNK_SAMPLES).collect();
                     
+                    let speech_chunks = vad.process(chunk);
                     for speech_chunk in speech_chunks {
                         if !speech_chunk.is_empty() {
-                           tsfn.call(speech_chunk, ThreadsafeFunctionCallMode::Blocking);
+                           tsfn.call(speech_chunk, ThreadsafeFunctionCallMode::NonBlocking);
                         }
                     }
-                } else {
-                    // Small sleep to prevent busy loop if buffer empty
-                    thread::sleep(Duration::from_millis(5));
+                }
+                
+                // 4. Yield
+                if i16_accumulator.len() < CHUNK_SAMPLES {
+                    thread::sleep(Duration::from_millis(1));
                 }
             }
         }));
@@ -236,6 +270,10 @@ impl MicrophoneCapture {
         *self.stop_signal.lock().unwrap() = true;
         if let Some(handle) = self.capture_thread.take() {
             let _ = handle.join();
+        }
+        // Optional: pause input?
+        if let Some(input) = self.input.as_mut() {
+            let _ = input.pause();
         }
     }
 }

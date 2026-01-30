@@ -20,4 +20,5 @@ export declare class MicrophoneCapture {
   getSampleRate(): number
   start(callback: (...args: any[]) => any): void
   stop(): void
+  
 }

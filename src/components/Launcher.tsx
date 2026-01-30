@@ -8,6 +8,7 @@ import MeetingDetails from './MeetingDetails';
 import TopSearchPill from './TopSearchPill';
 import GlobalChatOverlay from './GlobalChatOverlay';
 import { motion, AnimatePresence } from 'framer-motion';
+import { FeatureSpotlight } from './FeatureSpotlight';
 
 interface Meeting {
     id: string;
@@ -75,7 +76,6 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
     const [isCalendarConnected, setIsCalendarConnected] = useState(false);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [showNotification, setShowNotification] = useState(false);
-    const [isInterested, setIsInterested] = useState(false);
 
     // Global search state (for AI chat overlay)
     const [isGlobalChatOpen, setIsGlobalChatOpen] = useState(false);
@@ -532,117 +532,8 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
                                                 <div className="absolute top-0 right-0 w-[150px] h-[150px] bg-emerald-500/10 blur-[60px] pointer-events-none" />
                                             </div>
                                         ) : (
-                                            <div className="md:col-span-2 relative group rounded-xl bg-gradient-to-br from-[#1C1C1E] to-[#151516] flex flex-col justify-between px-5 py-4 overflow-hidden">
-
-                                                {/* Backdrop Image (Refined Visibility) */}
-                                                <div className="absolute inset-0">
-                                                    <img src={mainui} alt="" className="w-full h-full object-cover opacity-80 scale-100 transition-transform duration-700 group-hover:scale-105" />
-                                                    <div className="absolute inset-0 bg-black/10" /> {/* Subtle tint to reduce raw brightness */}
-                                                </div>
-
-                                                {/* Content */}
-                                                <div className="relative z-10 flex flex-col h-full items-center text-center">
-                                                    {/* Header */}
-                                                    <div className="flex flex-col items-center w-full">
-                                                        <h2 className="text-[22px] font-semibold text-white mb-1 leading-tight drop-shadow-md tracking-wide">
-                                                            Upcoming features
-                                                        </h2>
-                                                        <p className="text-[14px] text-white/[0.8] font-medium leading-relaxed drop-shadow-sm tracking-wide">
-                                                            Answers, tailored to you.
-                                                        </p>
-                                                    </div>
-
-                                                    {/* Feature List (Centered, No Bullets) */}
-                                                    <div className="flex flex-col gap-1 mt-3 w-full">
-                                                        <div className="text-[14px] text-white/[0.7] font-medium leading-relaxed">
-                                                            GitHub integration for code context
-                                                        </div>
-                                                        <div className="text-[14px] text-white/[0.7] font-medium leading-relaxed">
-                                                            Resume & job-description aware answers
-                                                        </div>
-                                                        <div className="text-[14px] text-white/[0.7] font-medium leading-relaxed">
-                                                            Confidence timeline for fact checking
-                                                        </div>
-                                                    </div>
-
-                                                    {/* Footer (Anchored Button) */}
-                                                    <div className="mt-3 w-full flex justify-center">
-                                                        <motion.button
-                                                            layout
-                                                            onClick={() => setIsInterested(!isInterested)}
-                                                            className="group relative flex items-center gap-2 pl-4 pr-5 py-2 rounded-full text-[13px] font-medium ease-[cubic-bezier(0.23,1,0.32,1)] hover:brightness-125 active:scale-[0.98] overflow-hidden"
-                                                            animate={{
-                                                                backgroundColor: isInterested ? 'rgba(50, 80, 160, 0.6)' : 'rgba(20, 40, 70, 0.4)',
-                                                            }}
-                                                            transition={{
-                                                                layout: { duration: 0.4, ease: [0.23, 1, 0.32, 1] }, // Direct morph A -> B
-                                                                backgroundColor: { duration: 0.3 }
-                                                            }}
-                                                            style={{
-                                                                backdropFilter: 'blur(14px)',
-                                                                WebkitBackdropFilter: 'blur(14px)',
-                                                                color: '#F4F6FA',
-                                                            }}
-                                                        >
-                                                            {/* Gradient Border */}
-                                                            <div
-                                                                className="absolute inset-0 rounded-full pointer-events-none transition-opacity duration-300 group-hover:opacity-80"
-                                                                style={{
-                                                                    padding: '1px',
-                                                                    background: isInterested ? 'linear-gradient(to right, #60A5FA, #8B5CF6)' : 'linear-gradient(to right, #60A5FA, #3B82F6)',
-                                                                    WebkitMask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
-                                                                    WebkitMaskComposite: 'xor',
-                                                                    maskComposite: 'exclude',
-                                                                    opacity: 0.6,
-                                                                }}
-                                                            />
-                                                            {/* Inner Highlight */}
-                                                            <div
-                                                                className="absolute inset-0 rounded-full pointer-events-none"
-                                                                style={{ boxShadow: 'inset 0 1px 0 0 rgba(255, 255, 255, 0.08)' }}
-                                                            />
-                                                            <motion.div layout className="relative z-10 flex items-center gap-2 font-semibold">
-                                                                {/* Text Transition */}
-                                                                <AnimatePresence mode="popLayout" initial={false}>
-                                                                    <motion.span
-                                                                        layout
-                                                                        key={isInterested ? 'interested' : 'mark'}
-                                                                        initial={{ opacity: 0, scale: 0.9, y: 5, filter: 'blur(2px)' }}
-                                                                        animate={{ opacity: 1, scale: 1, y: 0, filter: 'blur(0px)' }}
-                                                                        exit={{ opacity: 0, scale: 1.1, y: -5, filter: 'blur(2px)' }}
-                                                                        transition={{ duration: 0.25, ease: "easeOut" }}
-                                                                        className="block whitespace-nowrap"
-                                                                    >
-                                                                        {isInterested ? 'Interested' : 'Mark interest'}
-                                                                    </motion.span>
-                                                                </AnimatePresence>
-
-                                                                {/* Icon Container (Stable) */}
-                                                                <motion.div layout className="relative flex items-center justify-center -ml-0.5">
-                                                                    <Bell size={13} className={`transition-all duration-300 ${isInterested ? 'fill-white/20' : ''}`} />
-                                                                    <AnimatePresence>
-                                                                        {isInterested && (
-                                                                            <motion.div
-                                                                                initial={{ scale: 0, opacity: 0 }}
-                                                                                animate={{ scale: 1, opacity: 1 }}
-                                                                                exit={{ scale: 0, opacity: 0 }}
-                                                                                transition={{
-                                                                                    type: "spring",
-                                                                                    stiffness: 500,
-                                                                                    damping: 30,
-                                                                                    mass: 0.8
-                                                                                }}
-                                                                                className="absolute -top-1 -right-1 bg-emerald-500 rounded-full p-[1px] border border-[#1C1C1E]"
-                                                                            >
-                                                                                <Check size={6} className="text-white" strokeWidth={4} />
-                                                                            </motion.div>
-                                                                        )}
-                                                                    </AnimatePresence>
-                                                                </motion.div>
-                                                            </motion.div>
-                                                        </motion.button>
-                                                    </div>
-                                                </div>
+                                            <div className="md:col-span-2 h-full">
+                                                <FeatureSpotlight />
                                             </div>
                                         )
                                     )}

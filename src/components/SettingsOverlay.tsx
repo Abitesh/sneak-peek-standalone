@@ -3,8 +3,9 @@ import {
     X, Mic, Speaker, Monitor, Keyboard, User, LifeBuoy, LogOut,
     Command, ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
     AppWindow, Camera, RotateCcw, Eye, Layout, MessageSquare, Crop,
-    ChevronDown, Check, BadgeCheck, Power, Palette, Calendar, Ghost, Sun, Moon, RefreshCw
+    ChevronDown, Check, BadgeCheck, Power, Palette, Calendar, Ghost, Sun, Moon, RefreshCw, Info
 } from 'lucide-react';
+import { AboutSection } from './AboutSection';
 
 interface CustomSelectProps {
     label: string;
@@ -393,6 +394,12 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                             >
                                 <User size={16} /> Profile
                             </button>
+                            <button
+                                onClick={() => setActiveTab('about')}
+                                className={`w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-3 ${activeTab === 'about' ? 'bg-bg-item-active text-text-primary' : 'text-text-secondary hover:text-text-primary hover:bg-bg-item-active/50'}`}
+                            >
+                                <Info size={16} /> About
+                            </button>
                         </nav>
                     </div>
 
@@ -563,6 +570,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                             {updateStatus === 'error' && 'Error checking'}
                                         </button>
                                     </div>
+
                                 </div>
                             </div>
 
@@ -833,6 +841,10 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                 )}
                             </div>
                         </div>
+                    )}
+
+                    {activeTab === 'about' && (
+                        <AboutSection />
                     )}
                 </div>
             </div>

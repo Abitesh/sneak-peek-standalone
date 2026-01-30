@@ -485,6 +485,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.removeListener("intelligence-error", subscription)
     }
   },
+  onSessionReset: (callback: () => void) => {
+    const subscription = () => callback()
+    ipcRenderer.on("session-reset", subscription)
+    return () => {
+      ipcRenderer.removeListener("session-reset", subscription)
+    }
+  },
 
 
   // Streaming Chat

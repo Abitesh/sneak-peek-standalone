@@ -153,6 +153,22 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) =
         return () => unsubscribe();
     }, []);
 
+    // Session Reset Listener - Clears UI when a NEW meeting starts
+    useEffect(() => {
+        if (!window.electronAPI?.onSessionReset) return;
+        const unsubscribe = window.electronAPI.onSessionReset(() => {
+            console.log('[NativelyInterface] Resetting session state...');
+            setMessages([]);
+            setInputValue('');
+            setAttachedContext(null);
+            setManualTranscript('');
+            setVoiceInput('');
+            setIsProcessing(false);
+            // Optionally reset connection status if needed, but connection persists
+        });
+        return () => unsubscribe();
+    }, []);
+
     // Connect to Native Audio Backend
     useEffect(() => {
         const cleanups: (() => void)[] = [];

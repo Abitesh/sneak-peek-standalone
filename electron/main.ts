@@ -46,6 +46,7 @@ import { ProcessingHelper } from "./ProcessingHelper"
 
 import { IntelligenceManager } from "./IntelligenceManager"
 import { SystemAudioCapture } from "./audio/SystemAudioCapture"
+import { MicrophoneCapture } from "./audio/MicrophoneCapture"
 import { GoogleSTT } from "./audio/GoogleSTT"
 import { ThemeManager } from "./ThemeManager"
 import { RAGManager } from "./rag/RAGManager"
@@ -79,6 +80,7 @@ export class AppState {
   } | null = null // Allow null
 
   private hasDebugged: boolean = false
+  private isMeetingActive: boolean = false; // Guard for session state leaks
 
   // Processing events
   public readonly PROCESSING_EVENTS = {
@@ -211,16 +213,13 @@ export class AppState {
 
   // New Property for System Audio & Microphone
   private systemAudioCapture: SystemAudioCapture | null = null;
-  private microphoneCapture: any | null = null; // Typing loosely to avoid import issues
+  private microphoneCapture: MicrophoneCapture | null = null;
+  private audioTestCapture: MicrophoneCapture | null = null; // For audio settings test
   private googleSTT: GoogleSTT | null = null; // Interviewer
   private googleSTT_User: GoogleSTT | null = null; // User
 
   private setupSystemAudioPipeline(): void {
     try {
-      const { SystemAudioCapture } = require('./audio/SystemAudioCapture');
-      const { MicrophoneCapture } = require('./audio/MicrophoneCapture');
-      const { GoogleSTT } = require('./audio/GoogleSTT');
-
       this.systemAudioCapture = new SystemAudioCapture();
       this.microphoneCapture = new MicrophoneCapture();
       this.googleSTT = new GoogleSTT();
@@ -251,6 +250,11 @@ export class AppState {
       });
 
       this.googleSTT?.on('transcript', (segment: { text: string, isFinal: boolean, confidence: number }) => {
+        if (!this.isMeetingActive) {
+          console.log('[Main] Ignored transcript (Meeting inactive):', segment.text.substring(0, 50));
+          return;
+        }
+
         this.intelligenceManager.handleTranscript({
           speaker: 'interviewer',
           text: segment.text,
@@ -287,6 +291,11 @@ export class AppState {
       });
 
       this.googleSTT_User?.on('transcript', (segment: { text: string, isFinal: boolean, confidence: number }) => {
+        if (!this.isMeetingActive) {
+          console.log('[Main] Ignored transcript (Meeting inactive):', segment.text.substring(0, 50));
+          return;
+        }
+
         this.intelligenceManager.handleTranscript({
           speaker: 'user', // Identified as User
           text: segment.text,
@@ -321,9 +330,6 @@ export class AppState {
 
   private async reconfigureAudio(inputDeviceId?: string, outputDeviceId?: string): Promise<void> {
     console.log(`[Main] Reconfiguring Audio: Input=${inputDeviceId}, Output=${outputDeviceId}`);
-
-    const { SystemAudioCapture } = require('./audio/SystemAudioCapture');
-    const { MicrophoneCapture } = require('./audio/MicrophoneCapture');
 
     // 1. System Audio (Output Capture)
     if (this.systemAudioCapture) {
@@ -406,8 +412,60 @@ export class AppState {
     }
   }
 
+
+  public startAudioTest(deviceId?: string): void {
+    console.log(`[Main] Starting Audio Test on device: ${deviceId || 'default'}`);
+    this.stopAudioTest(); // Stop any existing test
+
+    try {
+      this.audioTestCapture = new MicrophoneCapture(deviceId || undefined);
+      this.audioTestCapture.start();
+
+      // Send to settings window if open, else main window
+      const win = this.settingsWindowHelper.getSettingsWindow() || this.getMainWindow();
+
+      this.audioTestCapture.on('data', (chunk: Buffer) => {
+        // Calculate basic RMS for level meter
+        if (!win || win.isDestroyed()) return;
+
+        let sum = 0;
+        const step = 10;
+        const len = chunk.length;
+
+        for (let i = 0; i < len; i += 2 * step) {
+          const val = chunk.readInt16LE(i);
+          sum += val * val;
+        }
+
+        const count = len / (2 * step);
+        if (count > 0) {
+          const rms = Math.sqrt(sum / count);
+          // Normalize 0-1 (heuristic scaling, max comfortable mic input is around 10000-20000)
+          const level = Math.min(rms / 10000, 1.0);
+          win.webContents.send('audio-level', level);
+        }
+      });
+
+      this.audioTestCapture.on('error', (err: Error) => {
+        console.error('[Main] AudioTest Error:', err);
+      });
+
+    } catch (err) {
+      console.error('[Main] Failed to start audio test:', err);
+    }
+  }
+
+  public stopAudioTest(): void {
+    if (this.audioTestCapture) {
+      console.log('[Main] Stopping Audio Test');
+      this.audioTestCapture.stop();
+      this.audioTestCapture = null;
+    }
+  }
+
   public async startMeeting(metadata?: any): Promise<void> {
     console.log('[Main] Starting Meeting...', metadata);
+    this.isMeetingActive = true;
     if (metadata) {
       this.intelligenceManager.setMeetingMetadata(metadata);
 
@@ -417,6 +475,9 @@ export class AppState {
       }
     }
 
+    // Emit session reset to clear UI state
+    this.getWindowHelper().getOverlayWindow()?.webContents.send('session-reset');
+    this.getWindowHelper().getLauncherWindow()?.webContents.send('session-reset');
 
     // 3. Start System Audio
     this.systemAudioCapture?.start();
@@ -429,6 +490,7 @@ export class AppState {
 
   public async endMeeting(): Promise<void> {
     console.log('[Main] Ending Meeting...');
+    this.isMeetingActive = false; // Block new data immediately
 
     // 3. Stop System Audio
     this.systemAudioCapture?.stop();
