@@ -1,6 +1,6 @@
 use anyhow::Result;
-use cidre::{arc, av, core_audio, cf, dispatch, ns};
-use ringbuf::{traits::{Consumer, Producer, Split}, HeapRb, HeapProd, HeapCons};
+use cidre::{arc, av, core_audio, dispatch};
+use ringbuf::{traits::{Producer, Split}, HeapRb, HeapCons};
 use std::sync::{Arc, Mutex};
 
 pub struct MicrophoneStream {
@@ -77,7 +77,7 @@ impl MicrophoneStream {
             }
         };
 
-        input_node.install_tap_on_bus(0, buffer_size, Some(&input_format), block);
+        let _ = input_node.install_tap_on_bus(0, buffer_size, Some(&input_format), block);
 
         engine.prepare();
         println!("[Microphone] Engine Prepared");

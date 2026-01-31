@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use napi::bindgen_prelude::*;
 use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode, ErrorStrategy};
-use ringbuf::traits::{Consumer, Observer};
+use ringbuf::traits::Consumer;
 
 pub mod vad; 
 pub mod microphone;
@@ -72,7 +72,7 @@ impl SystemAudioCapture {
         // LAZY INIT: Create SpeakerInput NOW (when meeting starts), not at app launch
         // This is where the CoreAudio tap gets created - the 1-second mute happens here
         // but only when the user actually starts a meeting, not when the app launches
-        let input = if let Some(existing) = self.input.take() {
+        let input: speaker::SpeakerInput = if let Some(existing) = self.input.take() {
             existing
         } else {
             println!("[SystemAudioCapture] Creating audio tap now (lazy init)...");
@@ -297,7 +297,7 @@ pub struct AudioDeviceInfo {
 #[napi]
 pub fn get_input_devices() -> Vec<AudioDeviceInfo> {
     match microphone::list_input_devices() {
-        Ok(devs) => devs.into_iter().map(|(id, name)| AudioDeviceInfo { id, name }).collect(),
+        Ok(devs) => devs.into_iter().map(|(id, name)| AudioDeviceInfo { id, name }).collect::<Vec<_>>(),
         Err(e) => {
             eprintln!("Failed to list input devices: {}", e);
             Vec::new()
@@ -308,7 +308,7 @@ pub fn get_input_devices() -> Vec<AudioDeviceInfo> {
 #[napi]
 pub fn get_output_devices() -> Vec<AudioDeviceInfo> {
     match speaker::list_output_devices() {
-        Ok(devs) => devs.into_iter().map(|(id, name)| AudioDeviceInfo { id, name }).collect(),
+        Ok(devs) => devs.into_iter().map(|(id, name)| AudioDeviceInfo { id, name }).collect::<Vec<_>>(),
         Err(e) => {
              eprintln!("Failed to list output devices: {}", e);
              Vec::new()

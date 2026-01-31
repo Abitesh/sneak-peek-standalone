@@ -10,7 +10,7 @@ crate-type = ["cdylib"]
 [dependencies]
 napi = { version = "2.12.2", features = ["napi4"] }
 napi-derive = "2.9.3"
-cidre = { version = "0.11.3", platform = "macos", features = ["ca", "cm", "av", "cat", "dispatch", "ns", "sc", "cf"] }
+cidre = { version = "0.11.10", features = ["ca", "cm", "av", "cat", "dispatch", "ns", "sc", "cf", "blocks", "objc"] }
 wasapi = { version = "0.13.0", platform = "windows" }
 windows = { version = "0.52.0", platform = "windows", features = ["Win32_Media_Audio", "Win32_System_Com", "Win32_System_Threading"] }
 cpal = "0.15.2"

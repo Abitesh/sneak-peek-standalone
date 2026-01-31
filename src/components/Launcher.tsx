@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { ToggleLeft, ToggleRight, Search, Zap, Calendar, ArrowRight, ArrowLeft, MoreHorizontal, Globe, Clock, ChevronRight, Settings, RefreshCw, Eye, EyeOff, Ghost, Plus, Mail, Link as LinkIcon, ChevronDown, Trash2, Bell, Check } from 'lucide-react';
+import { ToggleLeft, ToggleRight, Search, Zap, Calendar, ArrowRight, ArrowLeft, MoreHorizontal, Globe, Clock, ChevronRight, Settings, RefreshCw, Eye, EyeOff, Ghost, Plus, Mail, Link as LinkIcon, ChevronDown, Trash2, Bell, Check, Download } from 'lucide-react';
+import { generateMeetingPDF } from '../utils/pdfGenerator';
 import icon from "./icon.png";
 import mainui from "../UI_comp/mainui.png";
 import calender from "../UI_comp/calender.png";
@@ -202,6 +203,11 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
 
     const [forwardMeeting, setForwardMeeting] = useState<Meeting | null>(null);
     const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
+    const [menuEntered, setMenuEntered] = useState(false);
+
+    useEffect(() => {
+        setMenuEntered(false);
+    }, [activeMenuId]);
 
     // Global click listener to close menu
     useEffect(() => {
@@ -636,20 +642,38 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
                                                                     animate={{ opacity: 1, scale: 1, y: 0 }}
                                                                     exit={{ opacity: 0, scale: 0.95, y: 5 }}
                                                                     transition={{ duration: 0.1 }}
-                                                                    className="absolute right-0 top-full mt-1 w-28 bg-[#1E1E1E]/80 backdrop-blur-xl border border-white/10 rounded-lg shadow-2xl z-50 overflow-hidden"
+                                                                    className="absolute right-0 top-full mt-1 w-[90px] bg-[#1E1E1E]/80 backdrop-blur-xl border border-white/10 rounded-lg shadow-2xl z-50 overflow-hidden"
                                                                     onClick={(e) => e.stopPropagation()}
+                                                                    onMouseEnter={() => setMenuEntered(true)}
+                                                                    onMouseLeave={() => {
+                                                                        if (menuEntered) setActiveMenuId(null);
+                                                                    }}
                                                                 >
                                                                     <div className="p-1 flex flex-col gap-0.5">
                                                                         <button
                                                                             className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-text-primary hover:bg-white/10 rounded-lg transition-colors text-left"
-                                                                            onClick={() => {
-                                                                                // Placeholder copy link
-                                                                                console.log("Copy link clicked");
+                                                                            onClick={async () => {
                                                                                 setActiveMenuId(null);
+                                                                                // Fetch full details if needed
+                                                                                if (window.electronAPI && window.electronAPI.getMeetingDetails) {
+                                                                                    try {
+                                                                                        const fullMeeting = await window.electronAPI.getMeetingDetails(m.id);
+                                                                                        if (fullMeeting) {
+                                                                                            generateMeetingPDF(fullMeeting);
+                                                                                        } else {
+                                                                                            generateMeetingPDF(m);
+                                                                                        }
+                                                                                    } catch (e) {
+                                                                                        console.error("Failed to fetch details for PDF", e);
+                                                                                        generateMeetingPDF(m);
+                                                                                    }
+                                                                                } else {
+                                                                                    generateMeetingPDF(m);
+                                                                                }
                                                                             }}
                                                                         >
-                                                                            <LinkIcon size={13} />
-                                                                            Copy link
+                                                                            <Download size={13} />
+                                                                            Export
                                                                         </button>
                                                                         <button
                                                                             className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-red-400 hover:bg-red-500/10 hover:text-red-300 rounded-lg transition-colors text-left"

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use cidre::{arc, av, core_audio as ca};
+use cidre::{arc, av};
 use cidre::cat::{AudioFormatFlags, AudioStreamBasicDesc, AudioFormat};
 
 pub struct Resampler {

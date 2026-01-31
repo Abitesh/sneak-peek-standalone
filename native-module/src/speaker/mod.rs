@@ -1,4 +1,4 @@
-use anyhow::Result;
+// removed unused anyhow::Result
 
 #[cfg(target_os = "macos")]
 pub mod macos;
