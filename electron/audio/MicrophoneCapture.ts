@@ -52,9 +52,9 @@ export class MicrophoneCapture extends EventEmitter {
         }
 
         // Monitor should be ready from constructor
+        // Monitor should be ready from constructor
         if (!this.monitor) {
-            console.error('[MicrophoneCapture] Monitor not initialized.');
-            // Optional: Try to recreate? For now, assume constructor init or failure.
+            console.log('[MicrophoneCapture] Monitor not initialized. Re-initializing...');
             try {
                 this.monitor = new RustMicCapture(this.deviceId);
             } catch (e) {
@@ -68,6 +68,7 @@ export class MicrophoneCapture extends EventEmitter {
 
             this.monitor.start((chunk: Uint8Array) => {
                 if (chunk && chunk.length > 0) {
+                    // console.log(`[Microphone] Emitting chunk: ${chunk.length} bytes`);
                     this.emit('data', Buffer.from(chunk));
                 }
             });
@@ -93,9 +94,15 @@ export class MicrophoneCapture extends EventEmitter {
             console.error('[MicrophoneCapture] Error stopping:', e);
         }
 
-        // Destroy monitor to release microphone access fully
-        this.monitor = null;
+        // DO NOT destroy monitor here. Keep it alive for seamless restart.
+        // this.monitor = null; 
+
         this.isRecording = false;
         this.emit('stop');
+    }
+
+    public destroy(): void {
+        this.stop();
+        this.monitor = null;
     }
 }

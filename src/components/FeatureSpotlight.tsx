@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowRight, Check, Bell } from 'lucide-react';
+import { ArrowRight, Check, Bell, Sparkles } from 'lucide-react';
 import mainui from "../UI_comp/mainui.png";
 
 // --- Types ---
@@ -10,9 +10,12 @@ interface FeatureSlide {
     id: string;
     headline: string;
     subtitle: string;
-    type?: 'feature' | 'support';
+    type?: 'feature' | 'support' | 'premium';
     actionLabel?: string;
     url?: string;
+    eyebrow?: string;
+    bullets?: string[];
+    footer?: string;
 }
 
 // --- Data ---
@@ -22,17 +25,11 @@ const FEATURES: FeatureSlide[] = [
         id: 'tailored_answers',
         headline: 'Upcoming features',
         subtitle: 'Answers, tailored to you',
+        bullets: ['Repo aware explanations', 'Resume grounded responses'],
+        footer: 'Designed to work silently during live interviews.',
+        type: 'premium',
     },
-    {
-        id: 'github_context',
-        headline: 'GitHub integration',
-        subtitle: 'Use your real code as context',
-    },
-    {
-        id: 'resume_aware',
-        headline: 'Resume-aware answers',
-        subtitle: 'Speak from your real experience',
-    },
+
     {
         id: 'support_natively',
         headline: 'Support Development',
@@ -62,6 +59,7 @@ export const FeatureSpotlight: React.FC = () => {
     const currentFeature = FEATURES[currentIndex];
     const isInterested = interestState[currentFeature.id] || false;
     const isSupport = currentFeature.type === 'support';
+    const isPremium = currentFeature.type === 'premium';
 
     // --- Auto-Advance Logic ---
 
@@ -138,7 +136,27 @@ export const FeatureSpotlight: React.FC = () => {
             </div>
 
             {/* 2. Content Area (Centered) */}
-            <div className="relative z-10 flex flex-col items-center justify-center h-full w-full px-6 text-center">
+            <div className="relative z-10 flex flex-col items-center h-full w-full px-6 py-6 text-center">
+
+                {/* Ambient Glow for Premium Slide */}
+                <AnimatePresence>
+                    {currentFeature.type === 'premium' && (
+                        <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            transition={{ duration: 0.8 }}
+                            className="absolute inset-0 z-[-1] flex items-center justify-center pointer-events-none"
+                        >
+                            <div
+                                className="w-[200px] h-[200px] rounded-full blur-[60px]"
+                                style={{
+                                    background: 'radial-gradient(circle, rgba(255, 215, 0, 0.15) 0%, rgba(255, 215, 0, 0) 70%)',
+                                }}
+                            />
+                        </motion.div>
+                    )}
+                </AnimatePresence>
 
                 <AnimatePresence mode="wait" initial={false}>
                     <motion.div
@@ -152,119 +170,169 @@ export const FeatureSpotlight: React.FC = () => {
                         }}
                         className="flex flex-col items-center w-full max-w-[440px]"
                     >
-                        {/* Title */}
-                        <h2
-                            className="mb-2 text-white drop-shadow-sm"
-                            style={{
-                                fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text"',
-                                fontSize: '26px',
-                                fontWeight: 500,
-                                letterSpacing: '-0.02em',
-                                lineHeight: 1.2,
-                            }}
-                        >
-                            {currentFeature.headline}
-                        </h2>
+                        {/* Eyebrow / Label */}
+                        {currentFeature.eyebrow && (
+                            <div className="mb-2 text-[11px] font-semibold tracking-[0.15em] text-yellow-500/80 uppercase">
+                                {currentFeature.eyebrow}
+                            </div>
+                        )}
 
-                        {/* Subtitle */}
-                        <p
-                            className="mb-6 antialiased"
-                            style={{
-                                fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text"',
-                                fontSize: '15px',
-                                fontWeight: 400,
-                                lineHeight: 1.5,
-                                color: 'rgba(255,255,255,0.75)',
-                                maxWidth: '380px'
-                            }}
-                        >
-                            {currentFeature.subtitle}
-                        </p>
+                        {/* Content Stack: Dimensions Matched to Standard Slide */}
+                        <div className="relative h-full w-full flex flex-col items-center justify-center">
 
-                        {/* Primary Action Button - Connect Calendar Style Alignment */}
-                        <motion.button
-                            onClick={handleActionClick}
-                            className={`
-                                group relative
-                                flex items-center justify-center gap-3
-                                px-10 py-2.5
-                                rounded-full
-                                text-[13px] font-medium
-                                transition-all duration-300 ease-out
-                                hover:brightness-125
-                                active:scale-[0.98]
-                                overflow-hidden
-                                cursor-pointer
-                            `}
-                            style={{
-                                minWidth: '220px', // Match the "Connected" ratio visually
-                                backgroundColor: isSupport
-                                    ? 'rgba(80, 20, 40, 0.35)'
-                                    : (isInterested ? 'rgba(255, 255, 255, 0.12)' : 'rgba(255, 255, 255, 0.08)'),
-                                backdropFilter: 'blur(14px)',
-                                WebkitBackdropFilter: 'blur(14px)',
-                                color: '#F4F6FA',
-                            }}
-                        >
-                            {/* Gradient Border (Connect Button Technique) */}
-                            <div
-                                className="absolute inset-0 rounded-full pointer-events-none transition-opacity duration-300 group-hover:opacity-80"
-                                style={{
-                                    padding: '1px',
-                                    background: isSupport
-                                        ? 'linear-gradient(to right, #FDA4AF, #F43F5E)'
-                                        : 'linear-gradient(to right, #FFFFFF, #A1A1AA)',
-                                    WebkitMask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
-                                    WebkitMaskComposite: 'xor',
-                                    maskComposite: 'exclude',
-                                    opacity: 0.6,
-                                }}
-                            />
+                            {/* Main Content Group */}
+                            <div className="flex flex-col items-center justify-center translate-y-2"> {/* Adjusted down per user request */}
 
-                            {/* Inner Highlight */}
-                            <div
-                                className="absolute inset-0 rounded-full pointer-events-none"
-                                style={{
-                                    boxShadow: 'inset 0 1px 0 0 rgba(255, 255, 255, 0.08)',
-                                }}
-                            />
-
-                            <AnimatePresence mode="wait" initial={false}>
-                                <motion.span
-                                    key={isInterested ? 'interested' : 'cta'}
-                                    initial={{ opacity: 0, y: isInterested ? 5 : -5 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    exit={{ opacity: 0, y: isInterested ? -5 : 5 }}
-                                    className="flex items-center gap-2.5 font-semibold relative z-10"
+                                {/* Title */}
+                                <h2
+                                    className="text-white drop-shadow-sm tracking-tight mb-1"
+                                    style={{
+                                        fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text"',
+                                        fontSize: isPremium ? '30px' : '26px', // Increased by ~15% (26 -> 30)
+                                        fontWeight: isPremium ? 600 : 500,
+                                        lineHeight: 1.1,
+                                        ...(isPremium ? {
+                                            backgroundImage: 'linear-gradient(180deg, #FFE8A3 0%, #D4AF37 100%)',
+                                            WebkitBackgroundClip: 'text',
+                                            WebkitTextFillColor: 'transparent',
+                                            textShadow: '0 2px 14px rgba(212, 175, 55, 0.25)',
+                                        } : {})
+                                    }}
                                 >
-                                    <span>
-                                        {isInterested && !isSupport
-                                            ? 'Interested'
-                                            : (currentFeature.actionLabel || 'Mark interest')
-                                        }
-                                    </span>
+                                    {currentFeature.headline}
+                                </h2>
 
-                                    {/* Bell Icon with conditional ringing animation */}
-                                    <motion.div
-                                        animate={isInterested ? {
-                                            rotate: [0, -10, 10, -10, 10, 0],
-                                        } : {}}
-                                        transition={isInterested ? {
-                                            duration: 0.5,
-                                            repeat: Infinity,
-                                            repeatDelay: 2,
-                                            ease: "easeInOut"
-                                        } : {}}
+                                {/* Subtitle */}
+                                <p
+                                    className="antialiased opacity-90 mb-3" // Reduced margin (was mb-5)
+                                    style={{
+                                        fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text"',
+                                        fontSize: isPremium ? '16px' : '15px', // Increased by ~15% (14 -> 16)
+                                        fontWeight: 400,
+                                        lineHeight: 1.3, // Slightly tighter line height
+                                        color: isPremium ? '#F5F5F7' : 'rgba(255,255,255,0.75)',
+                                        maxWidth: '360px'
+                                    }}
+                                >
+                                    {currentFeature.subtitle}
+                                </p>
+
+                                {/* Bullets - Replacing Button Area */}
+                                {currentFeature.bullets && (
+                                    <div className="flex flex-col gap-1 w-full max-w-[340px]">
+                                        {currentFeature.bullets.map((bullet, idx) => (
+                                            <div key={idx} className="flex items-center justify-center gap-2 px-2">
+                                                <div className="flex-shrink-0 flex items-center justify-center">
+                                                    <Check size={12} className="text-[#FFD700]" strokeWidth={2.5} />
+                                                </div>
+                                                <span
+                                                    className="text-[12.5px] text-white/95 leading-snug" // Slightly smaller to fit
+                                                    style={{ letterSpacing: '-0.01em' }}
+                                                >
+                                                    {bullet}
+                                                </span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Footer: Absolutely Positioned (Zero Height Impact) */}
+                            {currentFeature.footer && (
+                                <div className="absolute -bottom-10 w-full text-center pointer-events-none">
+                                    <p className="text-[11px] text-white/8 font-medium tracking-wide">
+                                        {currentFeature.footer}
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Primary Action Button - Hidden for Premium slide */}
+                        {!isPremium && (
+                            <motion.button
+                                onClick={handleActionClick}
+                                className={`
+                                    group relative
+                                    flex items-center justify-center gap-3
+                                    px-10 py-2.5
+                                    rounded-full
+                                    text-[13px] font-medium
+                                    transition-all duration-300 ease-out
+                                    hover:brightness-125
+                                    active:scale-[0.98]
+                                    overflow-hidden
+                                    cursor-pointer
+                                `}
+                                style={{
+                                    minWidth: '220px', // Match the "Connected" ratio visually
+                                    backgroundColor: isSupport
+                                        ? 'rgba(80, 20, 40, 0.35)'
+                                        : (isInterested ? 'rgba(255, 255, 255, 0.12)' : 'rgba(255, 255, 255, 0.08)'),
+                                    backdropFilter: 'blur(14px)',
+                                    WebkitBackdropFilter: 'blur(14px)',
+                                    color: '#F4F6FA',
+                                }}
+                            >
+                                {/* Gradient Border (Connect Button Technique) */}
+                                <div
+                                    className="absolute inset-0 rounded-full pointer-events-none transition-opacity duration-300 group-hover:opacity-80"
+                                    style={{
+                                        padding: '1px',
+                                        background: isSupport
+                                            ? 'linear-gradient(to right, #FDA4AF, #F43F5E)'
+                                            : 'linear-gradient(to right, #FFFFFF, #A1A1AA)',
+                                        WebkitMask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
+                                        WebkitMaskComposite: 'xor',
+                                        maskComposite: 'exclude',
+                                        opacity: 0.6,
+                                    }}
+                                />
+
+                                {/* Inner Highlight */}
+                                <div
+                                    className="absolute inset-0 rounded-full pointer-events-none"
+                                    style={{
+                                        boxShadow: 'inset 0 1px 0 0 rgba(255, 255, 255, 0.08)',
+                                    }}
+                                />
+
+                                <AnimatePresence mode="wait" initial={false}>
+                                    <motion.span
+                                        key={isInterested ? 'interested' : 'cta'}
+                                        initial={{ opacity: 0, y: isInterested ? 5 : -5 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        exit={{ opacity: 0, y: isInterested ? -5 : 5 }}
+                                        className="flex items-center gap-2.5 font-semibold relative z-10"
                                     >
-                                        <Bell
-                                            size={14}
-                                            className={`${isInterested ? 'text-blue-400' : 'opacity-80'}`}
-                                            fill={isInterested ? "currentColor" : "none"}
-                                        />
-                                    </motion.div>
-                                </motion.span>
-                            </AnimatePresence>
-                        </motion.button>
+                                        <span>
+                                            {isInterested && !isSupport
+                                                ? 'Interested'
+                                                : (currentFeature.actionLabel || 'Mark interest')
+                                            }
+                                        </span>
+
+                                        {/* Bell Icon with conditional ringing animation */}
+                                        <motion.div
+                                            animate={isInterested ? {
+                                                rotate: [0, -10, 10, -10, 10, 0],
+                                            } : {}}
+                                            transition={isInterested ? {
+                                                duration: 0.5,
+                                                repeat: Infinity,
+                                                repeatDelay: 2,
+                                                ease: "easeInOut"
+                                            } : {}}
+                                        >
+                                            <Bell
+                                                size={14}
+                                                className={`${isInterested ? 'text-blue-400' : 'opacity-80'}`}
+                                                fill={isInterested ? "currentColor" : "none"}
+                                            />
+                                        </motion.div>
+                                    </motion.span>
+                                </AnimatePresence>
+                            </motion.button>
+                        )}
                     </motion.div>
                 </AnimatePresence>
 

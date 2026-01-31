@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { X, Copy, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import nativelyIcon from './icon.png';
 
 // ============================================
 // Types
@@ -402,12 +403,16 @@ ${contextString}`;
                         onClick={(e) => e.stopPropagation()}
                     >
                         {/* Header with close button */}
-                        <div className="flex items-center justify-end px-4 py-3 gap-2 shrink-0">
+                        <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.05] shrink-0">
+                            <div className="flex items-center gap-2 text-[#636366]">
+                                <img src={nativelyIcon} className="w-3.5 h-3.5 opacity-50 grayscale" alt="logo" />
+                                <span className="text-[13px] font-medium">Search this meeting</span>
+                            </div>
                             <button
                                 onClick={handleClose}
-                                className="p-2 rounded-lg hover:bg-white/5 transition-colors group"
+                                className="p-2 transition-colors group"
                             >
-                                <X size={16} className="text-[#636366] group-hover:text-[#A4A4A7] transition-colors" />
+                                <X size={16} className="text-[#636366] group-hover:text-red-500 group-hover:drop-shadow-[0_0_8px_rgba(239,68,68,0.5)] transition-all duration-300" />
                             </button>
                         </div>
 

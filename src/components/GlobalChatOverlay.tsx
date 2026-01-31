@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { X, Copy, Check, Globe } from 'lucide-react';
+import { X, Copy, Check, Globe, ArrowUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import nativelyIcon from './icon.png';
 
 // ============================================
 // Types
@@ -117,6 +118,7 @@ const GlobalChatOverlay: React.FC<GlobalChatOverlayProps> = ({
     const [messages, setMessages] = useState<Message[]>([]);
     const [chatState, setChatState] = useState<ChatState>('idle');
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    const [query, setQuery] = useState('');
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const chatWindowRef = useRef<HTMLDivElement>(null);
@@ -170,6 +172,14 @@ const GlobalChatOverlay: React.FC<GlobalChatOverlayProps> = ({
             setErrorMessage(null);
         }, 140);
     }, [onClose]);
+
+    const handleInputKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter' && query.trim()) {
+            e.preventDefault();
+            submitQuestion(query);
+            setQuery('');
+        }
+    };
 
     // Submit question using global RAG
     const submitQuestion = useCallback(async (question: string) => {
@@ -251,7 +261,7 @@ const GlobalChatOverlay: React.FC<GlobalChatOverlayProps> = ({
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
                     transition={{ duration: 0.16 }}
-                    className="absolute inset-0 z-40 flex flex-col"
+                    className="absolute inset-0 z-40 flex flex-col justify-end"
                     onClick={handleBackdropClick}
                 >
                     {/* Backdrop with blur */}
@@ -266,29 +276,31 @@ const GlobalChatOverlay: React.FC<GlobalChatOverlayProps> = ({
                     {/* Chat Window */}
                     <motion.div
                         ref={chatWindowRef}
-                        initial={{ scale: 0.98, opacity: 0, y: 20 }}
-                        animate={{ scale: 1, opacity: 1, y: 0 }}
-                        exit={{ scale: 0.98, opacity: 0, y: 20 }}
-                        transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-                        className="relative mx-auto w-full max-w-[680px] mt-12 mb-24 bg-[#121214] rounded-2xl border border-white/[0.08] shadow-2xl overflow-hidden flex flex-col flex-1"
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: "85vh", opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{
+                            height: { type: "spring", stiffness: 300, damping: 30, mass: 0.8 },
+                            opacity: { duration: 0.2 }
+                        }}
+                        className="relative mx-auto w-full max-w-[680px] mb-0 bg-[#121214] rounded-t-[24px] border-t border-x border-white/[0.08] shadow-2xl overflow-hidden flex flex-col"
                         onClick={(e) => e.stopPropagation()}
                     >
-                        {/* Header */}
                         <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.05] shrink-0">
                             <div className="flex items-center gap-2 text-[#636366]">
-                                <Globe size={14} />
+                                <img src={nativelyIcon} className="w-3.5 h-3.5 opacity-50 grayscale" alt="logo" />
                                 <span className="text-[13px] font-medium">Search all meetings</span>
                             </div>
                             <button
                                 onClick={handleClose}
-                                className="p-2 rounded-lg hover:bg-white/5 transition-colors group"
+                                className="p-2 transition-colors group"
                             >
-                                <X size={16} className="text-[#636366] group-hover:text-[#A4A4A7] transition-colors" />
+                                <X size={16} className="text-[#636366] group-hover:text-red-500 group-hover:drop-shadow-[0_0_8px_rgba(239,68,68,0.5)] transition-all duration-300" />
                             </button>
                         </div>
 
                         {/* Messages area - scrollable */}
-                        <div className="flex-1 overflow-y-auto px-6 py-4 custom-scrollbar">
+                        <div className="flex-1 overflow-y-auto px-6 py-4 pb-32 custom-scrollbar">
                             {messages.map((msg) => (
                                 msg.role === 'user'
                                     ? <UserMessage key={msg.id} content={msg.content} />
@@ -308,6 +320,33 @@ const GlobalChatOverlay: React.FC<GlobalChatOverlayProps> = ({
                             )}
 
                             <div ref={messagesEndRef} />
+                        </div>
+
+                        {/* Floating Footer (Ask Bar) */}
+                        <div className="absolute bottom-0 left-0 right-0 p-6 flex justify-center z-50 pointer-events-none">
+                            <div className="w-full max-w-[440px] relative group pointer-events-auto">
+                                {/* Dark Glass Effect Input */}
+                                <input
+                                    type="text"
+                                    value={query}
+                                    onChange={(e) => setQuery(e.target.value)}
+                                    onKeyDown={handleInputKeyDown}
+                                    placeholder="Ask me anything..."
+                                    className="w-full pl-5 pr-12 py-3 bg-[#1C1C1E]/20 backdrop-blur-xl border border-white/[0.08] rounded-full text-sm text-[#E9E9E9] placeholder-text-tertiary/70 focus:outline-none transition-all shadow-xl"
+                                />
+                                <button
+                                    onClick={() => {
+                                        if (query.trim()) {
+                                            submitQuestion(query);
+                                            setQuery('');
+                                        }
+                                    }}
+                                    className={`absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full transition-all duration-200 border border-white/5 ${query.trim() ? 'bg-white text-black hover:scale-105' : 'bg-[#2C2C2E] text-[#E9E9E9] hover:bg-[#3A3A3C]'
+                                        }`}
+                                >
+                                    <ArrowUp size={16} className="transform rotate-45" />
+                                </button>
+                            </div>
                         </div>
                     </motion.div>
                 </motion.div>

@@ -603,7 +603,7 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
                                                         {/* Time & Duration Section */}
                                                         <div className="flex items-center gap-4">
                                                             {m.title === 'Processing...' ? (
-                                                                <div className="flex items-center gap-2">
+                                                                <div className="flex items-center gap-2 transition-all duration-200 ease-out group-hover:opacity-0 group-hover:translate-x-2 delayed-hover-exit">
                                                                     <RefreshCw size={12} className="animate-spin text-blue-500" />
                                                                     <span className="text-xs text-blue-500 font-medium">Finalizing...</span>
                                                                 </div>

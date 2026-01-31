@@ -34,6 +34,18 @@ impl MicrophoneStream {
         let mut engine = av::AudioEngine::new();
         let mut input_node = engine.input_node();
         
+        // Disable VPIO on Input Node
+        if let Ok(_) = input_node.set_vp_enabled(false) {
+            println!("[Microphone] Input: Voice Processing (VPIO) disabled");
+        }
+        
+        // Explicitly disable AGC and Bypass (Double safety)
+        input_node.set_vp_agc_enabled(false);
+        input_node.set_vp_bypassed(true);
+        
+        // REMOVED Output Node logic to prevent "Voice Chat" profile trigger
+        // let mut output_node = engine.output_node(); ...
+        
         // --- DEVICE SELECTION LOGIC (Simplified) ---
         if let Some(req_id) = _device_id.as_ref() {
              if req_id != "default" {
@@ -70,14 +82,18 @@ impl MicrophoneStream {
         let producer_clone = producer.clone();
         
         let block = move |buffer: &av::AudioPcmBuf, _time: &av::AudioTime| {
+            println!("[Microphone] Tap callback executed");
             let mut producer = producer_clone.lock().unwrap();
             
             if let Some(data) = buffer.data_f32_at(0) {
+                 // println!("[Microphone] Tap received {} samples", data.len());
                  let _ = producer.push_slice(data);
+            } else {
+                 println!("[Microphone] Buffer empty or format mismatch");
             }
         };
 
-        let _ = input_node.install_tap_on_bus(0, buffer_size, Some(&input_format), block);
+        input_node.install_tap_on_bus(0, buffer_size, Some(&input_format), block).expect("Failed to install tap");
 
         engine.prepare();
         println!("[Microphone] Engine Prepared");
@@ -99,7 +115,8 @@ impl MicrophoneStream {
     }
 
     pub fn pause(&mut self) -> Result<()> {
-        self.engine.pause();
+        // use pause() for seamless toggle (keeps hardware active, instantaneous)
+        self.engine.pause(); 
         Ok(())
     }
 

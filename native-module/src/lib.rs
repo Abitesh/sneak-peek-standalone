@@ -78,7 +78,14 @@ impl SystemAudioCapture {
             println!("[SystemAudioCapture] Creating audio tap now (lazy init)...");
             match speaker::SpeakerInput::new(self.device_id.take()) {
                 Ok(i) => i,
-                Err(e) => return Err(napi::Error::from_reason(format!("Failed to create speaker input: {}", e))),
+                Err(e) => {
+                     println!("[SystemAudioCapture] Failed to create input with device ID ({}). Falling back to default.", e);
+                     // Fallback to default
+                     match speaker::SpeakerInput::new(None) {
+                         Ok(i) => i,
+                         Err(e2) => return Err(napi::Error::from_reason(format!("Failed to create speaker input (default): {}", e2))),
+                     }
+                }
             }
         };
         
@@ -127,6 +134,7 @@ impl SystemAudioCapture {
                     for speech in speech_chunks {
                         if !speech.is_empty() {
                             // NonBlocking call to JS
+                            println!("[SystemAudioCapture] Sending chunk: {} bytes", speech.len());
                             tsfn.call(speech, ThreadsafeFunctionCallMode::NonBlocking);
                         }
                     }
@@ -260,6 +268,7 @@ impl MicrophoneCapture {
                     let speech_chunks = vad.process(chunk);
                     for speech_chunk in speech_chunks {
                         if !speech_chunk.is_empty() {
+                           println!("[MicrophoneCapture] Sending chunk: {} bytes", speech_chunk.len());
                            tsfn.call(speech_chunk, ThreadsafeFunctionCallMode::NonBlocking);
                         }
                     }

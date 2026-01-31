@@ -129,7 +129,8 @@ export class AppState {
     this.setupIntelligenceEvents()
 
     // --- NEW SYSTEM AUDIO PIPELINE (SOX + NODE GOOGLE STT) ---
-    this.setupSystemAudioPipeline()
+    // LAZY INIT: Do not setup pipeline here to prevent launch volume surge.
+    // this.setupSystemAudioPipeline()
 
     // Initialize Auto-Updater
     this.setupAutoUpdater()
@@ -219,20 +220,111 @@ export class AppState {
   private googleSTT_User: GoogleSTT | null = null; // User
 
   private setupSystemAudioPipeline(): void {
+    // REMOVED EARLY RETURN: if (this.systemAudioCapture && this.microphoneCapture) return; // Already initialized
+
     try {
-      this.systemAudioCapture = new SystemAudioCapture();
-      this.microphoneCapture = new MicrophoneCapture();
-      this.googleSTT = new GoogleSTT();
-      this.googleSTT_User = new GoogleSTT();
+      // 1. Initialize Captures if missing
+      // If they already exist (e.g. from reconfigureAudio), they are already wired to write to this.googleSTT/User
+      if (!this.systemAudioCapture) {
+        this.systemAudioCapture = new SystemAudioCapture();
+        // Wire Capture -> STT
+        this.systemAudioCapture.on('data', (chunk: Buffer) => {
+          this.googleSTT?.write(chunk);
+        });
+        this.systemAudioCapture.on('error', (err: Error) => {
+          console.error('[Main] SystemAudioCapture Error:', err);
+        });
+      }
+
+      if (!this.microphoneCapture) {
+        this.microphoneCapture = new MicrophoneCapture();
+        // Wire Capture -> STT
+        this.microphoneCapture.on('data', (chunk: Buffer) => {
+          this.googleSTT_User?.write(chunk);
+        });
+        this.microphoneCapture.on('error', (err: Error) => {
+          console.error('[Main] MicrophoneCapture Error:', err);
+        });
+      }
+
+      // 2. Initialize STT Services if missing
+      if (!this.googleSTT) {
+        this.googleSTT = new GoogleSTT();
+        // Wire Transcript Events
+        this.googleSTT.on('transcript', (segment: { text: string, isFinal: boolean, confidence: number }) => {
+          if (!this.isMeetingActive) {
+            // console.log('[Main] Ignored transcript (Meeting inactive):', segment.text.substring(0, 50));
+            return;
+          }
+
+          this.intelligenceManager.handleTranscript({
+            speaker: 'interviewer',
+            text: segment.text,
+            timestamp: Date.now(),
+            final: segment.isFinal,
+            confidence: segment.confidence
+          });
+
+          const helper = this.getWindowHelper();
+          const payload = {
+            speaker: 'interviewer',
+            text: segment.text,
+            timestamp: Date.now(),
+            final: segment.isFinal,
+            confidence: segment.confidence
+          };
+          helper.getLauncherWindow()?.webContents.send('native-audio-transcript', payload);
+          helper.getOverlayWindow()?.webContents.send('native-audio-transcript', payload);
+        });
+
+        this.googleSTT.on('error', (err: Error) => {
+          console.error('[Main] GoogleSTT (Interviewer) Error:', err);
+        });
+      }
+
+      if (!this.googleSTT_User) {
+        this.googleSTT_User = new GoogleSTT();
+        // Wire Transcript Events
+        this.googleSTT_User.on('transcript', (segment: { text: string, isFinal: boolean, confidence: number }) => {
+          if (!this.isMeetingActive) {
+            // console.log('[Main] Ignored transcript (Meeting inactive):', segment.text.substring(0, 50));
+            return;
+          }
+
+          this.intelligenceManager.handleTranscript({
+            speaker: 'user', // Identified as User
+            text: segment.text,
+            timestamp: Date.now(),
+            final: segment.isFinal,
+            confidence: segment.confidence
+          });
+
+          // Forward User transcript to UI too
+          const helper = this.getWindowHelper();
+          const payload = {
+            speaker: 'user',
+            text: segment.text,
+            timestamp: Date.now(),
+            final: segment.isFinal,
+            confidence: segment.confidence
+          };
+          helper.getLauncherWindow()?.webContents.send('native-audio-transcript', payload);
+          helper.getOverlayWindow()?.webContents.send('native-audio-transcript', payload);
+        });
+
+        this.googleSTT_User.on('error', (err: Error) => {
+          console.error('[Main] GoogleSTT (User) Error:', err);
+        });
+      }
 
       // --- CRITICAL FIX: SYNC SAMPLE RATES ---
+      // Always sync rates, even if just initialized, to ensure consistency
 
       // 1. Sync System Audio Rate
       const sysRate = this.systemAudioCapture?.getSampleRate() || 16000;
-      console.log(`[Main] Configuring Interviewer STT to ${sysRate}Hz (Mono check)`);
+      console.log(`[Main] Configuring Interviewer STT to ${sysRate}Hz`);
       this.googleSTT?.setSampleRate(sysRate);
-      // Assuming Mono for now as per Rust implementation - if we suspect stereo we need to add getChannels() to Rust
-      this.googleSTT?.setAudioChannelCount(1);
+      this.googleSTT?.setAudioChannelCount(1); // Assuming Mono
 
       // 2. Sync Mic Rate
       const micRate = this.microphoneCapture?.getSampleRate() || 16000;
@@ -240,88 +332,7 @@ export class AppState {
       this.googleSTT_User?.setSampleRate(micRate);
       this.googleSTT_User?.setAudioChannelCount(1);
 
-      // --- Wire Capture -> STT (System Audio -> Interviewer) ---
-      this.systemAudioCapture?.on('data', (chunk: Buffer) => {
-        this.googleSTT?.write(chunk);
-      });
-
-      this.systemAudioCapture?.on('error', (err: Error) => {
-        console.error('[Main] SystemAudioCapture Error:', err);
-      });
-
-      this.googleSTT?.on('transcript', (segment: { text: string, isFinal: boolean, confidence: number }) => {
-        if (!this.isMeetingActive) {
-          console.log('[Main] Ignored transcript (Meeting inactive):', segment.text.substring(0, 50));
-          return;
-        }
-
-        this.intelligenceManager.handleTranscript({
-          speaker: 'interviewer',
-          text: segment.text,
-          timestamp: Date.now(),
-          final: segment.isFinal,
-          confidence: segment.confidence
-        });
-
-        const helper = this.getWindowHelper();
-        const payload = {
-          speaker: 'interviewer',
-          text: segment.text,
-          timestamp: Date.now(),
-          final: segment.isFinal,
-          confidence: segment.confidence
-        };
-        helper.getLauncherWindow()?.webContents.send('native-audio-transcript', payload);
-        helper.getOverlayWindow()?.webContents.send('native-audio-transcript', payload);
-      });
-
-      this.googleSTT?.on('error', (err: Error) => {
-        console.error('[Main] GoogleSTT (Interviewer) Error:', err);
-      });
-
-
-      // --- Wire Capture -> STT (Microphone -> User) ---
-      this.microphoneCapture?.on('data', (chunk: Buffer) => {
-        // console.log(`[Main] Mic data: ${chunk.length}`);
-        this.googleSTT_User?.write(chunk);
-      });
-
-      this.microphoneCapture?.on('error', (err: Error) => {
-        console.error('[Main] MicrophoneCapture Error:', err);
-      });
-
-      this.googleSTT_User?.on('transcript', (segment: { text: string, isFinal: boolean, confidence: number }) => {
-        if (!this.isMeetingActive) {
-          console.log('[Main] Ignored transcript (Meeting inactive):', segment.text.substring(0, 50));
-          return;
-        }
-
-        this.intelligenceManager.handleTranscript({
-          speaker: 'user', // Identified as User
-          text: segment.text,
-          timestamp: Date.now(),
-          final: segment.isFinal,
-          confidence: segment.confidence
-        });
-
-        // Forward User transcript to UI too
-        const helper = this.getWindowHelper();
-        const payload = {
-          speaker: 'user',
-          text: segment.text,
-          timestamp: Date.now(),
-          final: segment.isFinal,
-          confidence: segment.confidence
-        };
-        helper.getLauncherWindow()?.webContents.send('native-audio-transcript', payload);
-        helper.getOverlayWindow()?.webContents.send('native-audio-transcript', payload);
-      });
-
-      this.googleSTT_User?.on('error', (err: Error) => {
-        console.error('[Main] GoogleSTT (User) Error:', err);
-      });
-
-      console.log('[Main] Full Audio Pipeline (System + Mic) Initialized (Paused)');
+      console.log('[Main] Full Audio Pipeline (System + Mic) Initialized (Ready)');
 
     } catch (err) {
       console.error('[Main] Failed to setup System Audio Pipeline:', err);
@@ -465,6 +476,7 @@ export class AppState {
 
   public async startMeeting(metadata?: any): Promise<void> {
     console.log('[Main] Starting Meeting...', metadata);
+
     this.isMeetingActive = true;
     if (metadata) {
       this.intelligenceManager.setMeetingMetadata(metadata);
@@ -478,6 +490,9 @@ export class AppState {
     // Emit session reset to clear UI state
     this.getWindowHelper().getOverlayWindow()?.webContents.send('session-reset');
     this.getWindowHelper().getLauncherWindow()?.webContents.send('session-reset');
+
+    // LAZY INIT: Ensure pipeline is ready (if not reconfigured above)
+    this.setupSystemAudioPipeline();
 
     // 3. Start System Audio
     this.systemAudioCapture?.start();

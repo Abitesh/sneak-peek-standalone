@@ -66,6 +66,7 @@ impl sc::stream::OutputImpl for AudioHandler {
                      unsafe {
                          // Push data to ring buffer
                          let slice = std::slice::from_raw_parts(data_ptr, float_count);
+                         println!("[Speaker] Tap received {} samples", slice.len());
                          let _ = inner.producer.push_slice(slice);
                      }
                  }
