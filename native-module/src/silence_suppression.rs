@@ -4,13 +4,13 @@
 // 1. Google STT requires timing continuity - never send gaps
 // 2. During silence, send keepalive frames every 100ms
 // 3. During speech, send ALL frames immediately with NO delay
-// 4. Hangover is for cost savings only, NOT for first-word accuracy
+// 4. Hangover is f.  or cost savings only, NOT for first-word accuracy
 //
 // LATENCY BUDGET:
 // - Speech onset: 0ms delay (immediate)
 // - Hangover: Only affects AFTER speech ends (no latency impact)
 
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant};  // Added for timing
 
 /// Configuration for silence suppression
 /// Optimized for low latency
