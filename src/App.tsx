@@ -32,9 +32,9 @@ const App: React.FC = () => {
       let outputDeviceId = localStorage.getItem('preferredOutputDeviceId');
       const useLegacyAudio = localStorage.getItem('useLegacyAudioBackend') === 'true';
 
-      // Override output device ID to force SCK fallback if legacy mode is enabled
+      // Override output device ID to force SCK if experimental mode is enabled
       if (useLegacyAudio) {
-        console.log("[App] Legacy Audio Backend (SCK) enabled by user preference.");
+        console.log("[App] Experimental: ScreenCaptureKit API enabled by user preference.");
         outputDeviceId = "sck";
       }
 

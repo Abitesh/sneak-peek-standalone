@@ -772,11 +772,11 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
 
                                             <div className="h-px bg-border-subtle my-4" />
 
-                                            {/* Legacy Backend Toggle */}
+                                            {/* Experimental ScreenCaptureKit Toggle */}
                                             <div className="flex items-center justify-between">
                                                 <div>
-                                                    <h3 className="text-sm font-bold text-text-primary">Legacy Audio Backend</h3>
-                                                    <p className="text-xs text-text-secondary mt-0.5">Use ScreenCaptureKit instead of CoreAudio Tap (May show orange dot)</p>
+                                                    <h3 className="text-sm font-bold text-text-primary">Experimental: ScreenCaptureKit API</h3>
+                                                    <p className="text-xs text-text-secondary mt-0.5">Use ScreenCaptureKit instead of CoreAudio Tap (Shows orange recording dot)</p>
                                                 </div>
                                                 <div
                                                     onClick={() => {
