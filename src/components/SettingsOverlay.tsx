@@ -121,6 +121,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
     const [selectedInput, setSelectedInput] = useState('');
     const [selectedOutput, setSelectedOutput] = useState('');
     const [micLevel, setMicLevel] = useState(0);
+    const [useLegacyAudio, setUseLegacyAudio] = useState(false);
 
     const [apiKey, setApiKey] = useState('');
     const [groqApiKey, setGroqApiKey] = useState('');
@@ -238,6 +239,10 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                 }
             };
             loadDevices();
+
+            // Load Legacy Audio pref
+            const savedLegacy = localStorage.getItem('useLegacyAudioBackend') === 'true';
+            setUseLegacyAudio(savedLegacy);
 
             // Load Calendar Status
             if (window.electronAPI?.getCalendarStatus) {
@@ -763,6 +768,26 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                                 >
                                                     <Speaker size={12} /> Test Sound
                                                 </button>
+                                            </div>
+
+                                            <div className="h-px bg-border-subtle my-4" />
+
+                                            {/* Legacy Backend Toggle */}
+                                            <div className="flex items-center justify-between">
+                                                <div>
+                                                    <h3 className="text-sm font-bold text-text-primary">Legacy Audio Backend</h3>
+                                                    <p className="text-xs text-text-secondary mt-0.5">Use ScreenCaptureKit instead of CoreAudio Tap (May show orange dot)</p>
+                                                </div>
+                                                <div
+                                                    onClick={() => {
+                                                        const newState = !useLegacyAudio;
+                                                        setUseLegacyAudio(newState);
+                                                        window.localStorage.setItem('useLegacyAudioBackend', newState ? 'true' : 'false');
+                                                    }}
+                                                    className={`w-11 h-6 rounded-full relative cursor-pointer transition-colors ${useLegacyAudio ? 'bg-accent-primary' : 'bg-bg-toggle-switch border border-border-muted'}`}
+                                                >
+                                                    <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${useLegacyAudio ? 'translate-x-5' : 'translate-x-0'}`} />
+                                                </div>
                                             </div>
                                         </div>
                                     </div>

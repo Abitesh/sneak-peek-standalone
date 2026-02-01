@@ -29,7 +29,14 @@ const App: React.FC = () => {
   const handleStartMeeting = async () => {
     try {
       const inputDeviceId = localStorage.getItem('preferredInputDeviceId');
-      const outputDeviceId = localStorage.getItem('preferredOutputDeviceId');
+      let outputDeviceId = localStorage.getItem('preferredOutputDeviceId');
+      const useLegacyAudio = localStorage.getItem('useLegacyAudioBackend') === 'true';
+
+      // Override output device ID to force SCK fallback if legacy mode is enabled
+      if (useLegacyAudio) {
+        console.log("[App] Legacy Audio Backend (SCK) enabled by user preference.");
+        outputDeviceId = "sck";
+      }
 
       const result = await window.electronAPI.startMeeting({
         audio: { inputDeviceId, outputDeviceId }

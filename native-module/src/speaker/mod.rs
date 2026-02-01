@@ -1,6 +1,10 @@
 // removed unused anyhow::Result
 
 #[cfg(target_os = "macos")]
+mod core_audio;
+#[cfg(target_os = "macos")]
+mod sck;
+#[cfg(target_os = "macos")]
 pub mod macos;
 #[cfg(target_os = "macos")]
 #[cfg(target_os = "macos")]

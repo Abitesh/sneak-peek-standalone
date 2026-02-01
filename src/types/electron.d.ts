@@ -71,7 +71,7 @@ export interface ElectronAPI {
   resetIntelligence: () => Promise<{ success: boolean; error?: string }>
 
   // Meeting Lifecycle
-  startMeeting: () => Promise<{ success: boolean; error?: string }>
+  startMeeting: (metadata?: any) => Promise<{ success: boolean; error?: string }>
   endMeeting: () => Promise<{ success: boolean; error?: string }>
   getRecentMeetings: () => Promise<Array<{ id: string; title: string; date: string; duration: string; summary: string }>>
   getMeetingDetails: (id: string) => Promise<any>
