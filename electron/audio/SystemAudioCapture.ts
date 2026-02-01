@@ -67,10 +67,24 @@ export class SystemAudioCapture extends EventEmitter {
                 // The native module sends raw PCM bytes (Uint8Array)
                 if (chunk && chunk.length > 0) {
                     const buffer = Buffer.from(chunk);
+
+                    // DEBUG: Check if audio data is valid
+                    // We interpret the bytes as Int16 (linear 16-bit PCM)
+                    const samples = new Int16Array(buffer.buffer, buffer.byteOffset, buffer.length / 2);
+
+                    // Calculate RMS of a subset to verify signal presence
+                    let sumSquares = 0;
+                    const limit = Math.min(samples.length, 100);
+                    for (let i = 0; i < limit; i++) {
+                        sumSquares += samples[i] * samples[i];
+                    }
+                    const rms = Math.sqrt(sumSquares / limit);
+
                     if (Math.random() < 0.05) {
                         const prefix = buffer.slice(0, 10).toString('hex');
-                        console.log(`[SystemAudioCapture] Chunk: ${buffer.length}b, Rate: ${this.detectedSampleRate}, Data(hex): ${prefix}...`);
+                        console.log(`[SystemAudioCapture-JS] Chunk: ${buffer.length}b, RMS: ${rms.toFixed(1)}, FirstSample: ${samples[0]}, Data(hex): ${prefix}...`);
                     }
+
                     this.emit('data', buffer);
                 }
             });

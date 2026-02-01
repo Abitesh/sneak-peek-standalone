@@ -102,7 +102,7 @@ impl SystemAudioCapture {
         
         self.stream = Some(stream);
 
-        // DSP thread with silence suppression
+        // DSP thread with silence suppression and AGC
         self.capture_thread = Some(thread::spawn(move || {
             let mut resampler = StreamingResampler::new(input_sample_rate, 16000.0);
             let mut frame_buffer: Vec<i16> = Vec::with_capacity(FRAME_SAMPLES * 4);
@@ -112,8 +112,15 @@ impl SystemAudioCapture {
             let mut suppressor = SilenceSuppressor::new(
                 SilenceSuppressionConfig::for_system_audio()
             );
+            
+            // Automatic Gain Control for system audio
+            let target_rms: f32 = 0.1; // Target RMS level (10% of full scale)
+            let max_gain: f32 = 50.0;  // Maximum amplification (50x = ~34dB boost)
+            let mut current_gain: f32 = 10.0; // Start with 10x gain
+            let gain_smoothing: f32 = 0.95; // Smooth gain changes
+            let mut agc_update_counter = 0u32;
 
-            println!("[SystemAudioCapture] DSP thread started (suppression active)");
+            println!("[SystemAudioCapture] DSP thread started (AGC + suppression active)");
 
             loop {
                 if stop_signal.load(Ordering::Relaxed) {
@@ -121,25 +128,65 @@ impl SystemAudioCapture {
                 }
                 
                 // 1. Drain ring buffer (lock-free)
-                let mut batch_count = 0;
+                let mut _batch_count = 0;
                 while let Some(sample) = consumer.try_pop() {
                     raw_batch.push(sample);
-                    batch_count += 1;
+                    _batch_count += 1;
                     if raw_batch.len() >= 480 {
                         break;
                     }
                 }
                 
-                // 2. Resample
+                // 2. Apply AGC to raw batch BEFORE resampling
+                // 2. AGC DISABLED FOR DEBUGGING
+                /*
+                if !raw_batch.is_empty() {
+                    // Calculate RMS of current batch
+                    let sum_squares: f32 = raw_batch.iter()
+                        .step_by(4)
+                        .map(|&s| s * s)
+                        .sum();
+                    let batch_rms = (sum_squares / (raw_batch.len() / 4) as f32).sqrt();
+                    
+                    // Update gain adaptively (but not too aggressively)
+                    if batch_rms > 0.001 { // Only adjust if there's actual signal
+                        let desired_gain = target_rms / batch_rms;
+                        let target_gain = desired_gain.clamp(1.0, max_gain);
+                        current_gain = gain_smoothing * current_gain + (1.0 - gain_smoothing) * target_gain;
+                    }
+                    
+                    // Apply gain with soft clipping
+                    for sample in raw_batch.iter_mut() {
+                        let amplified = *sample * current_gain;
+                        // Soft clip to prevent harsh distortion
+                        *sample = if amplified.abs() > 0.9 {
+                            amplified.signum() * (0.9 + 0.1 * (1.0 - (-10.0 * (amplified.abs() - 0.9)).exp()))
+                        } else {
+                            amplified
+                        };
+                    }
+                    
+                    // Debug logging
+                    agc_update_counter += 1;
+                    if agc_update_counter % 100 == 0 {
+                        println!("[SystemAudioCapture-AGC] RMS: {:.4} -> Gain: {:.1}x", batch_rms, current_gain);
+                    }
+                }
+                */
+                
+                // 3. Resample
                 if !raw_batch.is_empty() {
                     let resampled = resampler.resample(&raw_batch);
                     frame_buffer.extend(resampled);
                     raw_batch.clear();
                 }
 
-                // 3. Process frames with Silence Suppression
+                // 3. Process frames (SUPPRESSION DISABLED FOR DEBUGGING)
                 while frame_buffer.len() >= FRAME_SAMPLES {
                     let frame: Vec<i16> = frame_buffer.drain(0..FRAME_SAMPLES).collect();
+                    // Just send everything directly
+                    tsfn.call(frame, ThreadsafeFunctionCallMode::NonBlocking);
+                    /*
                     match suppressor.process(&frame) {
                         FrameAction::Send(audio) => {
                              tsfn.call(audio, ThreadsafeFunctionCallMode::NonBlocking);
@@ -151,6 +198,7 @@ impl SystemAudioCapture {
                             // Do nothing (bandwidth saving)
                         }
                     }
+                    */
                 }
                 
                 // 4. Short sleep

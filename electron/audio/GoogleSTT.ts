@@ -12,9 +12,12 @@ import * as path from 'path';
  * - Parses intermediate and final results.
  */
 export class GoogleSTT extends EventEmitter {
-    private client: SpeechClient;
+    private client: SpeechClient | null = null;
     private stream: any = null; // Stream type is complex in google-cloud libs
     private isStreaming = false;
+    private isConnecting = false;
+    private dataBuffer: Buffer[] = [];
+    private streamLabel: string;
 
     // Config
     private encoding = 'LINEAR16' as const;
@@ -22,8 +25,9 @@ export class GoogleSTT extends EventEmitter {
     private audioChannelCount = 1; // Default to Mono
     private languageCode = 'en-US';
 
-    constructor() {
+    constructor(label: string = 'STT') {
         super();
+        this.streamLabel = label;
         // ... (credentials setup) ...
         const path = require('path');
         const dotenvPath = path.resolve(__dirname, '../../.env');
@@ -95,7 +99,7 @@ export class GoogleSTT extends EventEmitter {
     }
 
     private buffer: Buffer[] = [];
-    private isConnecting = false;
+    // private isConnecting = false; // Removed duplicate
 
     public write(audioData: Buffer): void {
         if (!this.isStreaming || !this.stream) {
@@ -115,9 +119,9 @@ export class GoogleSTT extends EventEmitter {
         }
 
         try {
-            // Debug log every ~50th write to avoid spam
-            if (Math.random() < 0.02) {
-                console.log(`[GoogleSTT] Writing ${audioData.length} bytes to stream`);
+            // Debug log every ~10th write for better visibility
+            if (Math.random() < 0.1) {
+                console.log(`[GoogleSTT-${this.streamLabel}] Writing ${audioData.length} bytes to stream`);
             }
 
             if (this.stream.command && this.stream.command.writable) {
@@ -125,10 +129,10 @@ export class GoogleSTT extends EventEmitter {
             } else if (this.stream.writable) {
                 this.stream.write(audioData);
             } else {
-                console.warn('[GoogleSTT] Stream not writable!');
+                console.warn(`[GoogleSTT-${this.streamLabel}] Stream not writable!`);
             }
         } catch (err) {
-            console.error('[GoogleSTT] Safe write failed:', err);
+            console.error(`[GoogleSTT-${this.streamLabel}] Safe write failed:`, err);
             this.isStreaming = false;
         }
     }
@@ -142,7 +146,7 @@ export class GoogleSTT extends EventEmitter {
                 try {
                     this.stream.write(data);
                 } catch (e) {
-                    console.error('[GoogleSTT] Failed to flush buffer chunk:', e);
+                    console.error(`[GoogleSTT-${this.streamLabel}] Failed to flush buffer chunk:`, e);
                 }
             }
         }
@@ -166,12 +170,23 @@ export class GoogleSTT extends EventEmitter {
                 interimResults: true,
             })
             .on('error', (err: Error) => {
-                console.error('[GoogleSTT] Stream error:', err);
+                console.error(`[GoogleSTT-${this.streamLabel}] Stream error:`, err);
                 this.emit('error', err);
                 this.isConnecting = false;
             })
             .on('data', (data: any) => {
-                // ... (existing data handler)
+                // DEBUG: Log ALL responses from Google, even empty ones
+                const hasResults = data.results && data.results.length > 0;
+                const hasAlternatives = hasResults && data.results[0].alternatives && data.results[0].alternatives.length > 0;
+
+                if (!hasResults) {
+                    // Log that we received data but no results (happens occasionally)
+                    if (Math.random() < 0.1) {
+                        console.log(`[GoogleSTT-${this.streamLabel}] Received data but no results`);
+                    }
+                    return;
+                }
+
                 if (data.results[0] && data.results[0].alternatives[0]) {
                     const result = data.results[0];
                     const alt = result.alternatives[0];
@@ -179,6 +194,7 @@ export class GoogleSTT extends EventEmitter {
                     const isFinal = result.isFinal;
 
                     if (transcript) {
+                        console.log(`[GoogleSTT-${this.streamLabel}] Transcript: "${transcript}" (final: ${isFinal})`);
                         this.emit('transcript', {
                             text: transcript,
                             isFinal,
@@ -194,6 +210,6 @@ export class GoogleSTT extends EventEmitter {
         this.isConnecting = false;
         this.flushBuffer();
 
-        console.log('[GoogleSTT] Stream created. Waiting for events...');
+        console.log(`[GoogleSTT-${this.streamLabel}] Stream created. Waiting for events...`);
     }
 }

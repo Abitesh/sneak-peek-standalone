@@ -249,7 +249,7 @@ export class AppState {
 
       // 2. Initialize STT Services if missing
       if (!this.googleSTT) {
-        this.googleSTT = new GoogleSTT();
+        this.googleSTT = new GoogleSTT('System');
         // Wire Transcript Events
         this.googleSTT.on('transcript', (segment: { text: string, isFinal: boolean, confidence: number }) => {
           if (!this.isMeetingActive) {
@@ -283,7 +283,7 @@ export class AppState {
       }
 
       if (!this.googleSTT_User) {
-        this.googleSTT_User = new GoogleSTT();
+        this.googleSTT_User = new GoogleSTT('Microphone');
         // Wire Transcript Events
         this.googleSTT_User.on('transcript', (segment: { text: string, isFinal: boolean, confidence: number }) => {
           if (!this.isMeetingActive) {
@@ -356,7 +356,10 @@ export class AppState {
       this.googleSTT?.setSampleRate(rate);
 
       this.systemAudioCapture.on('data', (chunk: Buffer) => {
-        // console.log('[Main] SysAudio chunk', chunk.length);
+        // DEBUG: Log that data is being forwarded
+        if (Math.random() < 0.1) {
+          console.log(`[Main] Forwarding SysAudio ${chunk.length}b to googleSTT (exists: ${!!this.googleSTT})`);
+        }
         this.googleSTT?.write(chunk);
       });
       this.systemAudioCapture.on('error', (err: Error) => {

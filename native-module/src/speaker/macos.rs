@@ -16,25 +16,21 @@ enum BackendInput {
 
 impl SpeakerInput {
     pub fn new(device_id: Option<String>) -> Result<Self> {
-        let force_sck = device_id.as_deref() == Some("sck");
-        
-        if !force_sck {
-            // Try CoreAudio Tap first (Default)
-            println!("[SpeakerInput] Initializing CoreAudio Tap backend...");
-            match core_audio::SpeakerInput::new(device_id.clone()) {
-                Ok(input) => {
-                     println!("[SpeakerInput] CoreAudio Tap backend initialized.");
-                     return Ok(Self { backend: BackendInput::CoreAudio(input) });
-                },
-                Err(e) => {
-                    println!("[SpeakerInput] CoreAudio Tap initialization failed: {}. Falling back to ScreenCaptureKit.", e);
-                }
+        // Use CoreAudio Tap (captures all system audio via global tap)
+        // The global tap captures ALL system audio regardless of output device
+        println!("[SpeakerInput] Initializing CoreAudio Tap backend...");
+        match core_audio::SpeakerInput::new(device_id.clone()) {
+            Ok(input) => {
+                 println!("[SpeakerInput] CoreAudio Tap backend initialized.");
+                 return Ok(Self { backend: BackendInput::CoreAudio(input) });
+            },
+            Err(e) => {
+                println!("[SpeakerInput] CoreAudio Tap initialization failed: {}. Falling back to ScreenCaptureKit.", e);
             }
-        } else {
-            println!("[SpeakerInput] SCK backend explicitly requested.");
         }
         
-        // Fallback to ScreenCaptureKit
+        // Fallback to ScreenCaptureKit (shows screen share icon)
+        println!("[SpeakerInput] Using ScreenCaptureKit fallback...");
         let input = sck::SpeakerInput::new(device_id)?;
         Ok(Self { backend: BackendInput::Sck(input) })
     }

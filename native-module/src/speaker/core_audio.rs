@@ -26,38 +26,40 @@ pub struct SpeakerInput {
 }
 
 impl SpeakerInput {
-    pub fn new(device_id: Option<String>) -> Result<Self> {
-        // 1. Find the target output device
-        let output_device = match device_id {
-            Some(ref uid) if !uid.is_empty() && uid != "default" => {
-                 // Simple search by UID
-                 let devices = ca::System::devices()?;
-                 devices.into_iter().find(|d| {
-                     d.uid().map(|u| u.to_string() == *uid).unwrap_or(false)
-                 }).unwrap_or(ca::System::default_output_device()?)
-            }
-            _ => ca::System::default_output_device()?,
-        };
-
+    pub fn new(_device_id: Option<String>) -> Result<Self> {
+        // GLOBAL TAP: Captures ALL system audio regardless of which device is playing
+        // Based on pluely reference implementation
+        // The device_id is ignored - we use default output just for aggregate device setup
+        
+        println!("[CoreAudioTap] === Global Tap Setup ===");
+        
+        // Use default output device for aggregate device configuration
+        // This doesn't limit what we capture - the global tap gets everything
+        let output_device = ca::System::default_output_device()?;
         let output_uid = output_device.uid()?;
-        println!("[CoreAudioTap] Target device UID: {}", output_uid);
+        let output_name = output_device.name().map(|n| n.to_string()).unwrap_or_else(|_| "Unknown".to_string());
+        
+        println!("[CoreAudioTap] Aggregate device base: '{}' ({})", output_name, output_uid);
+        println!("[CoreAudioTap] NOTE: Global tap captures ALL system audio regardless of output device");
 
-        // 2. Create global tap
+        // Sub-device for aggregate device
         let sub_device = cf::DictionaryOf::with_keys_values(
             &[ca::sub_device_keys::uid()],
             &[output_uid.as_type_ref()],
         );
 
+        // Create MONO global tap
+        // Mono avoids complexity of stereo downmix and planar/interleaved format issues
         let tap_desc = ca::TapDesc::with_mono_global_tap_excluding_processes(&ns::Array::new());
         let tap = tap_desc.create_process_tap()?;
-        println!("[CoreAudioTap] Tap created: {:?}", tap.uid());
+        println!("[CoreAudioTap] MONO global tap created: {:?}", tap.uid());
 
         let sub_tap = cf::DictionaryOf::with_keys_values(
             &[ca::sub_device_keys::uid()],
             &[tap.uid().unwrap().as_type_ref()],
         );
 
-        // 3. Create aggregate device descriptor
+        // Create aggregate device descriptor
         let agg_name = cf::String::from_str("NativelySystemAudioTap");
         let agg_uid = cf::Uuid::new().to_cf_string();
 
@@ -83,6 +85,8 @@ impl SpeakerInput {
                 &cf::ArrayOf::from_slice(&[sub_tap.as_ref()]),
             ],
         );
+        
+        println!("[CoreAudioTap] === Setup Complete ===");
 
         Ok(Self { tap, agg_desc })
     }
@@ -108,45 +112,23 @@ impl SpeakerInput {
                 Ordering::Release
             );
 
-            // Extract audio data
+            // Extract audio data (simplified, matching pluely exactly)
             if let Some(view) = av::AudioPcmBuf::with_buf_list_no_copy(&ctx.format, input_data, None) {
-                 // Try f32 planar/interleaved
-                 // Handle interleaved or planar buffers
-                 if let Some(float_slice) = view.data_f32_at(0) {
-                     let channel_count = ctx.format.absd().channels_per_frame;
-                     if channel_count == 1 {
-                         process_audio_data(ctx, float_slice);
-                     } else if channel_count == 2 {
-                         // Downmix stereo to mono
-                         let frame_count = float_slice.len() / 2;
-                         let mut inner_prod = &mut ctx.producer;
-                         for i in 0..frame_count {
-                             let left = float_slice[i * 2];
-                             let right = float_slice[i * 2 + 1];
-                             let mono = (left + right) * 0.5;
-                             let _ = inner_prod.try_push(mono);
-                         }
-                     } else {
-                         // Generic downmix (average first 2 channels or just take first)
-                         // Fallback: Take channel 0
-                         let stride = channel_count as usize;
-                         let frame_count = float_slice.len() / stride;
-                         let mut inner_prod = &mut ctx.producer;
-                         for i in 0..frame_count {
-                             let _ = inner_prod.try_push(float_slice[i * stride]);
-                         }
-                     }
-                 }
+                // For mono global tap, just get channel 0 and process
+                if let Some(data) = view.data_f32_at(0) {
+                    process_audio_data(ctx, data);
+                }
             } else if ctx.format.common_format() == av::audio::CommonFormat::PcmF32 {
-                 let first_buffer = &input_data.buffers[0];
-                 let byte_count = first_buffer.data_bytes_size as usize;
-                 let float_count = byte_count / std::mem::size_of::<f32>();
-                 if float_count > 0 && !first_buffer.data.is_null() {
-                      let data = unsafe {
-                          std::slice::from_raw_parts(first_buffer.data as *const f32, float_count)
-                      };
-                      process_audio_data(ctx, data);
-                 }
+                // Fallback: raw buffer access
+                let first_buffer = &input_data.buffers[0];
+                let byte_count = first_buffer.data_bytes_size as usize;
+                let float_count = byte_count / std::mem::size_of::<f32>();
+                if float_count > 0 && !first_buffer.data.is_null() {
+                     let data = unsafe {
+                         std::slice::from_raw_parts(first_buffer.data as *const f32, float_count)
+                     };
+                     process_audio_data(ctx, data);
+                }
             }
 
             os::Status::NO_ERR
