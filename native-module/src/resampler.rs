@@ -1,103 +1,77 @@
 use anyhow::Result;
-use cidre::{arc, av};
-use cidre::cat::{AudioFormatFlags, AudioStreamBasicDesc, AudioFormat};
+use rubato::{FftFixedIn, Resampler as RubatoResampler};
 
+/// High-quality resampler using rubato (polyphase FIR with sinc interpolation)
+/// Converts f32 audio from input sample rate to 16kHz i16 output
 pub struct Resampler {
-    converter: arc::R<av::AudioConverter>,
-    input_format: arc::R<av::AudioFormat>,
-    output_format: arc::R<av::AudioFormat>,
+    resampler: FftFixedIn<f32>,
+    input_buffer: Vec<Vec<f32>>,
+    output_buffer: Vec<Vec<f32>>,
 }
 
 impl Resampler {
     pub fn new(input_sample_rate: f64) -> Result<Self> {
-        let output_asbd = AudioStreamBasicDesc {
-            sample_rate: 16000.0,
-            format: AudioFormat::LINEAR_PCM,
-            format_flags: AudioFormatFlags::IS_SIGNED_INTEGER | AudioFormatFlags::IS_PACKED,
-            bytes_per_packet: 2,
-            frames_per_packet: 1,
-            bytes_per_frame: 2,
-            channels_per_frame: 1,
-            bits_per_channel: 16,
-            reserved: 0,
-        };
-        let output_format = av::AudioFormat::with_asbd(&output_asbd).ok_or_else(|| anyhow::anyhow!("Failed to create output format"))?;
-
-        let input_asbd = AudioStreamBasicDesc {
-            sample_rate: input_sample_rate,
-            format: AudioFormat::LINEAR_PCM,
-            format_flags: AudioFormatFlags::IS_FLOAT | AudioFormatFlags::IS_PACKED,
-            bytes_per_packet: 4,
-            frames_per_packet: 1,
-            bytes_per_frame: 4,
-            channels_per_frame: 1,
-            bits_per_channel: 32,
-            reserved: 0,
-        };
-        let input_format = av::AudioFormat::with_asbd(&input_asbd).ok_or_else(|| anyhow::anyhow!("Failed to create input format"))?;
-
-        let converter = av::AudioConverter::with_formats(&input_format, &output_format)
-            .ok_or_else(|| anyhow::anyhow!("Failed to create AudioConverter"))?;
-
-        Ok(Self { 
-            converter,
-            input_format,
-            output_format,
+        let output_sample_rate = 16000.0;
+        
+        println!("[Resampler] Created: {}Hz -> {}Hz (high-quality rubato)", 
+                 input_sample_rate, output_sample_rate);
+        
+        // FftFixedIn: Fixed input chunk size, variable output size
+        // This is ideal for streaming from a microphone tap that delivers fixed-size buffers
+        let resampler = FftFixedIn::<f32>::new(
+            input_sample_rate as usize,
+            output_sample_rate as usize,
+            1024,  // chunk size (internal buffer)
+            2,     // sub-chunks for better quality
+            1,     // mono
+        ).map_err(|e| anyhow::anyhow!("Failed to create resampler: {}", e))?;
+        
+        Ok(Self {
+            resampler,
+            input_buffer: vec![Vec::new()],
+            output_buffer: vec![Vec::new()],
         })
     }
 
+    /// Resample f32 audio data to i16 at 16kHz using high-quality algorithm
     pub fn resample(&mut self, input_data: &[f32]) -> Result<Vec<i16>> {
-        let frame_count = input_data.len() as u32;
-        
-        // Input Buffer (Use proper constructor if 'new' doesn't exist, try 'with_format')
-        // Error helper suggested 'with_fmt_frame_capacity' failed, try 'with_format'
-        // If 'with_format' failed, I will use `with_params`.
-        // Actually, try `av::AudioPcmBuf::new` which takes `format` and `capacity`.
-        // Inspecting cidre source history: usually `new`.
-        let mut input_buffer = av::AudioPcmBuf::with_format(&self.input_format, frame_count)
-            .ok_or_else(|| anyhow::anyhow!("Failed to create input buffer"))?;
-        
-        input_buffer.set_frame_len(frame_count).map_err(|e| anyhow::anyhow!("Failed to set input frame len: {:?}", e))?;
-        
-        // Copy f32 data via raw access to avoid method guessing
-        let buf_list = input_buffer.audio_buffer_list();
-        if buf_list.number_buffers > 0 {
-             let ptr = buf_list.buffers[0].data as *mut f32;
-             if !ptr.is_null() {
-                 unsafe {
-                     let dest = std::slice::from_raw_parts_mut(ptr, frame_count as usize);
-                     dest.copy_from_slice(input_data);
-                 }
-             }
+        if input_data.is_empty() {
+            return Ok(Vec::new());
         }
 
-        let ratio = 16000.0 / self.input_format.absd().sample_rate;
-        let estimated = (frame_count as f64 * ratio * 1.5) as u32 + 100;
-        // AVAudioConverter requires output capacity >= input length even when downsampling
-        let out_capacity = std::cmp::max(estimated, frame_count);
+        // Add new input to our buffer (mono, so channel 0)
+        self.input_buffer[0].extend_from_slice(input_data);
         
-        let mut output_buffer = av::AudioPcmBuf::with_format(&self.output_format, out_capacity)
-            .ok_or_else(|| anyhow::anyhow!("Failed to create output buffer"))?;
-
-        // Convert
-        self.converter.convert_to_buf_from_buf(&mut output_buffer, &input_buffer).map_err(|e| anyhow::anyhow!("{:?}", e))?;
-
-        // Extract i16
-        let samples_out = output_buffer.frame_len() as usize;
-        let mut result = Vec::with_capacity(samples_out);
+        let mut output_samples = Vec::new();
         
-        let buf_list = output_buffer.audio_buffer_list(); 
-        if buf_list.number_buffers > 0 {
-            let buffer = &buf_list.buffers[0];
-            if !buffer.data.is_null() && samples_out > 0 {
-                 let ptr = buffer.data as *const i16;
-                 unsafe {
-                     let slice = std::slice::from_raw_parts(ptr, samples_out);
-                     result.extend_from_slice(slice);
-                 }
+        // Process complete chunks
+        let frames_needed = self.resampler.input_frames_next();
+        
+        while self.input_buffer[0].len() >= frames_needed {
+            // Take exactly the frames we need
+            let chunk: Vec<f32> = self.input_buffer[0].drain(0..frames_needed).collect();
+            let input_chunk = vec![chunk];
+            
+            // Resize output buffer
+            let output_frames = self.resampler.output_frames_next();
+            self.output_buffer[0].resize(output_frames, 0.0);
+            
+            // Process
+            match self.resampler.process_into_buffer(&input_chunk, &mut self.output_buffer, None) {
+                Ok((_, out_len)) => {
+                    // Convert f32 [-1.0, 1.0] to i16
+                    for i in 0..out_len {
+                        let sample = self.output_buffer[0][i];
+                        let scaled = (sample * 32767.0).clamp(-32768.0, 32767.0);
+                        output_samples.push(scaled as i16);
+                    }
+                }
+                Err(e) => {
+                    println!("[Resampler] Process error: {}", e);
+                }
             }
         }
-
-        Ok(result)
+        
+        Ok(output_samples)
     }
 }

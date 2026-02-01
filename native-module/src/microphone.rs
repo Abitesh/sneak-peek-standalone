@@ -1,130 +1,219 @@
+// Microphone Capture - Lock-Free Real-Time Compliant
+// 
+// Architecture:
+// 1. CPAL callback: ONLY pushes to lock-free ring buffer
+// 2. No mutexes, allocations, or DSP in callback
+// 3. Background thread: drains buffer, resamples, emits to JS
+
 use anyhow::Result;
-use cidre::{arc, av, core_audio, dispatch};
-use ringbuf::{traits::{Producer, Split}, HeapRb, HeapCons};
-use std::sync::{Arc, Mutex};
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::{SampleFormat, Stream};
+use ringbuf::{traits::{Producer, Consumer, Split}, HeapRb, HeapProd, HeapCons};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-pub struct MicrophoneStream {
-    engine: arc::R<av::AudioEngine>,
-    consumer: Arc<Mutex<HeapCons<f32>>>, // Changed to f32
-    sample_rate: u32,
-    _queue: arc::R<dispatch::Queue>, 
-}
+use crate::audio_config::RING_BUFFER_SAMPLES;
 
+/// List available input devices
 pub fn list_input_devices() -> Result<Vec<(String, String)>> {
-    let devices = core_audio::System::devices()?;
+    let host = cpal::default_host();
     let mut list = Vec::new();
     list.push(("default".to_string(), "Default Microphone".to_string()));
-
-    for device in devices {
-        if let Ok(cfg) = device.input_stream_cfg() {
-             if cfg.number_buffers() > 0 {
-                 let uid = device.uid().map(|u: cidre::arc::R<cidre::cf::String>| u.to_string()).unwrap_or_default();
-                 let name = device.name().map(|n: cidre::arc::R<cidre::cf::String>| n.to_string()).unwrap_or_default();
-                 if !uid.is_empty() {
-                     list.push((uid, name));
-                 }
-             }
+    
+    if let Ok(devices) = host.input_devices() {
+        for device in devices {
+            if let Ok(name) = device.name() {
+                list.push((name.clone(), name));
+            }
         }
     }
     Ok(list)
 }
 
+/// Lock-free microphone stream
+/// 
+/// Callback pushes raw f32 samples to ring buffer.
+/// Consumer is polled by DSP thread.
+pub struct MicrophoneStream {
+    stream: Option<Stream>,
+    consumer: Option<HeapCons<f32>>,
+    sample_rate: u32,
+    is_running: Arc<AtomicBool>,
+}
+
 impl MicrophoneStream {
     pub fn new(_device_id: Option<String>) -> Result<Self> {
-        let mut engine = av::AudioEngine::new();
-        let mut input_node = engine.input_node();
+        let host = cpal::default_host();
+        let device = host.default_input_device()
+            .ok_or_else(|| anyhow::anyhow!("No input device found"))?;
         
-        // Disable VPIO on Input Node
-        if let Ok(_) = input_node.set_vp_enabled(false) {
-            println!("[Microphone] Input: Voice Processing (VPIO) disabled");
-        }
+        let config = device.default_input_config()
+            .map_err(|e| anyhow::anyhow!("Failed to get config: {}", e))?;
         
-        // Explicitly disable AGC and Bypass (Double safety)
-        input_node.set_vp_agc_enabled(false);
-        input_node.set_vp_bypassed(true);
+        let sample_rate = config.sample_rate().0;
+        let channels = config.channels() as usize;
         
-        // REMOVED Output Node logic to prevent "Voice Chat" profile trigger
-        // let mut output_node = engine.output_node(); ...
+        println!(
+            "[Microphone] Device: {}, Rate: {}Hz, Channels: {}, Format: {:?}", 
+            device.name().unwrap_or_default(), 
+            sample_rate, 
+            channels,
+            config.sample_format()
+        );
         
-        // --- DEVICE SELECTION LOGIC (Simplified) ---
-        if let Some(req_id) = _device_id.as_ref() {
-             if req_id != "default" {
-                 // Device selection placeholder
-                 println!("[Microphone] Requested device {} (Selection pending implementation)", req_id);
-             }
-        }
-
-        let input_format = input_node.output_format_for_bus(0);
-        let format_str = format!("{:?}", input_format);
-        let mut parsed_rate = 48000.0;
-        
-        if let Some(pos) = format_str.find("sample_rate: ") {
-            if let Some(slice) = format_str.get(pos + 13..) {
-                if let Some(end) = slice.find(',') {
-                     if let Ok(rate) = slice[..end].trim().parse::<f64>() {
-                         parsed_rate = rate;
-                     }
-                }
-            }
-        } 
-        
-        let sample_rate = if parsed_rate < 100.0 { 48000.0 } else { parsed_rate };
-        println!("[Microphone] Detected Input Format: {} Hz, {} ch", sample_rate, input_format.channel_count());
-
-        // Prepare Ring Buffer for F32 (Raw) Output
-        let buffer_len = 48000 * 2; 
-        let rb = HeapRb::<f32>::new(buffer_len);
+        // Create lock-free SPSC ring buffer
+        let rb = HeapRb::<f32>::new(RING_BUFFER_SAMPLES);
         let (producer, consumer) = rb.split();
-        let producer = Arc::new(Mutex::new(producer));
         
-        // Install Tap - Copy raw F32
-        let buffer_size = (sample_rate * 0.1) as u32; // 100ms
-        let producer_clone = producer.clone();
+        let is_running = Arc::new(AtomicBool::new(false));
+        let is_running_clone = is_running.clone();
         
-        let block = move |buffer: &av::AudioPcmBuf, _time: &av::AudioTime| {
-            println!("[Microphone] Tap callback executed");
-            let mut producer = producer_clone.lock().unwrap();
-            
-            if let Some(data) = buffer.data_f32_at(0) {
-                 // println!("[Microphone] Tap received {} samples", data.len());
-                 let _ = producer.push_slice(data);
-            } else {
-                 println!("[Microphone] Buffer empty or format mismatch");
-            }
-        };
-
-        input_node.install_tap_on_bus(0, buffer_size, Some(&input_format), block).expect("Failed to install tap");
-
-        engine.prepare();
-        println!("[Microphone] Engine Prepared");
-
-        let queue = dispatch::Queue::new();
-
+        // Build the stream with minimal callback
+        let stream = build_input_stream(
+            &device, 
+            &config, 
+            producer, 
+            channels, 
+            is_running_clone
+        )?;
+        
         Ok(Self {
-            engine,
-            consumer: Arc::new(Mutex::new(consumer)),
-            sample_rate: sample_rate as u32,
-            _queue: queue,
+            stream: Some(stream),
+            consumer: Some(consumer),
+            sample_rate,
+            is_running,
         })
     }
 
-    pub fn play(&mut self) -> Result<()> {
-        self.engine.start()?;
-        println!("[Microphone] Engine Started");
+    /// Start capturing audio
+    pub fn play(&self) -> Result<()> {
+        if let Some(ref stream) = self.stream {
+            stream.play().map_err(|e| anyhow::anyhow!("Failed to start stream: {}", e))?;
+            self.is_running.store(true, Ordering::SeqCst);
+            println!("[Microphone] Stream started");
+        }
         Ok(())
     }
 
-    pub fn pause(&mut self) -> Result<()> {
-        // use pause() for seamless toggle (keeps hardware active, instantaneous)
-        self.engine.pause(); 
+    /// Pause capturing
+    pub fn pause(&self) -> Result<()> {
+        if let Some(ref stream) = self.stream {
+            stream.pause().map_err(|e| anyhow::anyhow!("Failed to pause stream: {}", e))?;
+            self.is_running.store(false, Ordering::SeqCst);
+            println!("[Microphone] Stream paused");
+        }
         Ok(())
     }
 
+    /// Get the input sample rate
     pub fn sample_rate(&self) -> u32 {
         self.sample_rate
     }
+
+    /// Take ownership of the consumer for the DSP thread
+    pub fn take_consumer(&mut self) -> Option<HeapCons<f32>> {
+        self.consumer.take()
+    }
     
-    pub fn get_consumer(&self) -> Arc<Mutex<HeapCons<f32>>> {
-        self.consumer.clone()
+    /// Check if stream is running
+    pub fn is_running(&self) -> bool {
+        self.is_running.load(Ordering::SeqCst)
+    }
+}
+
+/// Build input stream with lock-free callback
+/// 
+/// The callback ONLY pushes to the ring buffer.
+/// No mutexes, allocations, or DSP.
+fn build_input_stream(
+    device: &cpal::Device,
+    config: &cpal::SupportedStreamConfig,
+    mut producer: HeapProd<f32>,
+    channels: usize,
+    is_running: Arc<AtomicBool>,
+) -> Result<Stream> {
+    let err_fn = |err| eprintln!("[Microphone] Stream error: {}", err);
+    
+    let stream = match config.sample_format() {
+        SampleFormat::F32 => {
+            device.build_input_stream(
+                &config.clone().into(),
+                move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                    if !is_running.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    // REAL-TIME SAFE: Only lock-free push
+                    // Convert stereo to mono if needed, then push
+                    if channels > 1 {
+                        // Take first channel only (interleaved)
+                        for chunk in data.chunks(channels) {
+                            let _ = producer.try_push(chunk[0]);
+                        }
+                    } else {
+                        let _ = producer.push_slice(data);
+                    }
+                },
+                err_fn,
+                None,
+            )?
+        }
+        SampleFormat::I16 => {
+            device.build_input_stream(
+                &config.clone().into(),
+                move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                    if !is_running.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    // REAL-TIME SAFE: Convert and push
+                    if channels > 1 {
+                        for chunk in data.chunks(channels) {
+                            let sample = chunk[0] as f32 / 32768.0;
+                            let _ = producer.try_push(sample);
+                        }
+                    } else {
+                        for &sample in data {
+                            let _ = producer.try_push(sample as f32 / 32768.0);
+                        }
+                    }
+                },
+                err_fn,
+                None,
+            )?
+        }
+        SampleFormat::I32 => {
+            device.build_input_stream(
+                &config.clone().into(),
+                move |data: &[i32], _: &cpal::InputCallbackInfo| {
+                    if !is_running.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    // REAL-TIME SAFE: Convert and push
+                    if channels > 1 {
+                        for chunk in data.chunks(channels) {
+                            let sample = chunk[0] as f32 / 2147483648.0;
+                            let _ = producer.try_push(sample);
+                        }
+                    } else {
+                        for &sample in data {
+                            let _ = producer.try_push(sample as f32 / 2147483648.0);
+                        }
+                    }
+                },
+                err_fn,
+                None,
+            )?
+        }
+        format => {
+            return Err(anyhow::anyhow!("Unsupported sample format: {:?}", format));
+        }
+    };
+    
+    Ok(stream)
+}
+
+impl Drop for MicrophoneStream {
+    fn drop(&mut self) {
+        self.is_running.store(false, Ordering::SeqCst);
+        // Stream will be dropped and stopped automatically
     }
 }

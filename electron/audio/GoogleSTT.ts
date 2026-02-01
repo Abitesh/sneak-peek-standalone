@@ -115,10 +115,17 @@ export class GoogleSTT extends EventEmitter {
         }
 
         try {
+            // Debug log every ~50th write to avoid spam
+            if (Math.random() < 0.02) {
+                console.log(`[GoogleSTT] Writing ${audioData.length} bytes to stream`);
+            }
+
             if (this.stream.command && this.stream.command.writable) {
                 this.stream.write(audioData);
             } else if (this.stream.writable) {
                 this.stream.write(audioData);
+            } else {
+                console.warn('[GoogleSTT] Stream not writable!');
             }
         } catch (err) {
             console.error('[GoogleSTT] Safe write failed:', err);

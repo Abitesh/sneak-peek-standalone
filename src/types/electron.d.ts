@@ -29,6 +29,7 @@ export interface ElectronAPI {
   toggleWindow: () => Promise<void>
   showWindow: () => Promise<void>
   hideWindow: () => Promise<void>
+  openExternal: (url: string) => Promise<void>
   setUndetectable: (state: boolean) => Promise<{ success: boolean; error?: string }>
   getUndetectable: () => Promise<boolean>
   setOpenAtLogin: (open: boolean) => Promise<{ success: boolean; error?: string }>

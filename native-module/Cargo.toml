@@ -17,3 +17,6 @@ cpal = "0.15.2"
 ringbuf = "0.4"
 anyhow = "1.0"
 once_cell = "1.18.0"
+rubato = "0.16"
+rand = "0.8"
+
