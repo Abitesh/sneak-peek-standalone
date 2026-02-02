@@ -54,17 +54,23 @@ impl sc::stream::OutputImpl for AudioHandler {
         // Access inner state safely
         let inner = self.inner_mut();
 
-        match sample_buf.audio_buf_list_in::<1>(cm::sample_buffer::Flags(0), None, None) {
+        match sample_buf.audio_buf_list_in::<2>(cm::sample_buffer::Flags(0), None, None) {
             Ok(buf_list) => {
                 let buffer_count = buf_list.list().number_buffers as usize;
-                for i in 0..buffer_count {
-                    let buffer = &buf_list.list().buffers[i];
+                
+                // For stereo, we may get:
+                // 1. One interleaved buffer with L,R,L,R samples
+                // 2. Two separate buffers (one L, one R)
+                // We need to handle both cases and convert to mono for STT
+                
+                if buffer_count == 1 {
+                    // Interleaved stereo: L,R,L,R...
+                    let buffer = &buf_list.list().buffers[0];
                     let data_ptr = buffer.data as *const f32;
                     let byte_count = buffer.data_bytes_size as usize;
                     
-                    // Validate sample format (must be f32 aligned)
                     if byte_count == 0 || byte_count % 4 != 0 {
-                        continue;
+                        return;
                     }
                     
                     let float_count = byte_count / 4;
@@ -72,7 +78,36 @@ impl sc::stream::OutputImpl for AudioHandler {
                     if float_count > 0 && !data_ptr.is_null() {
                         unsafe {
                             let slice = std::slice::from_raw_parts(data_ptr, float_count);
-                            // Push audio to ring buffer
+                            // Convert interleaved stereo to mono: average L+R pairs
+                            let mono_data: Vec<f32> = slice
+                                .chunks(2)
+                                .map(|pair| {
+                                    if pair.len() == 2 {
+                                        (pair[0] + pair[1]) * 0.5
+                                    } else {
+                                        pair[0]
+                                    }
+                                })
+                                .collect();
+                            let _pushed = inner.producer.push_slice(&mono_data);
+                        }
+                    }
+                } else if buffer_count >= 2 {
+                    // Separate L and R buffers - we'll just use the first (L) for simplicity
+                    // This preserves the audio without complex mixing
+                    let buffer = &buf_list.list().buffers[0];
+                    let data_ptr = buffer.data as *const f32;
+                    let byte_count = buffer.data_bytes_size as usize;
+                    
+                    if byte_count == 0 || byte_count % 4 != 0 {
+                        return;
+                    }
+                    
+                    let float_count = byte_count / 4;
+                    
+                    if float_count > 0 && !data_ptr.is_null() {
+                        unsafe {
+                            let slice = std::slice::from_raw_parts(data_ptr, float_count);
                             let _pushed = inner.producer.push_slice(slice);
                         }
                     }
@@ -153,7 +188,7 @@ impl SpeakerInput {
         let mut cfg = sc::StreamCfg::new();
         cfg.set_captures_audio(true);
         cfg.set_sample_rate(48000);
-        cfg.set_channel_count(1);
+        cfg.set_channel_count(2); // Stereo - prevents macOS audio quality degradation
         cfg.set_excludes_current_process_audio(true);
         cfg.set_queue_depth(8);
         
@@ -162,7 +197,7 @@ impl SpeakerInput {
         cfg.set_height(2);
         cfg.set_minimum_frame_interval(cm::Time::new(1, 1)); // 1 FPS
         
-        println!("[SpeakerInput] Config: 48kHz mono, queue_depth=8");
+        println!("[SpeakerInput] Config: 48kHz stereo, queue_depth=8");
         
         Ok(Self { cfg, filter })
     }

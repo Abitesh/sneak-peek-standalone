@@ -69,6 +69,30 @@ export class WindowHelper {
     }
   }
 
+  // Dedicated method for overlay window resizing - decoupled from launcher
+  public setOverlayDimensions(width: number, height: number): void {
+    if (!this.overlayWindow || this.overlayWindow.isDestroyed()) return
+
+    const [currentX, currentY] = this.overlayWindow.getPosition()
+    const primaryDisplay = screen.getPrimaryDisplay()
+    const workArea = primaryDisplay.workAreaSize
+    const maxAllowedWidth = Math.floor(workArea.width * 0.9)
+    const maxAllowedHeight = Math.floor(workArea.height * 0.9)
+    const newWidth = Math.min(Math.max(width, 300), maxAllowedWidth) // min 300, max 90%
+    const newHeight = Math.min(Math.max(height, 200), maxAllowedHeight) // min 200, max 90%
+    const maxX = workArea.width - newWidth
+    const maxY = workArea.height - newHeight
+    const newX = Math.min(Math.max(currentX, 0), maxX)
+    const newY = Math.min(Math.max(currentY, 0), maxY)
+
+    this.overlayWindow.setBounds({
+      x: newX,
+      y: newY,
+      width: newWidth,
+      height: newHeight
+    })
+  }
+
   public createWindow(): void {
     if (this.launcherWindow !== null) return // Already created
 

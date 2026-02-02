@@ -48,6 +48,8 @@ impl SpeakerInput {
             &[output_uid.as_type_ref()],
         );
 
+        // Create global tap (mono for STT processing)
+        // NOTE: Using mono tap. If audio quality issues persist, revisit this.
         let tap_desc = ca::TapDesc::with_mono_global_tap_excluding_processes(&ns::Array::new());
         let tap = tap_desc.create_process_tap()?;
         println!("[CoreAudioTap] Tap created: {:?}", tap.uid());

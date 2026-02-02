@@ -153,7 +153,7 @@ export class SettingsWindowHelper {
     private createWindow(x?: number, y?: number, showWhenReady: boolean = true): void {
         const windowSettings: Electron.BrowserWindowConstructorOptions = {
             width: 225, // Match React component width
-            height: 205, // Start smaller to avoid "long shadow" empty space, let ResizeObserver expand it
+            height: 238, // Increased to accommodate new Transcript toggle
             frame: false,
             transparent: true,
             resizable: false,
@@ -177,6 +177,13 @@ export class SettingsWindowHelper {
         }
 
         this.settingsWindow = new BrowserWindow(windowSettings)
+
+        if (process.platform === "darwin") {
+            this.settingsWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+            this.settingsWindow.setHiddenInMissionControl(true)
+            this.settingsWindow.setAlwaysOnTop(true, "floating")
+        }
+
         console.log(`[SettingsWindowHelper] Creating Settings Window with Content Protection: ${this.contentProtection}`);
         this.settingsWindow.setContentProtection(this.contentProtection);
 
@@ -234,6 +241,12 @@ export class SettingsWindowHelper {
                 preload: path.join(__dirname, "preload.js")
             }
         });
+
+        if (process.platform === "darwin") {
+            this.advancedWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+            this.advancedWindow.setHiddenInMissionControl(true)
+            this.advancedWindow.setAlwaysOnTop(true, "floating")
+        }
 
         const advancedUrl = isDev
             ? `${startUrl}?window=advanced`

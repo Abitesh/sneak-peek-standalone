@@ -6,9 +6,6 @@ const SettingsPopup = () => {
     const [useGeminiPro, setUseGeminiPro] = useState(() => {
         return localStorage.getItem('natively_model_preference') === 'pro';
     });
-    const [showTranscription, setShowTranscription] = useState(() => {
-        return localStorage.getItem('natively_showTranscription') !== 'false';
-    });
 
     const isFirstRender = React.useRef(true);
     const isFirstUndetectableRender = React.useRef(true);
@@ -44,9 +41,20 @@ const SettingsPopup = () => {
         }
     }, [useGeminiPro]);
 
+    const [showTranscript, setShowTranscript] = useState(() => {
+        const stored = localStorage.getItem('natively_interviewer_transcript');
+        return stored !== 'false'; // Default to true if not set
+    });
+
     useEffect(() => {
-        localStorage.setItem('natively_showTranscription', String(showTranscription));
-    }, [showTranscription]);
+        const handleStorage = () => {
+            const stored = localStorage.getItem('natively_interviewer_transcript');
+            setShowTranscript(stored !== 'false');
+        };
+
+        window.addEventListener('storage', handleStorage);
+        return () => window.removeEventListener('storage', handleStorage);
+    }, []);
 
     const contentRef = useRef<HTMLDivElement>(null);
 
@@ -76,7 +84,7 @@ const SettingsPopup = () => {
 
     return (
         <div className="w-fit h-fit bg-transparent flex flex-col">
-            <div ref={contentRef} className="w-[225px] bg-[#1E1E1E]/95 backdrop-blur-2xl border border-white/10 rounded-[16px] overflow-hidden shadow-2xl shadow-black/40 p-2 flex flex-col animate-scale-in origin-top-left justify-between">
+            <div ref={contentRef} className="w-[225px] bg-[#1E1E1E]/80 backdrop-blur-md border border-white/10 rounded-[16px] overflow-hidden shadow-2xl shadow-black/40 px-2 pt-2 pb-2 flex flex-col animate-scale-in origin-top-left justify-between">
 
                 {/* Undetectability */}
                 <div className="flex items-center justify-between px-3 py-2 hover:bg-white/5 rounded-lg transition-colors duration-200 group cursor-default">
@@ -115,19 +123,26 @@ const SettingsPopup = () => {
                     </button>
                 </div>
 
-                {/* Transcription Toggle */}
+                {/* Interviewer Transcript Toggle */}
                 <div className="flex items-center justify-between px-3 py-2 hover:bg-white/5 rounded-lg transition-colors duration-200 group cursor-default">
                     <div className="flex items-center gap-3">
                         <MessageSquare
-                            className={`w-4 h-4 transition-colors ${showTranscription ? 'text-emerald-400' : 'text-slate-500 group-hover:text-slate-300'}`}
+                            className={`w-3.5 h-3.5 transition-colors ${showTranscript ? 'text-emerald-400' : 'text-slate-500 group-hover:text-slate-300'}`}
+                            fill={showTranscript ? "currentColor" : "none"}
                         />
-                        <span className="text-[12px] text-slate-400 group-hover:text-slate-200 font-medium transition-colors">Transcription</span>
+                        <span className={`text-[12px] font-medium transition-colors ${showTranscript ? 'text-white' : 'text-slate-400 group-hover:text-slate-200'}`}>Transcript</span>
                     </div>
                     <button
-                        onClick={() => setShowTranscription(!showTranscription)}
-                        className={`w-[30px] h-[18px] rounded-full p-[1.5px] transition-all duration-300 ease-spring active:scale-[0.92] ${showTranscription ? 'bg-emerald-500 shadow-[0_2px_10px_rgba(16,185,129,0.3)]' : 'bg-white/10'}`}
+                        onClick={() => {
+                            const newState = !showTranscript;
+                            setShowTranscript(newState);
+                            localStorage.setItem('natively_interviewer_transcript', String(newState));
+                            // Dispatch event for same-window listeners
+                            window.dispatchEvent(new Event('storage'));
+                        }}
+                        className={`w-[30px] h-[18px] rounded-full p-[1.5px] transition-all duration-300 ease-spring active:scale-[0.92] ${showTranscript ? 'bg-emerald-500 shadow-[0_2px_10px_rgba(16,185,129,0.3)]' : 'bg-white/10'}`}
                     >
-                        <div className={`w-[15px] h-[15px] rounded-full bg-black shadow-sm transition-transform duration-300 ease-spring ${showTranscription ? 'translate-x-[12px]' : 'translate-x-0'}`} />
+                        <div className={`w-[15px] h-[15px] rounded-full bg-black shadow-sm transition-transform duration-300 ease-spring ${showTranscript ? 'translate-x-[12px]' : 'translate-x-0'}`} />
                     </button>
                 </div>
 

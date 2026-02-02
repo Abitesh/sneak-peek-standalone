@@ -1,13 +1,21 @@
 import React, { useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 
 interface RollingTranscriptProps {
     text: string;
+    isActive?: boolean;
 }
 
-const RollingTranscript: React.FC<RollingTranscriptProps> = ({ text }) => {
+/**
+ * RollingTranscript - A single-line horizontally scrolling transcript bar
+ * 
+ * Displays real-time speech transcription as a smooth left-scrolling text track.
+ * Features:
+ * - Fixed height, single line only
+ * - Text flows from right to left as new words arrive
+ * - Edge fade gradients for visual polish
+ */
+const RollingTranscript: React.FC<RollingTranscriptProps> = ({ text, isActive = true }) => {
     const containerRef = useRef<HTMLDivElement>(null);
-    const textRef = useRef<HTMLDivElement>(null);
 
     // Auto-scroll to the end when text updates
     useEffect(() => {
@@ -19,27 +27,23 @@ const RollingTranscript: React.FC<RollingTranscriptProps> = ({ text }) => {
     if (!text) return null;
 
     return (
-        <div className="relative w-full max-w-[700px] mx-auto px-4 group">
-            {/* Left Gradient Mask */}
-            <div className="absolute left-0 top-0 bottom-0 w-12 bg-gradient-to-r from-[#1E1E1E] to-transparent z-20 pointer-events-none" />
-
-            {/* Right Gradient Mask */}
-            <div className="absolute right-0 top-0 bottom-0 w-12 bg-gradient-to-l from-[#1E1E1E] to-transparent z-20 pointer-events-none" />
-
+        <div className="relative w-[90%] mx-auto pt-2">
             {/* Scrolling Container */}
             <div
                 ref={containerRef}
                 className="overflow-hidden whitespace-nowrap text-right scroll-smooth"
                 style={{
-                    maskImage: 'linear-gradient(to right, transparent, black 15%, black 85%, transparent)'
+                    maskImage: 'linear-gradient(to right, transparent, black 10%, black 90%, transparent)'
                 }}
             >
-                <div
-                    ref={textRef}
-                    className="inline-block text-[14px] font-medium text-slate-300/50 leading-relaxed transition-all duration-300"
-                >
+                <span className="inline-flex items-center text-[13px] text-white/40 italic leading-7 transition-all duration-300">
                     {text}
-                </div>
+                    {isActive && (
+                        <span className="inline-flex items-center ml-2">
+                            <span className="w-1 h-1 bg-green-500/60 rounded-full animate-pulse" />
+                        </span>
+                    )}
+                </span>
             </div>
         </div>
     );

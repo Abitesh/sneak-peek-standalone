@@ -97,14 +97,24 @@ export class ShortcutsHelper {
     })
 
     globalShortcut.register("CommandOrControl+B", () => {
-      const mainWindow = this.appState.getMainWindow()
-      if (mainWindow) {
-        // Ensure window is visible so renderer is active
-        if (!this.appState.isVisible()) {
-          this.appState.showMainWindow()
+      const windowHelper = this.appState.getWindowHelper()
+      const overlayWindow = windowHelper.getOverlayWindow()
+
+      // Check if overlay (NativelyInterface) is currently the active/visible window
+      if (overlayWindow && overlayWindow.isVisible()) {
+        // Toggle overlay visibility - send event to renderer to toggle expanded state
+        overlayWindow.webContents.send('toggle-expand')
+      } else {
+        // Launcher mode - toggle launcher visibility
+        const launcherWindow = windowHelper.getLauncherWindow()
+        if (launcherWindow) {
+          if (launcherWindow.isVisible()) {
+            launcherWindow.hide()
+          } else {
+            launcherWindow.show()
+            launcherWindow.focus()
+          }
         }
-        // Signal renderer to toggle its state
-        mainWindow.webContents.send('toggle-expand')
       }
     })
 

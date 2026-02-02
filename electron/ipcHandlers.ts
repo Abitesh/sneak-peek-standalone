@@ -17,11 +17,18 @@ export function initializeIpcHandlers(appState: AppState): void {
       const senderWebContents = event.sender
       const settingsWin = appState.settingsWindowHelper.getSettingsWindow()
       const advancedWin = appState.settingsWindowHelper.getAdvancedWindow()
+      const overlayWin = appState.getWindowHelper().getOverlayWindow()
+      const launcherWin = appState.getWindowHelper().getLauncherWindow()
 
       if (settingsWin && !settingsWin.isDestroyed() && settingsWin.webContents.id === senderWebContents.id) {
         appState.settingsWindowHelper.setWindowDimensions(settingsWin, width, height)
       } else if (advancedWin && !advancedWin.isDestroyed() && advancedWin.webContents.id === senderWebContents.id) {
         appState.settingsWindowHelper.setWindowDimensions(advancedWin, width, height)
+      } else if (
+        overlayWin && !overlayWin.isDestroyed() && overlayWin.webContents.id === senderWebContents.id
+      ) {
+        // NativelyInterface logic - Resize ONLY the overlay window using dedicated method
+        appState.getWindowHelper().setOverlayDimensions(width, height)
       }
     }
   )
