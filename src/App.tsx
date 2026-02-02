@@ -33,9 +33,12 @@ const App: React.FC = () => {
       const useLegacyAudio = localStorage.getItem('useLegacyAudioBackend') === 'true';
 
       // Override output device ID to force SCK if experimental mode is enabled
-      if (useLegacyAudio) {
-        console.log("[App] Experimental: ScreenCaptureKit API enabled by user preference.");
+      // Default to SCK unless legacy is enabled
+      if (!useLegacyAudio) {
+        console.log("[App] Using ScreenCaptureKit backend (Default).");
         outputDeviceId = "sck";
+      } else {
+        console.log("[App] Using Legacy CoreAudio backend (User Preference).");
       }
 
       const result = await window.electronAPI.startMeeting({

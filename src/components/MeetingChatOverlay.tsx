@@ -43,7 +43,7 @@ const TypingIndicator: React.FC = () => (
             {[0, 1, 2].map((i) => (
                 <motion.div
                     key={i}
-                    className="w-2 h-2 rounded-full bg-[#636366]"
+                    className="w-2 h-2 rounded-full bg-text-tertiary"
                     animate={{ opacity: [0.4, 1, 0.4] }}
                     transition={{
                         duration: 0.6,
@@ -68,7 +68,7 @@ const UserMessage: React.FC<{ content: string }> = ({ content }) => (
         transition={{ duration: 0.15 }}
         className="flex justify-end mb-6"
     >
-        <div className="bg-[#2C2C2E] text-white px-5 py-3 rounded-2xl rounded-tr-md max-w-[70%] text-[15px] leading-relaxed">
+        <div className="bg-accent-primary text-white px-5 py-3 rounded-2xl rounded-tr-md max-w-[70%] text-[15px] leading-relaxed">
             {content}
         </div>
     </motion.div>
@@ -94,11 +94,11 @@ const AssistantMessage: React.FC<{ content: string; isStreaming?: boolean }> = (
             transition={{ duration: 0.15 }}
             className="flex flex-col items-start mb-6"
         >
-            <div className="text-white text-[15px] leading-relaxed max-w-[85%]">
+            <div className="text-text-primary text-[15px] leading-relaxed max-w-[85%]">
                 {content}
                 {isStreaming && (
                     <motion.span
-                        className="inline-block w-0.5 h-4 bg-[#A4A4A7] ml-0.5 align-middle"
+                        className="inline-block w-0.5 h-4 bg-text-secondary ml-0.5 align-middle"
                         animate={{ opacity: [1, 0] }}
                         transition={{ duration: 0.5, repeat: Infinity }}
                     />
@@ -107,7 +107,7 @@ const AssistantMessage: React.FC<{ content: string; isStreaming?: boolean }> = (
             {!isStreaming && content && (
                 <button
                     onClick={handleCopy}
-                    className="flex items-center gap-2 mt-3 text-[13px] text-[#636366] hover:text-[#A4A4A7] transition-colors"
+                    className="flex items-center gap-2 mt-3 text-[13px] text-text-tertiary hover:text-text-secondary transition-colors"
                 >
                     {copied ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
                     {copied ? 'Copied' : 'Copy message'}
@@ -126,7 +126,7 @@ const MeetingChatOverlay: React.FC<MeetingChatOverlayProps> = ({
     onClose,
     meetingContext,
     initialQuery = '',
-    onNewQuery
+    // onNewQuery
 }) => {
     const [messages, setMessages] = useState<Message[]>([]);
     const [chatState, setChatState] = useState<ChatState>('idle');
@@ -399,20 +399,20 @@ ${contextString}`;
                             height: { type: "spring", stiffness: 300, damping: 30, mass: 0.8 },
                             opacity: { duration: 0.2 }
                         }}
-                        className="relative mx-auto w-full max-w-[680px] mb-0 bg-bg-secondary rounded-t-[24px] border-t border-x border-white/[0.08] shadow-2xl overflow-hidden flex flex-col"
+                        className="relative mx-auto w-full max-w-[680px] mb-0 bg-bg-secondary rounded-t-[24px] border-t border-x border-border-subtle shadow-2xl overflow-hidden flex flex-col"
                         onClick={(e) => e.stopPropagation()}
                     >
                         {/* Header with close button */}
-                        <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.05] shrink-0">
-                            <div className="flex items-center gap-2 text-[#636366]">
-                                <img src={nativelyIcon} className="w-3.5 h-3.5 opacity-50 grayscale" alt="logo" />
+                        <div className="flex items-center justify-between px-4 py-3 border-b border-border-subtle shrink-0">
+                            <div className="flex items-center gap-2 text-text-tertiary">
+                                <img src={nativelyIcon} className="w-3.5 h-3.5 brightness-0 dark:brightness-100 dark:opacity-50 dark:grayscale" alt="logo" />
                                 <span className="text-[13px] font-medium">Search this meeting</span>
                             </div>
                             <button
                                 onClick={handleClose}
                                 className="p-2 transition-colors group"
                             >
-                                <X size={16} className="text-[#636366] group-hover:text-red-500 group-hover:drop-shadow-[0_0_8px_rgba(239,68,68,0.5)] transition-all duration-300" />
+                                <X size={16} className="text-text-tertiary group-hover:text-red-500 group-hover:drop-shadow-[0_0_8px_rgba(239,68,68,0.5)] transition-all duration-300" />
                             </button>
                         </div>
 

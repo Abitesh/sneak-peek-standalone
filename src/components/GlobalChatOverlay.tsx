@@ -30,7 +30,7 @@ const TypingIndicator: React.FC = () => (
             {[0, 1, 2].map((i) => (
                 <motion.div
                     key={i}
-                    className="w-2 h-2 rounded-full bg-[#636366]"
+                    className="w-2 h-2 rounded-full bg-text-tertiary"
                     animate={{ opacity: [0.4, 1, 0.4] }}
                     transition={{
                         duration: 0.6,
@@ -81,11 +81,11 @@ const AssistantMessage: React.FC<{ content: string; isStreaming?: boolean }> = (
             transition={{ duration: 0.15 }}
             className="flex flex-col items-start mb-6"
         >
-            <div className="text-white text-[15px] leading-relaxed max-w-[85%]">
+            <div className="text-text-primary text-[15px] leading-relaxed max-w-[85%]">
                 {content}
                 {isStreaming && (
                     <motion.span
-                        className="inline-block w-0.5 h-4 bg-[#A4A4A7] ml-0.5 align-middle"
+                        className="inline-block w-0.5 h-4 bg-text-secondary ml-0.5 align-middle"
                         animate={{ opacity: [1, 0] }}
                         transition={{ duration: 0.5, repeat: Infinity }}
                     />
@@ -94,7 +94,7 @@ const AssistantMessage: React.FC<{ content: string; isStreaming?: boolean }> = (
             {!isStreaming && content && (
                 <button
                     onClick={handleCopy}
-                    className="flex items-center gap-2 mt-3 text-[13px] text-[#636366] hover:text-[#A4A4A7] transition-colors"
+                    className="flex items-center gap-2 mt-3 text-[13px] text-text-tertiary hover:text-text-secondary transition-colors"
                 >
                     {copied ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
                     {copied ? 'Copied' : 'Copy message'}
@@ -283,19 +283,19 @@ const GlobalChatOverlay: React.FC<GlobalChatOverlayProps> = ({
                             height: { type: "spring", stiffness: 300, damping: 30, mass: 0.8 },
                             opacity: { duration: 0.2 }
                         }}
-                        className="relative mx-auto w-full max-w-[680px] mb-0 bg-[#121214] rounded-t-[24px] border-t border-x border-white/[0.08] shadow-2xl overflow-hidden flex flex-col"
+                        className="relative mx-auto w-full max-w-[680px] mb-0 bg-bg-secondary rounded-t-[24px] border-t border-x border-border-subtle shadow-2xl overflow-hidden flex flex-col"
                         onClick={(e) => e.stopPropagation()}
                     >
-                        <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.05] shrink-0">
-                            <div className="flex items-center gap-2 text-[#636366]">
-                                <img src={nativelyIcon} className="w-3.5 h-3.5 opacity-50 grayscale" alt="logo" />
+                        <div className="flex items-center justify-between px-4 py-3 border-b border-border-subtle shrink-0">
+                            <div className="flex items-center gap-2 text-text-tertiary">
+                                <img src={nativelyIcon} className="w-3.5 h-3.5 force-black-icon brightness-0 dark:brightness-100 dark:opacity-50 dark:grayscale" alt="logo" />
                                 <span className="text-[13px] font-medium">Search all meetings</span>
                             </div>
                             <button
                                 onClick={handleClose}
                                 className="p-2 transition-colors group"
                             >
-                                <X size={16} className="text-[#636366] group-hover:text-red-500 group-hover:drop-shadow-[0_0_8px_rgba(239,68,68,0.5)] transition-all duration-300" />
+                                <X size={16} className="text-text-tertiary group-hover:text-red-500 group-hover:drop-shadow-[0_0_8px_rgba(239,68,68,0.5)] transition-all duration-300" />
                             </button>
                         </div>
 
@@ -332,7 +332,7 @@ const GlobalChatOverlay: React.FC<GlobalChatOverlayProps> = ({
                                     onChange={(e) => setQuery(e.target.value)}
                                     onKeyDown={handleInputKeyDown}
                                     placeholder="Ask me anything..."
-                                    className="w-full pl-5 pr-12 py-3 bg-[#1C1C1E]/20 backdrop-blur-xl border border-white/[0.08] rounded-full text-sm text-[#E9E9E9] placeholder-text-tertiary/70 focus:outline-none transition-all shadow-xl"
+                                    className="w-full pl-5 pr-12 py-3 bg-bg-elevated shadow-[0_8px_30px_rgb(0,0,0,0.12)] border border-border-muted dark:bg-bg-elevated/20 dark:backdrop-blur-xl dark:border-border-subtle rounded-full text-sm text-text-primary placeholder-text-tertiary/70 focus:outline-none transition-all"
                                 />
                                 <button
                                     onClick={() => {
@@ -341,7 +341,7 @@ const GlobalChatOverlay: React.FC<GlobalChatOverlayProps> = ({
                                             setQuery('');
                                         }
                                     }}
-                                    className={`absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full transition-all duration-200 border border-white/5 ${query.trim() ? 'bg-white text-black hover:scale-105' : 'bg-[#2C2C2E] text-[#E9E9E9] hover:bg-[#3A3A3C]'
+                                    className={`absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full transition-all duration-200 border border-white/5 ${query.trim() ? 'bg-text-primary text-bg-primary hover:scale-105' : 'bg-bg-item-active text-text-primary hover:bg-bg-item-hover'
                                         }`}
                                 >
                                     <ArrowUp size={16} className="transform rotate-45" />

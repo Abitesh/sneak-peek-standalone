@@ -168,7 +168,7 @@ ${meeting.detailedSummary.keyPoints?.map(item => `- ${item}`).join('\n') || 'Non
 
 
     return (
-        <div className="h-full w-full flex flex-col bg-[#0C0C0D] text-[#A4A4A7] font-sans overflow-hidden">
+        <div className="h-full w-full flex flex-col bg-bg-primary text-text-secondary font-sans overflow-hidden">
             {/* Main Content */}
             <main className="flex-1 overflow-y-auto custom-scrollbar">
                 <motion.div
@@ -190,7 +190,7 @@ ${meeting.detailedSummary.keyPoints?.map(item => `- ${item}`).join('\n') || 'Non
                                 initialValue={meeting.title}
                                 onSave={handleTitleSave}
                                 tagName="h1"
-                                className="text-3xl font-bold text-[#E9E9E9] tracking-tight -ml-2 px-2 py-1 rounded-md transition-colors"
+                                className="text-3xl font-bold text-text-primary tracking-tight -ml-2 px-2 py-1 rounded-md transition-colors"
                                 multiline={false}
                             />
                         </div>
@@ -202,20 +202,20 @@ ${meeting.detailedSummary.keyPoints?.map(item => `- ${item}`).join('\n') || 'Non
                     {/* Tabs */}
                     {/* Designing Tabs to match reference 1:1 (Dark Pill Container) */}
                     <div className="flex items-center justify-between mb-8">
-                        <div className="bg-[#121214] p-1 rounded-xl inline-flex items-center gap-0.5 border border-white/[0.08]">
+                        <div className="bg-bg-secondary p-1 rounded-xl inline-flex items-center gap-0.5 border border-border-subtle">
                             {['summary', 'transcript', 'usage'].map((tab) => (
                                 <button
                                     key={tab}
                                     onClick={() => setActiveTab(tab as any)}
                                     className={`
                                         relative px-3 py-1 text-[13px] font-medium rounded-lg transition-all duration-200 z-10
-                                        ${activeTab === tab ? 'text-[#E9E9E9]' : 'text-[#888889] hover:text-[#B0B0B1]'}
+                                        ${activeTab === tab ? 'text-text-primary' : 'text-text-tertiary hover:text-text-secondary'}
                                     `}
                                 >
                                     {activeTab === tab && (
                                         <motion.div
                                             layoutId="activeTabBackground"
-                                            className="absolute inset-0 bg-[#3A3A3C] rounded-lg -z-10 shadow-sm"
+                                            className="absolute inset-0 bg-bg-item-active rounded-lg -z-10 shadow-sm"
                                             initial={false}
                                             transition={{ type: "spring", stiffness: 400, damping: 30 }}
                                         />
@@ -228,7 +228,7 @@ ${meeting.detailedSummary.keyPoints?.map(item => `- ${item}`).join('\n') || 'Non
                         {/* Copy Button - Inline with Tabs (Always visible) */}
                         <button
                             onClick={handleCopy}
-                            className="flex items-center gap-2 text-xs font-medium text-[#A4A4A7] hover:text-white transition-colors"
+                            className="flex items-center gap-2 text-xs font-medium text-text-secondary hover:text-text-primary transition-colors"
                         >
                             {isCopied ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
                             {isCopied ? 'Copied' : activeTab === 'summary' ? 'Copy full summary' : activeTab === 'transcript' ? 'Copy full transcript' : 'Copy usage'}
@@ -264,7 +264,7 @@ ${meeting.detailedSummary.keyPoints?.map(item => `- ${item}`).join('\n') || 'Non
                                                 window.electronAPI?.updateMeetingSummary(meeting.id, { actionItemsTitle: val });
                                             }}
                                             tagName="h2"
-                                            className="text-lg font-semibold text-[#E9E9E9] -ml-2 px-2 py-1 rounded-sm transition-colors"
+                                            className="text-lg font-semibold text-text-primary -ml-2 px-2 py-1 rounded-sm transition-colors"
                                             multiline={false}
                                         />
                                     </div>
@@ -321,7 +321,7 @@ ${meeting.detailedSummary.keyPoints?.map(item => `- ${item}`).join('\n') || 'Non
                                                 window.electronAPI?.updateMeetingSummary(meeting.id, { keyPointsTitle: val });
                                             }}
                                             tagName="h2"
-                                            className="text-lg font-semibold text-[#E9E9E9] -ml-2 px-2 py-1 rounded-sm transition-colors"
+                                            className="text-lg font-semibold text-text-primary -ml-2 px-2 py-1 rounded-sm transition-colors"
                                             multiline={false}
                                         />
                                     </div>
@@ -363,7 +363,7 @@ ${meeting.detailedSummary.keyPoints?.map(item => `- ${item}`).join('\n') || 'Non
                                                 <span className="text-xs font-semibold text-text-secondary">{entry.speaker === 'user' ? 'Me' : 'Them'}</span>
                                                 <span className="text-xs text-text-tertiary font-mono">{entry.timestamp ? formatTime(entry.timestamp) : '0:00'}</span>
                                             </div>
-                                            <p className="text-[#A4A4A7] text-[15px] leading-relaxed transition-colors select-text cursor-text">{entry.text}</p>
+                                            <p className="text-text-secondary text-[15px] leading-relaxed transition-colors select-text cursor-text">{entry.text}</p>
                                         </div>
                                     ))}
                                     {!meeting.transcript?.length && <p className="text-text-tertiary">No transcript available.</p>}
@@ -378,7 +378,7 @@ ${meeting.detailedSummary.keyPoints?.map(item => `- ${item}`).join('\n') || 'Non
                                         {/* User Question */}
                                         {interaction.question && (
                                             <div className="flex justify-end">
-                                                <div className="bg-[#0A84FF] text-white px-5 py-2.5 rounded-2xl rounded-tr-sm max-w-[80%] text-[15px] font-medium leading-relaxed shadow-sm">
+                                                <div className="bg-accent-primary text-white px-5 py-2.5 rounded-2xl rounded-tr-sm max-w-[80%] text-[15px] font-medium leading-relaxed shadow-sm">
                                                     {interaction.question}
                                                 </div>
                                             </div>
@@ -394,7 +394,7 @@ ${meeting.detailedSummary.keyPoints?.map(item => `- ${item}`).join('\n') || 'Non
                                                 </div>
                                                 <div>
                                                     <div className="text-[11px] text-text-tertiary mb-1.5 font-medium">{formatTime(interaction.timestamp)}</div>
-                                                    <p className="text-[#A4A4A7] text-[15px] leading-relaxed whitespace-pre-wrap">{interaction.answer}</p>
+                                                    <p className="text-text-secondary text-[15px] leading-relaxed whitespace-pre-wrap">{interaction.answer}</p>
                                                 </div>
                                             </div>
                                         )}
@@ -417,11 +417,11 @@ ${meeting.detailedSummary.keyPoints?.map(item => `- ${item}`).join('\n') || 'Non
                         onChange={(e) => setQuery(e.target.value)}
                         onKeyDown={handleInputKeyDown}
                         placeholder="Ask about this meeting..."
-                        className="w-full pl-5 pr-12 py-3 bg-[#1C1C1E]/20 backdrop-blur-xl border border-white/[0.08] rounded-full text-sm text-[#E9E9E9] placeholder-text-tertiary/70 focus:outline-none transition-all shadow-xl"
+                        className="w-full pl-5 pr-12 py-3 bg-bg-elevated shadow-[0_8px_30px_rgb(0,0,0,0.12)] border border-border-muted dark:bg-bg-elevated/20 dark:backdrop-blur-xl dark:border-border-subtle rounded-full text-sm text-text-primary placeholder-text-tertiary/70 focus:outline-none transition-all"
                     />
                     <button
                         onClick={handleSubmitQuestion}
-                        className={`absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full transition-all duration-200 border border-white/5 ${query.trim() ? 'bg-white text-black hover:scale-105' : 'bg-[#2C2C2E] text-[#E9E9E9] hover:bg-[#3A3A3C]'
+                        className={`absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full transition-all duration-200 border border-white/5 ${query.trim() ? 'bg-text-primary text-bg-primary hover:scale-105' : 'bg-bg-item-active text-text-primary hover:bg-bg-item-hover'
                             }`}
                     >
                         <ArrowUp size={16} className="transform rotate-45" />

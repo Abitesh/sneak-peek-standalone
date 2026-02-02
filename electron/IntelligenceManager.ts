@@ -390,8 +390,11 @@ export class IntelligenceManager extends EventEmitter {
      * MODE 2: What Should I Say (Primary)
      * Manual trigger - uses clean transcript pipeline for question inference
      * NEVER returns null - always provides a usable response
+     * @param question - Optional explicit question
+     * @param confidence - Confidence score (default 0.8)
+     * @param imagePath - Optional path to screenshot for visual context
      */
-    async runWhatShouldISay(question?: string, confidence: number = 0.8): Promise<string | null> {
+    async runWhatShouldISay(question?: string, confidence: number = 0.8, imagePath?: string): Promise<string | null> {
         const now = Date.now();
 
         // Cooldown check
@@ -453,16 +456,13 @@ export class IntelligenceManager extends EventEmitter {
                 this.assistantResponseHistory.length
             );
 
-            console.log(`[IntelligenceManager] Temporal RAG: ${temporalContext.previousResponses.length} responses, tone: ${temporalContext.toneSignals[0]?.type || 'neutral'}, intent: ${intentResult.intent}`);
+            console.log(`[IntelligenceManager] Temporal RAG: ${temporalContext.previousResponses.length} responses, tone: ${temporalContext.toneSignals[0]?.type || 'neutral'}, intent: ${intentResult.intent}${imagePath ? ', with image' : ''}`);
 
             // Single-pass LLM call: question inference + answer generation with temporal context + intent
-            // NOW STREAMING
-
-            // Emit start event if needed (optional)
-            // this.emit('suggested_answer_started');
+            // NOW STREAMING - with optional image support
 
             let fullAnswer = "";
-            const stream = this.whatToAnswerLLM.generateStream(preparedTranscript, temporalContext, intentResult);
+            const stream = this.whatToAnswerLLM.generateStream(preparedTranscript, temporalContext, intentResult, imagePath);
 
             for await (const token of stream) {
                 this.emit('suggested_answer_token', token, question || 'inferred', confidence);
@@ -472,10 +472,6 @@ export class IntelligenceManager extends EventEmitter {
             // Sanity check final answer
             if (!fullAnswer || fullAnswer.trim().length < 5) {
                 fullAnswer = "Could you repeat that? I want to make sure I address your question properly.";
-                // If stream yielded nothing, we should emit the fallback as a token?
-                // Or just let the completion event handle it.
-                // Ideally we send the fallback as a chunk if empty.
-                // But generateStream already yields fallback on error.
             }
 
             // Store in context (WhatToAnswerLLM never returns empty)

@@ -259,10 +259,12 @@ const TopSearchPill: React.FC<TopSearchPillProps> = ({
                             <div
                                 className={`
                                     relative overflow-hidden
-                                    bg-[#1C1C1E]/90
+                                    bg-bg-elevated/90
                                     backdrop-blur-xl backdrop-saturate-150
                                     rounded-2xl
                                     shadow-[0_20px_40px_-12px_rgba(0,0,0,0.6),0_0_0_1px_rgba(255,255,255,0.08),inset_0_1px_0_rgba(255,255,255,0.1)]
+                                    dark:shadow-[0_20px_40px_-12px_rgba(0,0,0,0.6),0_0_0_1px_rgba(255,255,255,0.08),inset_0_1px_0_rgba(255,255,255,0.1)]
+                                    shadow-sm border border-border-subtle
                                 `}
                             >
                                 {/* Input Row */}
@@ -271,7 +273,7 @@ const TopSearchPill: React.FC<TopSearchPillProps> = ({
                                     onClick={() => state === 'idle' && open()}
                                 >
                                     <div className="absolute left-3 flex items-center pointer-events-none">
-                                        <Search size={14} className="text-[#636366]" />
+                                        <Search size={14} className="text-text-tertiary" />
                                     </div>
                                     <input
                                         ref={inputRef}
@@ -282,8 +284,8 @@ const TopSearchPill: React.FC<TopSearchPillProps> = ({
                                         className={`
                                         w-full bg-transparent
                                         pl-9 pr-4 py-1
-                                        text-[13px] text-white
-                                        placeholder-[#636366]
+                                        text-[13px] text-text-primary
+                                        placeholder-text-tertiary
                                         focus:outline-none
                                         ${state === 'idle' ? 'cursor-pointer' : 'cursor-text'}
                                     `}
@@ -307,10 +309,10 @@ const TopSearchPill: React.FC<TopSearchPillProps> = ({
                                             className="overflow-hidden"
                                         >
                                             <div className="w-[480px]">
-                                                <div className="border-t border-white/[0.06] py-2">
+                                                <div className="border-t border-border-muted py-2">
                                                     {/* Explore Section */}
                                                     <div className="px-3 py-1">
-                                                        <div className="text-[10px] font-semibold text-[#636366] uppercase tracking-wider mb-1">
+                                                        <div className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wider mb-1">
                                                             Explore
                                                         </div>
 
@@ -323,8 +325,8 @@ const TopSearchPill: React.FC<TopSearchPillProps> = ({
                                                             w-full flex items-center gap-3 px-2 py-1.5 rounded-lg text-left
                                                             transition-colors duration-100
                                                             ${selectedIndex === 0
-                                                                    ? 'bg-[#2C2C2E]'
-                                                                    : 'hover:bg-[#252528]'
+                                                                    ? 'bg-bg-item-active'
+                                                                    : 'hover:bg-bg-item-hover'
                                                                 }
                                                         `}
                                                             onClick={() => handleSelect(0)}
@@ -333,7 +335,7 @@ const TopSearchPill: React.FC<TopSearchPillProps> = ({
                                                             <div className="w-6 h-6 rounded-md bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center shrink-0">
                                                                 <Sparkles size={12} className="text-white" />
                                                             </div>
-                                                            <span className="text-[13px] text-white truncate">
+                                                            <span className="text-[13px] text-text-primary truncate">
                                                                 {query}
                                                             </span>
                                                         </motion.button>
@@ -347,18 +349,18 @@ const TopSearchPill: React.FC<TopSearchPillProps> = ({
                                                             w-full flex items-center gap-3 px-2 py-1.5 rounded-lg text-left
                                                             transition-colors duration-100
                                                             ${selectedIndex === 1
-                                                                    ? 'bg-[#2C2C2E]'
-                                                                    : 'hover:bg-[#252528]'
+                                                                    ? 'bg-bg-item-active'
+                                                                    : 'hover:bg-bg-item-hover'
                                                                 }
                                                         `}
                                                             onClick={() => handleSelect(1)}
                                                             onMouseEnter={() => setSelectedIndex(1)}
                                                         >
-                                                            <div className="w-6 h-6 rounded-md bg-[#3A3A3C] flex items-center justify-center shrink-0">
-                                                                <Search size={12} className="text-[#A0A0A2]" />
+                                                            <div className="w-6 h-6 rounded-md bg-bg-item-surface flex items-center justify-center shrink-0">
+                                                                <Search size={12} className="text-text-secondary" />
                                                             </div>
-                                                            <span className="text-[13px] text-[#A0A0A2]">
-                                                                Search for <span className="text-white">"{query}"</span>
+                                                            <span className="text-[13px] text-text-secondary">
+                                                                Search for <span className="text-text-primary">"{query}"</span>
                                                             </span>
                                                         </motion.button>
                                                     </div>
@@ -366,7 +368,7 @@ const TopSearchPill: React.FC<TopSearchPillProps> = ({
                                                     {/* Sessions Section */}
                                                     {sessionResults.length > 0 && (
                                                         <div className="px-3 py-1 mt-1">
-                                                            <div className="text-[10px] font-semibold text-[#636366] uppercase tracking-wider mb-1">
+                                                            <div className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wider mb-1">
                                                                 Sessions
                                                             </div>
 
@@ -383,22 +385,22 @@ const TopSearchPill: React.FC<TopSearchPillProps> = ({
                                                                         w-full flex items-center gap-3 px-2 py-1.5 rounded-lg text-left
                                                                         transition-colors duration-100
                                                                         ${selectedIndex === index + 2
-                                                                                ? 'bg-[#2C2C2E]'
-                                                                                : 'hover:bg-[#252528]'
+                                                                                ? 'bg-bg-item-active'
+                                                                                : 'hover:bg-bg-item-hover'
                                                                             }
                                                                     `}
                                                                         onClick={() => handleSelect(index + 2)}
                                                                         onMouseEnter={() => setSelectedIndex(index + 2)}
                                                                     >
-                                                                        <div className="w-6 h-6 rounded-md bg-[#3A3A3C] flex items-center justify-center shrink-0">
-                                                                            <FileText size={12} className="text-[#A0A0A2]" />
+                                                                        <div className="w-6 h-6 rounded-md bg-bg-item-surface flex items-center justify-center shrink-0">
+                                                                            <FileText size={12} className="text-text-secondary" />
                                                                         </div>
                                                                         <div className="flex-1 min-w-0">
-                                                                            <div className="text-[13px] text-white truncate">
+                                                                            <div className="text-[13px] text-text-primary truncate">
                                                                                 {result.title}
                                                                             </div>
                                                                             {result.subtitle && (
-                                                                                <div className="text-[11px] text-[#636366]">
+                                                                                <div className="text-[11px] text-text-tertiary">
                                                                                     {result.subtitle}
                                                                                 </div>
                                                                             )}

@@ -6,6 +6,7 @@
 
 import { GoogleGenAI } from "@google/genai";
 import Groq from "groq-sdk";
+import * as fs from "fs";
 import { WHAT_TO_ANSWER_PROMPT, GROQ_WHAT_TO_ANSWER_PROMPT, TEMPORAL_CONTEXT_TEMPLATE, buildWhatToAnswerContents } from "./prompts";
 import { TemporalContext, formatTemporalContextForPrompt } from "./TemporalContextBuilder";
 import { IntentResult, ConversationIntent } from "./IntentClassifier";
@@ -81,26 +82,29 @@ ANSWER SHAPE: ${intentResult.answerShape}
 
     /**
      * Generate a spoken interview answer from transcript context (Streamed)
-     * Uses Groq first if available, falls back to Gemini
+     * Uses Groq first if available (text-only), falls back to Gemini
+     * Supports multimodal: when imagePath is provided, uses Gemini directly
      * @param cleanedTranscript - The cleaned and formatted transcript
      * @param temporalContext - Optional temporal context for anti-repetition
      * @param intentResult - Optional intent classification for answer shaping
+     * @param imagePath - Optional path to screenshot for visual context
      */
     async *generateStream(
         cleanedTranscript: string,
         temporalContext?: TemporalContext,
-        intentResult?: IntentResult
+        intentResult?: IntentResult,
+        imagePath?: string
     ): AsyncGenerator<string> {
         try {
-            // Handle empty/thin transcript gracefully
-            if (!cleanedTranscript || cleanedTranscript.trim().length < 10) {
+            // Handle empty/thin transcript gracefully (but allow if image is present)
+            if ((!cleanedTranscript || cleanedTranscript.trim().length < 10) && !imagePath) {
                 const fallback = this.getFallbackAnswer();
                 yield fallback;
                 return;
             }
 
-            // Try Groq first if available
-            if (this.groqClient) {
+            // Try Groq first if available (text-only, skip if image is present)
+            if (this.groqClient && !imagePath) {
                 try {
                     console.log(`[WhatToAnswerLLM] 🚀 Using Groq (${GROQ_MODEL}), intent: ${intentResult?.intent || 'general'}...`);
                     const enrichedPrompt = this.buildEnrichedPrompt(temporalContext, intentResult);
@@ -132,9 +136,40 @@ ANSWER SHAPE: ${intentResult.answerShape}
                 }
             }
 
-            // Fallback to Gemini
-            console.log(`[WhatToAnswerLLM] 🔄 Using Gemini fallback...`);
-            const contents = buildWhatToAnswerContents(cleanedTranscript);
+            // Fallback to Gemini (or primary when image is present)
+            console.log(`[WhatToAnswerLLM] 🔄 Using Gemini${imagePath ? ' with image' : ''}...`);
+
+            // Build contents - include image if present
+            let contents: any[] = buildWhatToAnswerContents(cleanedTranscript || 'Analyze the attached image and suggest what to say.');
+
+            // Add image to the request if present
+            if (imagePath) {
+                try {
+                    const imageData = fs.readFileSync(imagePath);
+                    const base64Image = imageData.toString('base64');
+                    const mimeType = imagePath.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
+
+                    // Prepend image context instruction
+                    contents = [
+                        {
+                            role: "user",
+                            parts: [
+                                { text: WHAT_TO_ANSWER_PROMPT },
+                                {
+                                    inlineData: {
+                                        data: base64Image,
+                                        mimeType: mimeType
+                                    }
+                                },
+                                { text: `\n\nAn image is attached showing visual context (code, question, or problem). Analyze it together with the conversation below and suggest what the user should say.\n\nCONVERSATION:\n${cleanedTranscript || '(No recent transcript - focus on the image)'}` }
+                            ]
+                        }
+                    ];
+                    console.log(`[WhatToAnswerLLM] 📸 Image attached: ${imagePath}`);
+                } catch (imgErr: any) {
+                    console.warn(`[WhatToAnswerLLM] ⚠️ Failed to read image: ${imgErr.message}`);
+                }
+            }
 
             const streamResult = await this.client.models.generateContentStream({
                 model: this.modelName,

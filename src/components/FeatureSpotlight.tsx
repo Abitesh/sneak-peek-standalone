@@ -41,7 +41,7 @@ const FEATURES: FeatureSlide[] = [
         ],
         type: 'support',
         actionLabel: 'Contribute to development',
-        url: 'https://github.com/sponsors/evinjohnn'
+        url: 'https://ko-fi.com/evinjohnn'
     }
 ];
 

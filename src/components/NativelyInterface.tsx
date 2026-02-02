@@ -552,8 +552,23 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) =
         setIsExpanded(true);
         setIsProcessing(true);
 
+        // Capture and clear attached image context
+        const currentAttachment = attachedContext;
+        if (currentAttachment) {
+            setAttachedContext(null);
+            // Show the attached image in chat
+            setMessages(prev => [...prev, {
+                id: Date.now().toString(),
+                role: 'user',
+                text: 'What should I say about this?',
+                hasScreenshot: true,
+                screenshotPreview: currentAttachment.preview
+            }]);
+        }
+
         try {
-            await window.electronAPI.generateWhatToSay();
+            // Pass imagePath if attached
+            await window.electronAPI.generateWhatToSay(undefined, currentAttachment?.path);
         } catch (err) {
             setMessages(prev => [...prev, {
                 id: Date.now().toString(),

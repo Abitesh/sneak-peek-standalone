@@ -104,49 +104,30 @@ impl SpeakerInput {
 
             // Update sample rate if needed
             ctx.current_sample_rate.store(
-                device.actual_sample_rate().unwrap_or(ctx.format.absd().sample_rate) as u32,
-                Ordering::Release
+                device
+                    .actual_sample_rate()
+                    .unwrap_or(ctx.format.absd().sample_rate) as u32,
+                Ordering::Release,
             );
 
-            // Extract audio data
-            if let Some(view) = av::AudioPcmBuf::with_buf_list_no_copy(&ctx.format, input_data, None) {
-                 // Try f32 planar/interleaved
-                 // Handle interleaved or planar buffers
-                 if let Some(float_slice) = view.data_f32_at(0) {
-                     let channel_count = ctx.format.absd().channels_per_frame;
-                     if channel_count == 1 {
-                         process_audio_data(ctx, float_slice);
-                     } else if channel_count == 2 {
-                         // Downmix stereo to mono
-                         let frame_count = float_slice.len() / 2;
-                         let mut inner_prod = &mut ctx.producer;
-                         for i in 0..frame_count {
-                             let left = float_slice[i * 2];
-                             let right = float_slice[i * 2 + 1];
-                             let mono = (left + right) * 0.5;
-                             let _ = inner_prod.try_push(mono);
-                         }
-                     } else {
-                         // Generic downmix (average first 2 channels or just take first)
-                         // Fallback: Take channel 0
-                         let stride = channel_count as usize;
-                         let frame_count = float_slice.len() / stride;
-                         let mut inner_prod = &mut ctx.producer;
-                         for i in 0..frame_count {
-                             let _ = inner_prod.try_push(float_slice[i * stride]);
-                         }
-                     }
-                 }
+            // Extract audio data (Simpler logic from Pluely)
+            if let Some(view) =
+                av::AudioPcmBuf::with_buf_list_no_copy(&ctx.format, input_data, None)
+            {
+                if let Some(data) = view.data_f32_at(0) {
+                     process_audio_data(ctx, data);
+                }
             } else if ctx.format.common_format() == av::audio::CommonFormat::PcmF32 {
-                 let first_buffer = &input_data.buffers[0];
-                 let byte_count = first_buffer.data_bytes_size as usize;
-                 let float_count = byte_count / std::mem::size_of::<f32>();
-                 if float_count > 0 && !first_buffer.data.is_null() {
-                      let data = unsafe {
-                          std::slice::from_raw_parts(first_buffer.data as *const f32, float_count)
-                      };
-                      process_audio_data(ctx, data);
-                 }
+                let first_buffer = &input_data.buffers[0];
+                let byte_count = first_buffer.data_bytes_size as usize;
+                let float_count = byte_count / std::mem::size_of::<f32>();
+
+                if float_count > 0 && !first_buffer.data.is_null() {
+                    let data = unsafe {
+                        std::slice::from_raw_parts(first_buffer.data as *const f32, float_count)
+                    };
+                    process_audio_data(ctx, data);
+                }
             }
 
             os::Status::NO_ERR
@@ -161,19 +142,7 @@ impl SpeakerInput {
     }
 
     pub fn stream(self) -> SpeakerStream {
-         let asbd = self.tap.asbd().unwrap_or_else(|_| {
-             // Fallback to 44.1k f32 if tap returns nothing
-             let mut asbd = cat::AudioStreamBasicDesc::default();
-             asbd.sample_rate = 44100.0;
-             asbd.format = cat::AudioFormat(0x6c70636d); // kAudioFormatLinearPCM
-             asbd.format_flags = cat::AudioFormatFlags(1 | 8);   // kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked
-             asbd.bytes_per_packet = 4;
-             asbd.frames_per_packet = 1;
-             asbd.bytes_per_frame = 4;
-             asbd.channels_per_frame = 1;
-             asbd.bits_per_channel = 32;
-             asbd
-        });
+         let asbd = self.tap.asbd().expect("Failed to get ASBD from tap");
         
         let format = av::AudioFormat::with_asbd(&asbd).unwrap();
         println!("[CoreAudioTap] Format: {}Hz, {}ch", asbd.sample_rate, asbd.channels_per_frame);
@@ -230,11 +199,37 @@ fn process_audio_data(ctx: &mut Ctx, data: &[f32]) {
         }
     }
 
-    let _pushed = ctx.producer.push_slice(data);
-    
-    // We can add overflow detection here later if needed
-    // For now, lock-free push is all we need
-    // Note: No mutexes here!
+    // Pluely Logic
+    let buffer_size = data.len();
+    let pushed = ctx.producer.push_slice(data);
+
+    if pushed < buffer_size {
+        let consecutive = ctx.consecutive_drops.fetch_add(1, Ordering::AcqRel) + 1;
+        if consecutive == 25 {
+            eprintln!("Warning: Audio buffer experiencing drops - system may be overloaded");
+        }
+        if consecutive > 50 {
+            eprintln!("Critical: Audio buffer overflow - capture stopping");
+            ctx.should_terminate.store(true, Ordering::Release);
+            return;
+        }
+    } else {
+        ctx.consecutive_drops.store(0, Ordering::Release);
+    }
+
+    let should_wake = {
+        let mut waker_state = ctx.waker_state.lock().unwrap();
+        if !waker_state.has_data {
+            waker_state.has_data = true;
+            waker_state.waker.take()
+        } else {
+            None
+        }
+    };
+
+    if let Some(waker) = should_wake {
+        waker.wake();
+    }
 }
 
 pub struct SpeakerStream {
@@ -252,6 +247,14 @@ impl SpeakerStream {
 
     pub fn take_consumer(&mut self) -> Option<HeapCons<f32>> {
         self.consumer.take()
+    }
+}
+
+
+
+impl Drop for SpeakerStream {
+    fn drop(&mut self) {
+        self._ctx.should_terminate.store(true, Ordering::Release);
     }
 }
 

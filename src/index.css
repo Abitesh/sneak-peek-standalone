@@ -67,53 +67,56 @@
   /* --- LIGHT MODE PALETTE (Refined Material Model) --- */
 
   /* Canvas = Matte Paper | Cards = Porcelain */
-  --bg-primary: #F9F9F9;
-  /* Matte Paper: Soft, slight warmth, not sterile */
-  --bg-secondary: #FFFFFF;
-  /* Porcelain: Distinct headers */
+  --bg-primary: #FFFFFF;
+  /* Pure White */
+  --bg-secondary: #F5F5F7;
+  /* Light Grey for separation */
   --bg-elevated: #FFFFFF;
   /* Porcelain: Clean cards */
-  --bg-input: #F0F0F2;
+  --bg-input: #Eaeaea;
   /* Recessed/Input areas */
 
   /* Reference Image Mappings (Light) */
-  --bg-sidebar: #FAFAFA;
+  --bg-sidebar: #F5F5F7;
   /* User Spec Light */
   --bg-main: #FFFFFF;
   /* User Spec Light */
-  --bg-card: #F4F4F5;
+  --bg-card: #F9F9FB;
   /* User Spec Light */
   --bg-item-active: #E4E4E7;
   /* User Spec Light */
 
   --bg-toggle-switch: #E4E4E7;
   /* User Spec Light */
-  --bg-item-surface: #F4F4F5;
+  --bg-item-surface: #F0F0F2;
   /* User Spec Light */
 
   /* Text = Graphite Ink */
-  --text-primary: #1C1C1E;
-  /* deep graphite, never pure black */
-  --text-secondary: #636366;
-  /* distinctly receded grey */
+  --text-primary: #000000;
+  /* Pure black for max contrast */
+  --text-secondary: #3A3A3C;
+  /* Dark Grey */
   --text-tertiary: #8E8E93;
   /* structural metadata */
 
   /* Borders = Nearly Invisible */
-  --border-subtle: rgba(0, 0, 0, 0.04);
-  --border-muted: rgba(0, 0, 0, 0.08);
+  --border-subtle: rgba(0, 0, 0, 0.06);
+  --border-muted: rgba(0, 0, 0, 0.12);
 
   /* Accent = Calm & Confident */
   --accent-primary: #0071E3;
-  /* Premium balanced blue */
   /* Premium balanced blue */
   --accent-muted: rgba(0, 113, 227, 0.12);
 
   --bg-component: #F0F0F2;
   /* Input/Button background in Light Mode */
 
-  --overlay-bg: rgba(245, 245, 247, 0.75);
+  --overlay-bg: rgba(245, 245, 247, 0.85);
   /* Frosted matte glass */
+
+  .force-black-icon {
+    filter: brightness(0) !important;
+  }
 }
 
 /* App sizing baseline (required for h-full / flex scroll areas) */

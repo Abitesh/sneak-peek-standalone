@@ -443,11 +443,11 @@ export function initializeIpcHandlers(appState: AppState): void {
   });
 
   // MODE 2: What Should I Say (Primary auto-answer)
-  ipcMain.handle("generate-what-to-say", async (_, question?: string) => {
+  ipcMain.handle("generate-what-to-say", async (_, question?: string, imagePath?: string) => {
     try {
       const intelligenceManager = appState.getIntelligenceManager();
-      // Question is now optional - IntelligenceManager infers from transcript
-      const answer = await intelligenceManager.runWhatShouldISay(question);
+      // Question and imagePath are now optional - IntelligenceManager infers from transcript
+      const answer = await intelligenceManager.runWhatShouldISay(question, 0.8, imagePath);
       return { answer, question: question || 'inferred from context' };
     } catch (error: any) {
       // Return graceful fallback instead of throwing

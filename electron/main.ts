@@ -772,9 +772,17 @@ export class AppState {
   public async takeScreenshot(): Promise<string> {
     if (!this.getMainWindow()) throw new Error("No main window available")
 
+    const wasOverlayVisible = this.windowHelper.getOverlayWindow()?.isVisible() ?? false
+
     const screenshotPath = await this.screenshotHelper.takeScreenshot(
       () => this.hideMainWindow(),
-      () => this.showMainWindow()
+      () => {
+        if (wasOverlayVisible) {
+          this.windowHelper.switchToOverlay()
+        } else {
+          this.showMainWindow()
+        }
+      }
     )
 
     return screenshotPath
@@ -783,9 +791,17 @@ export class AppState {
   public async takeSelectiveScreenshot(): Promise<string> {
     if (!this.getMainWindow()) throw new Error("No main window available")
 
+    const wasOverlayVisible = this.windowHelper.getOverlayWindow()?.isVisible() ?? false
+
     const screenshotPath = await this.screenshotHelper.takeSelectiveScreenshot(
       () => this.hideMainWindow(),
-      () => this.showMainWindow()
+      () => {
+        if (wasOverlayVisible) {
+          this.windowHelper.switchToOverlay()
+        } else {
+          this.showMainWindow()
+        }
+      }
     )
 
     return screenshotPath

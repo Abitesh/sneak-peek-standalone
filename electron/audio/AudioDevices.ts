@@ -3,7 +3,7 @@ import path from 'path';
 let NativeModule: any = null;
 
 try {
-    NativeModule = require('../../native-module/index.node');
+    NativeModule = require('natively-audio');
 } catch (e) {
     console.error('[AudioDevices] Failed to load native module:', e);
 }
