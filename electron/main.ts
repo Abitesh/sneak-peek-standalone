@@ -670,6 +670,12 @@ export class AppState {
     }
   }
 
+  public setRecognitionLanguage(key: string): void {
+    console.log(`[AppState] Setting recognition language to: ${key}`);
+    this.googleSTT?.setRecognitionLanguage(key);
+    this.googleSTT_User?.setRecognitionLanguage(key);
+  }
+
   public static getInstance(): AppState {
     if (!AppState.instance) {
       AppState.instance = new AppState()

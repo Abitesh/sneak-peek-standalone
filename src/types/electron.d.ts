@@ -57,6 +57,9 @@ export interface ElectronAPI {
   onSuggestionProcessingStart: (callback: () => void) => () => void
   onSuggestionError: (callback: (error: { error: string }) => void) => () => void
   generateSuggestion: (context: string, lastQuestion: string) => Promise<{ suggestion: string }>
+  getInputDevices: () => Promise<Array<{ id: string; name: string }>>
+  getOutputDevices: () => Promise<Array<{ id: string; name: string }>>
+  setRecognitionLanguage: (key: string) => Promise<{ success: boolean; error?: string }>
 
   getNativeAudioStatus: () => Promise<{ connected: boolean }>
 

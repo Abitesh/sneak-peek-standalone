@@ -3,10 +3,11 @@ import {
     X, Mic, Speaker, Monitor, Keyboard, User, LifeBuoy, LogOut,
     Command, ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
     AppWindow, Camera, RotateCcw, Eye, Layout, MessageSquare, Crop,
-    ChevronDown, Check, BadgeCheck, Power, Palette, Calendar, Ghost, Sun, Moon, RefreshCw, Info
+    ChevronDown, Check, BadgeCheck, Power, Palette, Calendar, Ghost, Sun, Moon, RefreshCw, Info, FlaskConical
 } from 'lucide-react';
 import { AboutSection } from './AboutSection';
 import { motion, AnimatePresence } from 'framer-motion';
+import { ENGLISH_VARIANTS } from '../config/languages';
 
 interface CustomSelectProps {
     label: string;
@@ -85,6 +86,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
     const [activeTab, setActiveTab] = useState('general');
     const [isUndetectable, setIsUndetectable] = useState(true);
     const [openOnLogin, setOpenOnLogin] = useState(false);
+    const [showTranscription, setShowTranscription] = useState(true);
     const [themeMode, setThemeMode] = useState<'system' | 'light' | 'dark'>('system');
     const [isThemeDropdownOpen, setIsThemeDropdownOpen] = useState(false);
     const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'available' | 'uptodate' | 'error'>('idle');
@@ -127,8 +129,12 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
     const [groqApiKey, setGroqApiKey] = useState('');
 
     const [serviceAccountPath, setServiceAccountPath] = useState('');
+
     const [calendarStatus, setCalendarStatus] = useState<{ connected: boolean; email?: string }>({ connected: false });
     const [isCalendarsLoading, setIsCalendarsLoading] = useState(false);
+
+    // Language Settings
+    const [recognitionLanguage, setRecognitionLanguage] = useState<string>('english-india'); // Default smart fallback
 
     const audioContextRef = React.useRef<AudioContext | null>(null);
     const analyserRef = React.useRef<AnalyserNode | null>(null);
@@ -197,6 +203,10 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                 window.electronAPI.getThemeMode().then(({ mode }) => setThemeMode(mode));
             }
 
+            // Load local preferences
+            const savedShowTrans = localStorage.getItem('natively_showTranscription');
+            if (savedShowTrans !== null) setShowTranscription(savedShowTrans === 'true');
+
             // Load settings
             const loadDevices = async () => {
                 try {
@@ -247,6 +257,28 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
             // Load Calendar Status
             if (window.electronAPI?.getCalendarStatus) {
                 window.electronAPI.getCalendarStatus().then(setCalendarStatus);
+            }
+
+            // Load Language Pref
+            const savedLang = localStorage.getItem('recognitionLanguage');
+            if (savedLang && ENGLISH_VARIANTS[savedLang]) {
+                setRecognitionLanguage(savedLang);
+                window.electronAPI?.setRecognitionLanguage(savedLang);
+            } else {
+                // Smart Default Logic
+                // 1. OS Locale = en-US -> english-us
+                // 2. Else -> english-india (covers India, Unknown, First Launch)
+                const locale = navigator.language;
+
+                let defaultKey = 'english-india';
+
+                if (locale === 'en-US') {
+                    defaultKey = 'english-us';
+                }
+
+                setRecognitionLanguage(defaultKey);
+                localStorage.setItem('recognitionLanguage', defaultKey);
+                window.electronAPI?.setRecognitionLanguage(defaultKey);
             }
         }
     }, [isOpen, selectedInput, selectedOutput]); // Re-run if isOpen changes, or if selected devices are cleared
@@ -501,6 +533,29 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                                 </div>
                                             </div>
 
+                                            {/* Show Transcription */}
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex items-center gap-4">
+                                                    <div className="w-10 h-10 bg-bg-item-surface rounded-lg border border-border-subtle flex items-center justify-center text-text-tertiary">
+                                                        <MessageSquare size={20} />
+                                                    </div>
+                                                    <div>
+                                                        <h3 className="text-sm font-bold text-text-primary">Show Interviewer Transcription</h3>
+                                                        <p className="text-xs text-text-secondary mt-0.5">Show real-time speech transcription from the interviewer</p>
+                                                    </div>
+                                                </div>
+                                                <div
+                                                    onClick={() => {
+                                                        const newState = !showTranscription;
+                                                        setShowTranscription(newState);
+                                                        localStorage.setItem('natively_showTranscription', String(newState));
+                                                    }}
+                                                    className={`w-11 h-6 rounded-full relative cursor-pointer transition-colors ${showTranscription ? 'bg-accent-primary' : 'bg-bg-toggle-switch border border-border-muted'}`}
+                                                >
+                                                    <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${showTranscription ? 'translate-x-5' : 'translate-x-0'}`} />
+                                                </div>
+                                            </div>
+
                                             {/* Theme */}
                                             <div className="flex items-center justify-between">
                                                 <div className="flex items-center gap-4">
@@ -715,6 +770,34 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                     <div>
                                         <h3 className="text-lg font-medium text-text-primary mb-4">Audio Configuration</h3>
                                         <div className="space-y-4">
+
+                                            {/* Language Selector */}
+                                            <div>
+                                                <CustomSelect
+                                                    label="Preferred English Accent"
+                                                    icon={<MessageSquare size={16} />}
+                                                    value={recognitionLanguage}
+                                                    options={Object.entries(ENGLISH_VARIANTS).map(([key, variant]) => ({
+                                                        deviceId: key, // Reusing CustomSelect's "deviceId" as value key
+                                                        label: variant.label,
+                                                        kind: 'audioinput',
+                                                        groupId: '',
+                                                        toJSON: () => ({})
+                                                    }))}
+                                                    onChange={(key) => {
+                                                        setRecognitionLanguage(key);
+                                                        localStorage.setItem('recognitionLanguage', key);
+                                                        window.electronAPI?.setRecognitionLanguage(key);
+                                                    }}
+                                                    placeholder="Select Language"
+                                                />
+                                                <p className="text-xs text-text-secondary mt-2 px-1">
+                                                    Improves accuracy by prioritizing your accent. Other English accents are still supported .
+                                                </p>
+                                            </div>
+
+                                            <div className="h-px bg-border-subtle my-2" />
+
                                             <CustomSelect
                                                 label="Input Device"
                                                 icon={<Mic size={16} />}
@@ -773,20 +856,25 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                             <div className="h-px bg-border-subtle my-4" />
 
                                             {/* Experimental ScreenCaptureKit Toggle */}
-                                            <div className="flex items-center justify-between">
-                                                <div>
-                                                    <h3 className="text-sm font-bold text-text-primary">Experimental: CoreAudio Backend</h3>
-                                                    <p className="text-xs text-text-secondary mt-0.5">Use legacy CoreAudio Tap instead of ScreenCaptureKit (May be unstable)</p>
-                                                </div>
-                                                <div
-                                                    onClick={() => {
-                                                        const newState = !useLegacyAudio;
-                                                        setUseLegacyAudio(newState);
-                                                        window.localStorage.setItem('useLegacyAudioBackend', newState ? 'true' : 'false');
-                                                    }}
-                                                    className={`w-11 h-6 rounded-full relative cursor-pointer transition-colors ${useLegacyAudio ? 'bg-accent-primary' : 'bg-bg-toggle-switch border border-border-muted'}`}
-                                                >
-                                                    <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${useLegacyAudio ? 'translate-x-5' : 'translate-x-0'}`} />
+                                            <div className="mt-6">
+                                                <h3 className="text-xs font-bold text-amber-500 uppercase tracking-wider mb-2 flex items-center gap-2">
+                                                    <FlaskConical size={14} /> Experimental
+                                                </h3>
+                                                <div className={`bg-bg-card rounded-xl p-5 border transition-all duration-300 flex items-center justify-between ${useLegacyAudio ? 'border-amber-500/50 shadow-[0_0_15px_-3px_rgba(245,158,11,0.15)]' : 'border-border-subtle'}`}>
+                                                    <div>
+                                                        <h3 className="text-sm font-bold text-text-primary">CoreAudio Backend</h3>
+                                                        <p className="text-xs text-text-secondary mt-0.5">Use legacy CoreAudio Tap instead of ScreenCaptureKit</p>
+                                                    </div>
+                                                    <div
+                                                        onClick={() => {
+                                                            const newState = !useLegacyAudio;
+                                                            setUseLegacyAudio(newState);
+                                                            window.localStorage.setItem('useLegacyAudioBackend', newState ? 'true' : 'false');
+                                                        }}
+                                                        className={`w-11 h-6 rounded-full relative cursor-pointer transition-colors ${useLegacyAudio ? 'bg-amber-500' : 'bg-bg-toggle-switch border border-border-muted'}`}
+                                                    >
+                                                        <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${useLegacyAudio ? 'translate-x-5' : 'translate-x-0'}`} />
+                                                    </div>
                                                 </div>
                                             </div>
                                         </div>

@@ -6,6 +6,9 @@ const SettingsPopup = () => {
     const [useGeminiPro, setUseGeminiPro] = useState(() => {
         return localStorage.getItem('natively_model_preference') === 'pro';
     });
+    const [showTranscription, setShowTranscription] = useState(() => {
+        return localStorage.getItem('natively_showTranscription') !== 'false';
+    });
 
     const isFirstRender = React.useRef(true);
     const isFirstUndetectableRender = React.useRef(true);
@@ -40,6 +43,10 @@ const SettingsPopup = () => {
             console.error(e);
         }
     }, [useGeminiPro]);
+
+    useEffect(() => {
+        localStorage.setItem('natively_showTranscription', String(showTranscription));
+    }, [showTranscription]);
 
     const contentRef = useRef<HTMLDivElement>(null);
 
@@ -105,6 +112,22 @@ const SettingsPopup = () => {
                         className={`w-[30px] h-[18px] rounded-full p-[1.5px] transition-all duration-300 ease-spring active:scale-[0.92] ${useGeminiPro ? 'bg-yellow-500 shadow-[0_2px_10px_rgba(234,179,8,0.3)]' : 'bg-white/10'}`}
                     >
                         <div className={`w-[15px] h-[15px] rounded-full bg-black shadow-sm transition-transform duration-300 ease-spring ${useGeminiPro ? 'translate-x-[12px]' : 'translate-x-0'}`} />
+                    </button>
+                </div>
+
+                {/* Transcription Toggle */}
+                <div className="flex items-center justify-between px-3 py-2 hover:bg-white/5 rounded-lg transition-colors duration-200 group cursor-default">
+                    <div className="flex items-center gap-3">
+                        <MessageSquare
+                            className={`w-4 h-4 transition-colors ${showTranscription ? 'text-emerald-400' : 'text-slate-500 group-hover:text-slate-300'}`}
+                        />
+                        <span className="text-[12px] text-slate-400 group-hover:text-slate-200 font-medium transition-colors">Transcription</span>
+                    </div>
+                    <button
+                        onClick={() => setShowTranscription(!showTranscription)}
+                        className={`w-[30px] h-[18px] rounded-full p-[1.5px] transition-all duration-300 ease-spring active:scale-[0.92] ${showTranscription ? 'bg-emerald-500 shadow-[0_2px_10px_rgba(16,185,129,0.3)]' : 'bg-white/10'}`}
+                    >
+                        <div className={`w-[15px] h-[15px] rounded-full bg-black shadow-sm transition-transform duration-300 ease-spring ${showTranscription ? 'translate-x-[12px]' : 'translate-x-0'}`} />
                     </button>
                 </div>
 

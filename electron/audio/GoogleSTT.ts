@@ -1,6 +1,7 @@
 import { SpeechClient } from '@google-cloud/speech';
 import { EventEmitter } from 'events';
 import * as path from 'path';
+import { ENGLISH_VARIANTS } from '../config/languages';
 
 /**
  * GoogleSTT
@@ -21,6 +22,7 @@ export class GoogleSTT extends EventEmitter {
     private sampleRateHertz = 16000;
     private audioChannelCount = 1; // Default to Mono
     private languageCode = 'en-US';
+    private alternativeLanguageCodes: string[] = ['en-IN', 'en-GB']; // Default fallbacks
 
     constructor() {
         super();
@@ -70,6 +72,31 @@ export class GoogleSTT extends EventEmitter {
         this.audioChannelCount = count;
         if (this.isStreaming) {
             console.warn('[GoogleSTT] Config changed while streaming. Restarting stream...');
+            this.stop();
+            this.start();
+        }
+    }
+
+    public setRecognitionLanguage(key: string): void {
+        const config = ENGLISH_VARIANTS[key];
+        if (!config) {
+            console.warn(`[GoogleSTT] Unknown language key: ${key}`);
+            return;
+        }
+
+        console.log(`[GoogleSTT] Updating recognition language to: ${key} (${config.primary})`);
+
+        // Update state
+        this.languageCode = config.primary;
+        // CAST: Google's type definition might be strict, ensuring string[] is accepted
+        this.alternativeLanguageCodes = config.alternates;
+
+        console.log('[GoogleSTT] Primary:', this.languageCode);
+        console.log('[GoogleSTT] Alternates:', this.alternativeLanguageCodes.join(', '));
+
+        // Restart if streaming
+        if (this.isStreaming) {
+            console.log('[GoogleSTT] Language changed while streaming. Restarting stream...');
             this.stop();
             this.start();
         }
@@ -162,6 +189,7 @@ export class GoogleSTT extends EventEmitter {
                     enableAutomaticPunctuation: true,
                     model: 'latest_long',
                     useEnhanced: true,
+                    alternativeLanguageCodes: this.alternativeLanguageCodes,
                 },
                 interimResults: true,
             })

@@ -23,12 +23,14 @@ import {
     SlidersHorizontal,
     Ghost,
     Link,
-    Code
+    Code,
+    Check
 } from 'lucide-react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { dracula } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import ModelSelector from './ui/ModelSelector';
 import TopPill from './ui/TopPill';
+import RollingTranscript from './ui/RollingTranscript';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -57,10 +59,15 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) =
     const [isConnected, setIsConnected] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+    const [isQuickSettingsOpen, setIsQuickSettingsOpen] = useState(false);
+    const quickSettingsRef = useRef<HTMLDivElement>(null);
+    const settingsButtonRef = useRef<HTMLButtonElement>(null);
     const [conversationContext, setConversationContext] = useState<string>('');
     const [isManualRecording, setIsManualRecording] = useState(false);
     const isRecordingRef = useRef(false);  // Ref to track recording state (avoids stale closure)
     const [manualTranscript, setManualTranscript] = useState('');
+    const [stableTranscript, setStableTranscript] = useState(''); // Rolling transcript history
+    const [interimTranscript, setInterimTranscript] = useState(''); // Rolling transcript current segment
     const [voiceInput, setVoiceInput] = useState('');  // Accumulated user voice input
     const voiceInputRef = useRef<string>('');  // Ref for capturing in async handlers
     const textInputRef = useRef<HTMLInputElement>(null); // Ref for input focus
@@ -78,12 +85,28 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) =
         const stored = localStorage.getItem('natively_hideChatHidesWidget');
         return stored ? stored === 'true' : true;
     });
+    const [showTranscription, setShowTranscription] = useState(() => {
+        const stored = localStorage.getItem('natively_showTranscription');
+        return stored !== null ? stored === 'true' : true; // Default true
+    });
 
     // Persist Settings
     useEffect(() => {
         localStorage.setItem('natively_undetectable', String(isUndetectable));
         localStorage.setItem('natively_hideChatHidesWidget', String(hideChatHidesWidget));
-    }, [isUndetectable, hideChatHidesWidget]);
+        localStorage.setItem('natively_showTranscription', String(showTranscription));
+    }, [isUndetectable, hideChatHidesWidget, showTranscription]);
+
+    // Listen for storage changes (settings sync)
+    useEffect(() => {
+        const handleStorageChange = (e: StorageEvent) => {
+            if (e.key === 'natively_showTranscription') {
+                setShowTranscription(e.newValue === 'true');
+            }
+        };
+        window.addEventListener('storage', handleStorageChange);
+        return () => window.removeEventListener('storage', handleStorageChange);
+    }, []);
 
     // Auto-resize Window
     useLayoutEffect(() => {
@@ -144,6 +167,24 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) =
         }
     }, [isExpanded]);
 
+    // Click outside handler for Quick Settings
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (
+                quickSettingsRef.current &&
+                !quickSettingsRef.current.contains(event.target as Node) &&
+                !settingsButtonRef.current?.contains(event.target as Node)
+            ) {
+                setIsQuickSettingsOpen(false);
+            }
+        };
+
+        if (isQuickSettingsOpen) {
+            document.addEventListener('mousedown', handleClickOutside);
+        }
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [isQuickSettingsOpen]);
+
     // Keyboard shortcut to toggle expanded state (via Main Process)
     useEffect(() => {
         if (!window.electronAPI?.onToggleExpand) return;
@@ -162,6 +203,8 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) =
             setInputValue('');
             setAttachedContext(null);
             setManualTranscript('');
+            setStableTranscript('');
+            setInterimTranscript('');
             setVoiceInput('');
             setIsProcessing(false);
             // Optionally reset connection status if needed, but connection persists
@@ -220,11 +263,29 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) =
             }
 
             // Normal transcript handling for interviewer (system audio)
-            if (!transcript.final) {
-                setManualTranscript(transcript.text);
-            } else {
+
+            // --- ROLLING TRANSCRIPT LOGIC ---
+            const cleanText = transcript.text
+                .replace(/\b(um|uh|uhh|mm|hmm)\b/gi, '')
+                .replace(/\s+/g, ' ')
+                .trim();
+
+            if (transcript.final) {
+                if (cleanText) {
+                    setStableTranscript(prev => {
+                        const spacer = '\u00A0\u00A0\u00A0'; // Visual spacer for pauses
+                        const newVal = prev + (prev ? spacer : '') + cleanText;
+                        // Keep last 500 chars to avoid infinite growth
+                        return newVal.length > 500 ? '...' + newVal.slice(-500) : newVal;
+                    });
+                }
+                setInterimTranscript('');
                 setManualTranscript('');
+            } else {
+                setInterimTranscript(cleanText);
+                setManualTranscript(transcript.text);
             }
+            // --------------------------------
 
             setMessages(prev => {
                 const lastMsg = prev[prev.length - 1];
@@ -1165,8 +1226,8 @@ Provide only the answer, nothing else.`;
 
                         {/* Chat History - Only show if there are messages OR active states */}
                         {(messages.length > 0 || isManualRecording || isProcessing) && (
-                            <div className="flex-1 overflow-y-auto p-4 space-y-3 max-h-[clamp(300px,35vh,450px)]" style={{ scrollbarWidth: 'none' }}>
-                                {messages.map((msg) => (
+                            <div className="flex-1 overflow-y-auto p-4 space-y-3 max-h-[450px]" style={{ scrollbarWidth: 'none' }}>
+                                {messages.filter(m => m.role !== 'interviewer').map((msg) => (
                                     <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in-up`}>
                                         <div className={`
                       ${msg.role === 'user' ? 'max-w-[72.25%] px-[13.6px] py-[10.2px]' : 'max-w-[85%] px-4 py-3'} text-[14px] leading-relaxed relative group whitespace-pre-wrap
@@ -1233,8 +1294,13 @@ Provide only the answer, nothing else.`;
                             </div>
                         )}
 
+                        {/* Live Rolling Transcript */}
+                        {showTranscription && (
+                            <RollingTranscript text={`${stableTranscript}${interimTranscript ? (stableTranscript ? '\u00A0\u00A0\u00A0' : '') + interimTranscript : ''}`} />
+                        )}
+
                         {/* Quick Actions - Minimal & Clean */}
-                        <div className="flex flex-nowrap justify-center items-center gap-1.5 px-4 py-3 border-t border-white/[0.06] overflow-x-hidden">
+                        <div className={`flex flex-nowrap justify-center items-center gap-1.5 px-4 py-3 overflow-x-hidden`}>
                             <button onClick={handleWhatToSay} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium text-slate-400 bg-white/5 border border-white/0 hover:text-slate-200 hover:bg-white/10 hover:border-white/5 transition-all active:scale-95 duration-200 interaction-base interaction-press whitespace-nowrap shrink-0">
                                 <Pencil className="w-3 h-3 opacity-70" /> What to answer?
                             </button>
@@ -1362,10 +1428,9 @@ Provide only the answer, nothing else.`;
                                     {/* Settings Gear */}
                                     <div className="relative">
                                         <button
+                                            ref={settingsButtonRef}
                                             onClick={(e) => {
                                                 if (isSettingsOpen) {
-                                                    // If open, just close it (toggle will handle logic but we can be explicit or just toggle)
-                                                    // Actually toggle-settings-window handles hiding if visible, so logic is same.
                                                     window.electronAPI.invoke('toggle-settings-window');
                                                     return;
                                                 }
@@ -1374,19 +1439,15 @@ Provide only the answer, nothing else.`;
 
                                                 const contentRect = contentRef.current.getBoundingClientRect();
                                                 const buttonRect = e.currentTarget.getBoundingClientRect();
-                                                const POPUP_WIDTH = 270; // Matches SettingsWindowHelper actual width
-                                                const GAP = 8; // Same gap as between TopPill and main body (gap-2 = 8px)
+                                                const GAP = 8;
 
-                                                // X: Left-aligned relative to the Settings Button
                                                 const x = window.screenX + buttonRect.left;
-
-                                                // Y: Below the main content + gap
                                                 const y = window.screenY + contentRect.bottom + GAP;
 
                                                 window.electronAPI.invoke('toggle-settings-window', { x, y });
                                             }}
                                             className={`
-                                            w-7 h-7 flex items-center justify-center rounded-lg 
+                                            w-7 h-7 flex items-center justify-center rounded-lg
                                             interaction-base interaction-press
                                             ${isSettingsOpen ? 'text-white bg-white/10' : 'text-slate-500 hover:text-slate-300 hover:bg-white/5'}
                                         `}

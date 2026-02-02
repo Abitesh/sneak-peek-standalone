@@ -376,6 +376,11 @@ export function initializeIpcHandlers(appState: AppState): void {
     return { success: true };
   });
 
+  ipcMain.handle("set-recognition-language", async (_, key: string) => {
+    appState.setRecognitionLanguage(key);
+    return { success: true };
+  });
+
   // ==========================================
   // Meeting Lifecycle Handlers
   // ==========================================
