@@ -239,7 +239,7 @@ const TopSearchPill: React.FC<TopSearchPillProps> = ({
             {/* Search Pill Container */}
             <div
                 ref={containerRef}
-                className="absolute left-1/2 -translate-x-1/2 top-[6px] no-drag z-40"
+                className="absolute left-1/2 -translate-x-1/2 top-[7px] no-drag z-40"
             >
                 <div className="relative">
                     <motion.div
@@ -259,12 +259,10 @@ const TopSearchPill: React.FC<TopSearchPillProps> = ({
                             <div
                                 className={`
                                     relative overflow-hidden
-                                    bg-bg-elevated/90
+                                    bg-[#F2F2F7]/90 dark:bg-[#161618]/90
                                     backdrop-blur-xl backdrop-saturate-150
                                     rounded-2xl
-                                    shadow-[0_20px_40px_-12px_rgba(0,0,0,0.6),0_0_0_1px_rgba(255,255,255,0.08),inset_0_1px_0_rgba(255,255,255,0.1)]
-                                    dark:shadow-[0_20px_40px_-12px_rgba(0,0,0,0.6),0_0_0_1px_rgba(255,255,255,0.08),inset_0_1px_0_rgba(255,255,255,0.1)]
-                                    shadow-sm border border-border-subtle
+                                    shadow-sm
                                 `}
                             >
                                 {/* Input Row */}
@@ -273,7 +271,7 @@ const TopSearchPill: React.FC<TopSearchPillProps> = ({
                                     onClick={() => state === 'idle' && open()}
                                 >
                                     <div className="absolute left-3 flex items-center pointer-events-none">
-                                        <Search size={14} className="text-text-tertiary" />
+                                        <Search size={14} className="text-text-tertiary dark:text-[#7C7C7E]" />
                                     </div>
                                     <input
                                         ref={inputRef}
@@ -285,7 +283,7 @@ const TopSearchPill: React.FC<TopSearchPillProps> = ({
                                         w-full bg-transparent
                                         pl-9 pr-4 py-1
                                         text-[13px] text-text-primary
-                                        placeholder-text-tertiary
+                                        placeholder-text-tertiary dark:placeholder-[#7C7C7E]
                                         focus:outline-none
                                         ${state === 'idle' ? 'cursor-pointer' : 'cursor-text'}
                                     `}

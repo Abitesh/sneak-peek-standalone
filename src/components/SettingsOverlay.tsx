@@ -3,7 +3,7 @@ import {
     X, Mic, Speaker, Monitor, Keyboard, User, LifeBuoy, LogOut,
     Command, ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
     AppWindow, Camera, RotateCcw, Eye, Layout, MessageSquare, Crop,
-    ChevronDown, Check, BadgeCheck, Power, Palette, Calendar, Ghost, Sun, Moon, RefreshCw, Info
+    ChevronDown, Check, BadgeCheck, Power, Palette, Calendar, Ghost, Sun, Moon, RefreshCw, Info, Globe
 } from 'lucide-react';
 import { AboutSection } from './AboutSection';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -35,10 +35,12 @@ const CustomSelect: React.FC<CustomSelectProps> = ({ label, icon, value, options
 
     return (
         <div className="bg-bg-card rounded-xl p-4 border border-border-subtle" ref={containerRef}>
-            <div className="flex items-center gap-2 mb-3">
-                <span className="text-text-secondary">{icon}</span>
-                <label className="text-xs font-medium text-text-secondary uppercase tracking-wide">{label}</label>
-            </div>
+            {label && (
+                <div className="flex items-center gap-2 mb-3">
+                    <span className="text-text-secondary">{icon}</span>
+                    <label className="text-xs font-medium text-text-secondary uppercase tracking-wide">{label}</label>
+                </div>
+            )}
 
             <div className="relative">
                 <button
@@ -111,6 +113,64 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
         const stored = localStorage.getItem('natively_interviewer_transcript');
         return stored !== 'false';
     });
+
+    // Recognition Language
+    const [recognitionLanguage, setRecognitionLanguage] = useState('');
+    const [availableLanguages, setAvailableLanguages] = useState<Record<string, any>>({});
+    const [languageOptions, setLanguageOptions] = useState<any[]>([]);
+
+    useEffect(() => {
+        const loadLanguages = async () => {
+            if (window.electronAPI?.getRecognitionLanguages) {
+                const langs = await window.electronAPI.getRecognitionLanguages();
+                setAvailableLanguages(langs);
+
+                // Convert to options for select
+                const options = Object.entries(langs).map(([key, config]: [string, any]) => ({
+                    deviceId: key, // Reusing CustomSelect interface
+                    label: config.label,
+                    kind: 'audioinput' as MediaDeviceKind,
+                    groupId: '',
+                    toJSON: () => ({})
+                }));
+                setLanguageOptions(options);
+
+                // Smart Default Logic
+                const stored = localStorage.getItem('natively_recognition_language');
+                if (stored && langs[stored]) {
+                    setRecognitionLanguage(stored);
+                } else {
+                    // Detect from navigator
+                    const systemLocale = navigator.language; // e.g. "en-US", "en-GB"
+                    let match = 'english-us'; // Fallback
+
+                    // Try to find a match in alternates or primary
+                    for (const [key, config] of Object.entries(langs)) {
+                        if ((config as any).primary === systemLocale || (config as any).alternates.includes(systemLocale)) {
+                            match = key;
+                            break;
+                        }
+                    }
+
+                    // Special case for India if not matched above (though en-IN should match)
+                    if (systemLocale === 'en-IN') match = 'english-india';
+
+                    setRecognitionLanguage(match);
+                    localStorage.setItem('natively_recognition_language', match);
+                    window.electronAPI.setRecognitionLanguage(match);
+                }
+            }
+        };
+        loadLanguages();
+    }, []);
+
+    const handleLanguageChange = (key: string) => {
+        setRecognitionLanguage(key);
+        localStorage.setItem('natively_recognition_language', key);
+        if (window.electronAPI?.setRecognitionLanguage) {
+            window.electronAPI.setRecognitionLanguage(key);
+        }
+    };
 
     // Sync transcript setting
     useEffect(() => {
@@ -540,6 +600,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                                 </div>
                                             </div>
 
+
                                             {/* Theme */}
                                             <div className="flex items-center justify-between">
                                                 <div className="flex items-center gap-4">
@@ -754,6 +815,26 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                     <div>
                                         <h3 className="text-lg font-medium text-text-primary mb-4">Audio Configuration</h3>
                                         <div className="space-y-4">
+                                            {/* Preferred English Accent */}
+                                            <div className="flex items-center justify-between">
+                                                <div>
+                                                    <h3 className="text-sm font-bold text-text-primary">Preferred English Accent</h3>
+                                                    <p className="text-xs text-text-secondary mt-0.5">Improves accuracy by prioritizing your accent.</p>
+                                                </div>
+                                                <div className="w-[220px]">
+                                                    <CustomSelect
+                                                        label=""
+                                                        icon={null}
+                                                        value={recognitionLanguage}
+                                                        options={languageOptions}
+                                                        onChange={handleLanguageChange}
+                                                        placeholder="Select Language"
+                                                    />
+                                                </div>
+                                            </div>
+
+                                            <div className="h-px bg-border-subtle my-4" />
+
                                             <CustomSelect
                                                 label="Input Device"
                                                 icon={<Mic size={16} />}

@@ -168,7 +168,7 @@ ${meeting.detailedSummary.keyPoints?.map(item => `- ${item}`).join('\n') || 'Non
 
 
     return (
-        <div className="h-full w-full flex flex-col bg-bg-primary text-text-secondary font-sans overflow-hidden">
+        <div className="h-full w-full flex flex-col bg-bg-secondary dark:bg-[#0C0C0C] text-text-secondary font-sans overflow-hidden">
             {/* Main Content */}
             <main className="flex-1 overflow-y-auto custom-scrollbar">
                 <motion.div
@@ -202,20 +202,20 @@ ${meeting.detailedSummary.keyPoints?.map(item => `- ${item}`).join('\n') || 'Non
                     {/* Tabs */}
                     {/* Designing Tabs to match reference 1:1 (Dark Pill Container) */}
                     <div className="flex items-center justify-between mb-8">
-                        <div className="bg-bg-secondary p-1 rounded-xl inline-flex items-center gap-0.5 border border-border-subtle">
+                        <div className="bg-[#E5E5EA] dark:bg-[#121214] p-1 rounded-xl inline-flex items-center gap-0.5 border border-black/[0.04] dark:border-white/[0.08]">
                             {['summary', 'transcript', 'usage'].map((tab) => (
                                 <button
                                     key={tab}
                                     onClick={() => setActiveTab(tab as any)}
                                     className={`
                                         relative px-3 py-1 text-[13px] font-medium rounded-lg transition-all duration-200 z-10
-                                        ${activeTab === tab ? 'text-text-primary' : 'text-text-tertiary hover:text-text-secondary'}
+                                        ${activeTab === tab ? 'text-black dark:text-[#E9E9E9]' : 'text-text-tertiary hover:text-text-secondary dark:text-[#888889] dark:hover:text-[#B0B0B1]'}
                                     `}
                                 >
                                     {activeTab === tab && (
                                         <motion.div
                                             layoutId="activeTabBackground"
-                                            className="absolute inset-0 bg-bg-item-active rounded-lg -z-10 shadow-sm"
+                                            className="absolute inset-0 bg-white dark:bg-[#3A3A3C] rounded-lg -z-10 shadow-sm"
                                             initial={false}
                                             transition={{ type: "spring", stiffness: 400, damping: 30 }}
                                         />

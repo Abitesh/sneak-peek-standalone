@@ -8,7 +8,12 @@ import * as path from "path";
 import * as fs from "fs";
 import { AudioDevices } from "./audio/AudioDevices";
 
+import { ENGLISH_VARIANTS } from "./config/languages"
+
 export function initializeIpcHandlers(appState: AppState): void {
+  ipcMain.handle("get-recognition-languages", async () => {
+    return ENGLISH_VARIANTS;
+  });
   ipcMain.handle(
     "update-content-dimensions",
     async (event, { width, height }: { width: number; height: number }) => {
@@ -181,6 +186,21 @@ export function initializeIpcHandlers(appState: AppState): void {
       }, true);
 
       let fullResponse = "";
+
+      // Context Injection for "Answer" button (100s rolling window)
+      if (!context) {
+        // User requested 100 seconds of context for the answer button
+        // Logic: If no explicit context provided (like from manual override), auto-inject from IntelligenceManager
+        try {
+          const autoContext = intelligenceManager.getFormattedContext(100);
+          if (autoContext && autoContext.trim().length > 0) {
+            context = autoContext;
+            console.log(`[IPC] Auto-injected 100s context for gemini-chat-stream (${context.length} chars)`);
+          }
+        } catch (ctxErr) {
+          console.warn("[IPC] Failed to auto-inject context:", ctxErr);
+        }
+      }
 
       try {
         const stream = llmHelper.streamChatWithGemini(message, imagePath, context, options?.skipSystemPrompt);
