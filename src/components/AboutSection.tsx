@@ -213,8 +213,8 @@ export const AboutSection: React.FC<AboutSectionProps> = () => {
                             </div>
                         </div>
                         <a
-                            href="https://ko-fi.com/evinjohnn"
-                            onClick={(e) => handleOpenLink(e, "https://ko-fi.com/evinjohnn")}
+                            href="https://buymeacoffee.com/evinjohnn"
+                            onClick={(e) => handleOpenLink(e, "https://buymeacoffee.com/evinjohnn")}
                             className="whitespace-nowrap px-4 py-2 bg-text-primary hover:bg-white/90 text-bg-main text-xs font-bold rounded-lg transition-all shadow hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0"
                         >
                             Support Project

@@ -46,6 +46,11 @@ interface ElectronAPI {
   testLlmConnection: () => Promise<{ success: boolean; error?: string }>
   selectServiceAccount: () => Promise<{ success: boolean; path?: string; cancelled?: boolean; error?: string }>
 
+  // API Key Management
+  setGeminiApiKey: (apiKey: string) => Promise<{ success: boolean; error?: string }>
+  setGroqApiKey: (apiKey: string) => Promise<{ success: boolean; error?: string }>
+  getStoredCredentials: () => Promise<{ hasGeminiKey: boolean; hasGroqKey: boolean; googleServiceAccountPath: string | null }>
+
   // Native Audio Service Events
   onNativeAudioTranscript: (callback: (transcript: { speaker: string; text: string; final: boolean }) => void) => () => void
   onNativeAudioSuggestion: (callback: (suggestion: { context: string; lastQuestion: string; confidence: number }) => void) => () => void
@@ -310,6 +315,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
   switchToGemini: (apiKey?: string, modelId?: string) => ipcRenderer.invoke("switch-to-gemini", apiKey, modelId),
   testLlmConnection: () => ipcRenderer.invoke("test-llm-connection"),
   selectServiceAccount: () => ipcRenderer.invoke("select-service-account"),
+
+  // API Key Management
+  setGeminiApiKey: (apiKey: string) => ipcRenderer.invoke("set-gemini-api-key", apiKey),
+  setGroqApiKey: (apiKey: string) => ipcRenderer.invoke("set-groq-api-key", apiKey),
+  getStoredCredentials: () => ipcRenderer.invoke("get-stored-credentials"),
 
   // Native Audio Service Events
   onNativeAudioTranscript: (callback: (transcript: { speaker: string; text: string; final: boolean }) => void) => {

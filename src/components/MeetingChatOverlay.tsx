@@ -313,9 +313,19 @@ ${contextString}`;
                                 ? { ...msg, isStreaming: false }
                                 : msg
                         ));
-                        setChatState('idle');
                         oldTokenCleanup?.();
                         oldDoneCleanup?.();
+                        oldErrorCleanup?.();
+                    });
+
+                    const oldErrorCleanup = window.electronAPI?.onGeminiStreamError((error: string) => {
+                        console.error('[MeetingChat] Gemini stream error (fallback):', error);
+                        setMessages(prev => prev.filter(msg => msg.id !== assistantMessageId));
+                        setErrorMessage("Couldn't get a response. Please check your settings.");
+                        setChatState('error');
+                        oldTokenCleanup?.();
+                        oldDoneCleanup?.();
+                        oldErrorCleanup?.();
                     });
 
                     await window.electronAPI?.streamGeminiChat(
@@ -351,6 +361,17 @@ ${contextString}`;
                     setChatState('idle');
                     oldTokenCleanup?.();
                     oldDoneCleanup?.();
+                    oldErrorCleanup?.();
+                });
+
+                const oldErrorCleanup = window.electronAPI?.onGeminiStreamError((error: string) => {
+                    console.error('[MeetingChat] Gemini stream error:', error);
+                    setMessages(prev => prev.filter(msg => msg.id !== assistantMessageId));
+                    setErrorMessage("Couldn't get a response. Please check your settings.");
+                    setChatState('error');
+                    oldTokenCleanup?.();
+                    oldDoneCleanup?.();
+                    oldErrorCleanup?.();
                 });
 
                 await window.electronAPI?.streamGeminiChat(

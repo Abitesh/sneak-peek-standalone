@@ -925,7 +925,7 @@ Provide only the answer, nothing else.`;
         if (msg.isCode || (msg.role === 'system' && msg.text.includes('```'))) {
             const parts = msg.text.split(/(```[\s\S]*?```)/g);
             return (
-                <div className="bg-purple-500/10 border border-purple-500/20 rounded-lg p-3 my-1">
+                <div className="bg-white/5 border border-white/10 rounded-lg p-3 my-1">
                     <div className="flex items-center gap-2 mb-2 text-purple-300 font-semibold text-xs uppercase tracking-wide">
                         <Code className="w-3.5 h-3.5" />
                         <span>Code Solution</span>
@@ -1005,7 +1005,7 @@ Provide only the answer, nothing else.`;
         // Custom Styled Labels (Shorten, Recap, Follow-up) - also use Markdown for content
         if (msg.intent === 'shorten') {
             return (
-                <div className="bg-cyan-500/10 border border-cyan-500/20 rounded-lg p-3 my-1">
+                <div className="bg-white/5 border border-white/10 rounded-lg p-3 my-1">
                     <div className="flex items-center gap-2 mb-2 text-cyan-300 font-semibold text-xs uppercase tracking-wide">
                         <MessageSquare className="w-3.5 h-3.5" />
                         <span>Shortened</span>
@@ -1026,7 +1026,7 @@ Provide only the answer, nothing else.`;
 
         if (msg.intent === 'recap') {
             return (
-                <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-lg p-3 my-1">
+                <div className="bg-white/5 border border-white/10 rounded-lg p-3 my-1">
                     <div className="flex items-center gap-2 mb-2 text-indigo-300 font-semibold text-xs uppercase tracking-wide">
                         <RefreshCw className="w-3.5 h-3.5" />
                         <span>Recap</span>
@@ -1047,7 +1047,7 @@ Provide only the answer, nothing else.`;
 
         if (msg.intent === 'follow_up_questions') {
             return (
-                <div className="bg-[#FFD60A]/10 border border-[#FFD60A]/20 rounded-lg p-3 my-1">
+                <div className="bg-white/5 border border-white/10 rounded-lg p-3 my-1">
                     <div className="flex items-center gap-2 mb-2 text-[#FFD60A] font-semibold text-xs uppercase tracking-wide">
                         <HelpCircle className="w-3.5 h-3.5" />
                         <span>Follow-Up Questions</span>
@@ -1071,7 +1071,7 @@ Provide only the answer, nothing else.`;
             const parts = msg.text.split(/(```[\s\S]*?(?:```|$))/g);
 
             return (
-                <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-3 my-1">
+                <div className="bg-white/5 border border-white/10 rounded-lg p-3 my-1">
                     <div className="flex items-center gap-2 mb-2 text-emerald-400 font-semibold text-xs uppercase tracking-wide">
                         <span>Say this</span>
                     </div>

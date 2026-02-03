@@ -352,6 +352,13 @@ export function initializeIpcHandlers(appState: AppState): void {
     try {
       const llmHelper = appState.processingHelper.getLLMHelper();
       await llmHelper.switchToGemini(apiKey, modelId);
+
+      // Persist API key if provided
+      if (apiKey) {
+        const { CredentialsManager } = require('./services/CredentialsManager');
+        CredentialsManager.getInstance().setGeminiApiKey(apiKey);
+      }
+
       return { success: true };
     } catch (error: any) {
       // console.error("Error switching to Gemini:", error);
@@ -359,7 +366,61 @@ export function initializeIpcHandlers(appState: AppState): void {
     }
   });
 
+  // Dedicated API key setters (for Settings UI Save buttons)
+  ipcMain.handle("set-gemini-api-key", async (_, apiKey: string) => {
+    try {
+      const { CredentialsManager } = require('./services/CredentialsManager');
+      CredentialsManager.getInstance().setGeminiApiKey(apiKey);
 
+      // Also update the LLMHelper immediately
+      const llmHelper = appState.processingHelper.getLLMHelper();
+      llmHelper.setApiKey(apiKey);
+
+      // Re-init IntelligenceManager
+      appState.getIntelligenceManager().initializeLLMs();
+
+      return { success: true };
+    } catch (error: any) {
+      console.error("Error saving Gemini API key:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle("set-groq-api-key", async (_, apiKey: string) => {
+    try {
+      const { CredentialsManager } = require('./services/CredentialsManager');
+      CredentialsManager.getInstance().setGroqApiKey(apiKey);
+
+      // Also update the LLMHelper immediately
+      const llmHelper = appState.processingHelper.getLLMHelper();
+      llmHelper.setGroqApiKey(apiKey);
+
+      // Re-init IntelligenceManager
+      appState.getIntelligenceManager().initializeLLMs();
+
+      return { success: true };
+    } catch (error: any) {
+      console.error("Error saving Groq API key:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Get stored API keys (masked for UI display)
+  ipcMain.handle("get-stored-credentials", async () => {
+    try {
+      const { CredentialsManager } = require('./services/CredentialsManager');
+      const creds = CredentialsManager.getInstance().getAllCredentials();
+
+      // Return masked versions for security (just indicate if set)
+      return {
+        hasGeminiKey: !!creds.geminiApiKey,
+        hasGroqKey: !!creds.groqApiKey,
+        googleServiceAccountPath: creds.googleServiceAccountPath || null
+      };
+    } catch (error: any) {
+      return { hasGeminiKey: false, hasGroqKey: false, googleServiceAccountPath: null };
+    }
+  });
 
   ipcMain.handle("set-model-preference", (_, type: "flash" | "pro") => {
     try {
@@ -494,7 +555,6 @@ export function initializeIpcHandlers(appState: AppState): void {
     } catch (error: any) {
       // Return graceful fallback instead of throwing
       return {
-        answer: "Could you repeat that? I want to make sure I address your question properly.",
         question: question || 'unknown'
       };
     }
@@ -586,6 +646,10 @@ export function initializeIpcHandlers(appState: AppState): void {
 
       // Update backend state immediately
       appState.updateGoogleCredentials(filePath);
+
+      // Persist the path for future sessions
+      const { CredentialsManager } = require('./services/CredentialsManager');
+      CredentialsManager.getInstance().setGoogleServiceAccountPath(filePath);
 
       return { success: true, path: filePath };
     } catch (error: any) {

@@ -130,16 +130,16 @@ export class WindowHelper {
         contextIsolation: true,
         preload: path.join(__dirname, "preload.js"),
         scrollBounce: true,
-        webSecurity: false, // DEBUG: Disable web security
+        webSecurity: !isDev, // DEBUG: Disable web security only in dev
       },
-      show: true, // DEBUG: Force show
+      show: false, // DEBUG: Force show -> Fixed white screen, now relies on ready-to-show
       titleBarStyle: 'hiddenInset',
       trafficLightPosition: { x: 14, y: 14 },
       vibrancy: 'under-window',
       visualEffectState: 'followWindow',
       transparent: false, // DEBUG: Disable transparency
       hasShadow: true,
-      backgroundColor: "#FFFFFF", // DEBUG: White background
+      backgroundColor: "#000000", // Fixed: Black background to match startup sequence
       focusable: true,
       resizable: true,
       movable: true,
@@ -170,7 +170,9 @@ export class WindowHelper {
       console.error(`[WindowHelper] did-fail-load: ${errorCode} ${errorDescription}`);
     });
 
-    this.launcherWindow.webContents.openDevTools({ mode: 'detach' }); // DEBUG: Open DevTools
+    if (isDev) {
+      this.launcherWindow.webContents.openDevTools({ mode: 'detach' }); // DEBUG: Open DevTools
+    }
 
     // --- 2. Create Overlay Window (Hidden initially) ---
     const overlaySettings: Electron.BrowserWindowConstructorOptions = {
@@ -285,8 +287,12 @@ export class WindowHelper {
   }
 
   public showMainWindow(): void {
-    // Show Launcher by default if nothing specific requested
-    this.switchToLauncher()
+    // Show the window corresponding to the current mode
+    if (this.currentWindowMode === 'overlay') {
+      this.switchToOverlay();
+    } else {
+      this.switchToLauncher();
+    }
   }
 
   public toggleMainWindow(): void {

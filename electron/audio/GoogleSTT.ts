@@ -27,14 +27,9 @@ export class GoogleSTT extends EventEmitter {
     constructor() {
         super();
         // ... (credentials setup) ...
-        const path = require('path');
-        const dotenvPath = path.resolve(__dirname, '../../.env');
-        require('dotenv').config();
 
-        if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-            require('dotenv').config({ path: path.join(process.cwd(), '.env') });
-        }
-
+        // Note: In production, credentials are set by main.ts via process.env.GOOGLE_APPLICATION_CREDENTIALS
+        // or passed explicitly to setCredentials(). We do not load .env files here to avoid ASAR path issues.
         const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
         if (!credentialsPath) {
             console.error('[GoogleSTT] Missing GOOGLE_APPLICATION_CREDENTIALS in environment. Checked CWD:', process.cwd());

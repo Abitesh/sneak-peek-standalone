@@ -13,5 +13,16 @@ export default defineConfig({
     },
     server: {
         port: 5180,
+    },
+    build: {
+        chunkSizeWarningLimit: 1000,
+        rollupOptions: {
+            output: {
+                manualChunks: {
+                    vendor: ['react', 'react-dom', 'framer-motion'],
+                    ui: ['lucide-react', '@radix-ui/react-dialog', '@radix-ui/react-toast']
+                }
+            }
+        }
     }
 })

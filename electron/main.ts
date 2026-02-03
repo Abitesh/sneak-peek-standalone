@@ -14,7 +14,12 @@ const originalLog = console.log;
 const originalWarn = console.warn;
 const originalError = console.error;
 
+const isDev = process.env.NODE_ENV === "development";
+
 function logToFile(msg: string) {
+  // Only log to file in development
+  if (!isDev) return;
+
   try {
     require('fs').appendFileSync(logFile, new Date().toISOString() + ' ' + msg + '\n');
   } catch (e) {
@@ -60,6 +65,7 @@ import { GoogleSTT } from "./audio/GoogleSTT"
 import { ThemeManager } from "./ThemeManager"
 import { RAGManager } from "./rag/RAGManager"
 import { DatabaseManager } from "./db/DatabaseManager"
+import { CredentialsManager } from "./services/CredentialsManager"
 
 export class AppState {
   private static instance: AppState | null = null
@@ -672,10 +678,16 @@ export class AppState {
 
 
   public updateGoogleCredentials(keyPath: string): void {
+    console.log(`[AppState] Updating Google Credentials to: ${keyPath}`);
+    // Set global environment variable so new instances pick it up
+    process.env.GOOGLE_APPLICATION_CREDENTIALS = keyPath;
+
     if (this.googleSTT) {
       this.googleSTT.setCredentials(keyPath);
-    } else {
-      console.warn('[AppState] GoogleSTT not initialized, cannot update credentials');
+    }
+
+    if (this.googleSTT_User) {
+      this.googleSTT_User.setCredentials(keyPath);
     }
   }
 
@@ -1046,13 +1058,35 @@ function setMacDockIcon() {
 }
 
 async function initializeApp() {
+  await app.whenReady()
+
+  // Initialize CredentialsManager and load keys explicitly
+  // This fixes the issue where keys (especially in production) aren't loaded in time for RAG/LLM
+  const { CredentialsManager } = require('./services/CredentialsManager');
+  CredentialsManager.getInstance().init();
+
   const appState = AppState.getInstance()
+
+  // Explicitly load credentials into helpers
+  appState.processingHelper.loadStoredCredentials();
 
   // Initialize IPC handlers before window creation
   initializeIpcHandlers(appState)
 
   app.whenReady().then(() => {
     app.setName("Natively"); // Fix App Name in Menu
+
+    CredentialsManager.getInstance().init();
+
+    // Load stored API keys into ProcessingHelper/LLMHelper
+    appState.processingHelper.loadStoredCredentials();
+
+    // Load stored Google Service Account path (for Speech-to-Text)
+    const storedServiceAccountPath = CredentialsManager.getInstance().getGoogleServiceAccountPath();
+    if (storedServiceAccountPath) {
+      console.log("[Init] Loading stored Google Service Account path");
+      appState.updateGoogleCredentials(storedServiceAccountPath);
+    }
 
     try {
       setMacDockIcon(); // 🔴 MUST be first, before any window

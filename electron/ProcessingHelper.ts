@@ -2,6 +2,7 @@
 
 import { AppState } from "./main"
 import { LLMHelper } from "./LLMHelper"
+import { CredentialsManager } from "./services/CredentialsManager"
 import dotenv from "dotenv"
 
 dotenv.config()
@@ -28,14 +29,42 @@ export class ProcessingHelper {
       // console.log("[ProcessingHelper] Initializing with Ollama")
       this.llmHelper = new LLMHelper(undefined, true, ollamaModel, ollamaUrl)
     } else {
-      const apiKey = process.env.GEMINI_API_KEY
-      const groqApiKey = process.env.GROQ_API_KEY
+      // Try environment first (for development)
+      let apiKey = process.env.GEMINI_API_KEY
+      let groqApiKey = process.env.GROQ_API_KEY
+
+      // Allow initializing without key (will be loaded in loadStoredCredentials or via Settings)
       if (!apiKey) {
-        throw new Error("GEMINI_API_KEY not found in environment variables. Set GEMINI_API_KEY or enable Ollama with USE_OLLAMA=true")
+        console.warn("[ProcessingHelper] GEMINI_API_KEY not found in env. Will try CredentialsManager after ready.")
       }
-      // console.log("[ProcessingHelper] Initializing with Gemini")
+
       this.llmHelper = new LLMHelper(apiKey, false, undefined, undefined, groqApiKey)
     }
+  }
+
+  /**
+   * Load stored credentials from CredentialsManager
+   * Should be called after app.whenReady() when CredentialsManager is initialized
+   */
+  public loadStoredCredentials(): void {
+    const credManager = CredentialsManager.getInstance();
+
+    const geminiKey = credManager.getGeminiApiKey();
+    const groqKey = credManager.getGroqApiKey();
+
+    if (geminiKey) {
+      console.log("[ProcessingHelper] Loading stored Gemini API Key from CredentialsManager");
+      this.llmHelper.setApiKey(geminiKey);
+    }
+
+    if (groqKey) {
+      console.log("[ProcessingHelper] Loading stored Groq API Key from CredentialsManager");
+      this.llmHelper.setGroqApiKey(groqKey);
+    }
+
+    // CRITICAL: Re-initialize IntelligenceManager now that keys are loaded
+    // This fixes the issue where buttons don't work in production because of late key loading
+    this.appState.getIntelligenceManager().initializeLLMs();
   }
 
   public async processScreenshots(): Promise<void> {

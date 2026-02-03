@@ -24,7 +24,10 @@
       "dist/**/*",
       "dist-electron/**/*",
       "package.json",
-      "node_modules/**/*"
+      "node_modules/**/*",
+      "!**/native-module/target/**",
+      "!**/native-module/src/**",
+      "!**/native-module/.cargo/**"
     ],
     "directories": {
       "output": "release",

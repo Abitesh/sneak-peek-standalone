@@ -139,18 +139,21 @@ export class IntelligenceManager extends EventEmitter {
     constructor(llmHelper: LLMHelper) {
         super();
         this.llmHelper = llmHelper;
-        this.initializeModeLLMs();
+        this.initializeLLMs();
 
     }
 
 
 
     /**
-     * Initialize mode-specific LLMs with shared Gemini client and Groq client
+     * Initialize or Re-Initialize mode-specific LLMs with shared Gemini client and Groq client
+     * Must be called after API keys are updated.
      */
-    private initializeModeLLMs(): void {
+    public initializeLLMs(): void {
         const client = this.llmHelper.getGeminiClient();
         const groqClient = this.llmHelper.getGroqClient();
+
+        console.log(`[IntelligenceManager] Initializing LLMs. Client present: ${!!client}, Groq present: ${!!groqClient}`);
 
         if (client) {
             // Pass Groq client to ALL LLMs (now all support it)
@@ -166,7 +169,7 @@ export class IntelligenceManager extends EventEmitter {
     public setModel(modelName: string): void {
         console.log(`[IntelligenceManager] Switching model to: ${modelName}`);
         this.currentModel = modelName;
-        this.initializeModeLLMs();
+        this.initializeLLMs();
         this.llmHelper.switchToGemini(undefined, modelName);
     }
 
@@ -439,7 +442,7 @@ export class IntelligenceManager extends EventEmitter {
                 // Fallback to AnswerLLM if not initialized
                 if (!this.answerLLM) {
                     this.setMode('idle');
-                    return "Could you repeat that? I want to make sure I address your question properly.";
+                    return "Please configure your API Keys in Settings to use this feature.";
                 }
                 const context = this.getFormattedContext(180);
                 const answer = await this.answerLLM.generate(question || '', context);
@@ -1078,6 +1081,6 @@ export class IntelligenceManager extends EventEmitter {
      * Reinitialize LLMs (e.g., after switching providers)
      */
     reinitializeLLMs(): void {
-        this.initializeModeLLMs();
+        this.initializeLLMs();
     }
 }

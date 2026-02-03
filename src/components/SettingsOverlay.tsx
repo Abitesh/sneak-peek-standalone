@@ -253,6 +253,12 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
 
     const [apiKey, setApiKey] = useState('');
     const [groqApiKey, setGroqApiKey] = useState('');
+    const [apiKeySaving, setApiKeySaving] = useState(false);
+    const [groqKeySaving, setGroqKeySaving] = useState(false);
+    const [apiKeySaved, setApiKeySaved] = useState(false);
+    const [groqKeySaved, setGroqKeySaved] = useState(false);
+    const [hasStoredGeminiKey, setHasStoredGeminiKey] = useState(false);
+    const [hasStoredGroqKey, setHasStoredGroqKey] = useState(false);
 
     const [serviceAccountPath, setServiceAccountPath] = useState('');
     const [calendarStatus, setCalendarStatus] = useState<{ connected: boolean; email?: string }>({ connected: false });
@@ -263,6 +269,64 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
     const sourceRef = React.useRef<MediaStreamAudioSourceNode | null>(null);
     const rafRef = React.useRef<number | null>(null);
     const streamRef = React.useRef<MediaStream | null>(null);
+
+    // Load stored credentials on mount
+    useEffect(() => {
+        const loadStoredCredentials = async () => {
+            try {
+                // @ts-ignore  
+                const creds = await window.electronAPI?.getStoredCredentials?.();
+                if (creds) {
+                    setHasStoredGeminiKey(creds.hasGeminiKey);
+                    setHasStoredGroqKey(creds.hasGroqKey);
+                    if (creds.googleServiceAccountPath) {
+                        setServiceAccountPath(creds.googleServiceAccountPath);
+                    }
+                }
+            } catch (e) {
+                console.error("Failed to load stored credentials:", e);
+            }
+        };
+        loadStoredCredentials();
+    }, []);
+
+    const handleSaveGeminiKey = async () => {
+        if (!apiKey.trim()) return;
+        setApiKeySaving(true);
+        try {
+            // @ts-ignore
+            const result = await window.electronAPI.setGeminiApiKey(apiKey);
+            if (result.success) {
+                setApiKeySaved(true);
+                setHasStoredGeminiKey(true);
+                setApiKey(''); // Clear the input after saving
+                setTimeout(() => setApiKeySaved(false), 2000);
+            }
+        } catch (e) {
+            console.error("Failed to save Gemini API key:", e);
+        } finally {
+            setApiKeySaving(false);
+        }
+    };
+
+    const handleSaveGroqKey = async () => {
+        if (!groqApiKey.trim()) return;
+        setGroqKeySaving(true);
+        try {
+            // @ts-ignore
+            const result = await window.electronAPI.setGroqApiKey(groqApiKey);
+            if (result.success) {
+                setGroqKeySaved(true);
+                setHasStoredGroqKey(true);
+                setGroqApiKey(''); // Clear the input after saving
+                setTimeout(() => setGroqKeySaved(false), 2000);
+            }
+        } catch (e) {
+            console.error("Failed to save Groq API key:", e);
+        } finally {
+            setGroqKeySaving(false);
+        }
+    };
 
     const handleSelectServiceAccount = async () => {
         try {
@@ -746,33 +810,53 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                         <h3 className="text-sm font-bold text-text-primary mb-4">Advanced API</h3>
                                         <div className="space-y-4">
                                             <div className="bg-bg-item-surface rounded-xl p-5 border border-border-subtle">
-                                                <label className="block text-xs font-medium text-text-secondary uppercase tracking-wide mb-2">Gemini API Key</label>
+                                                <label className="block text-xs font-medium text-text-secondary uppercase tracking-wide mb-2">
+                                                    Gemini API Key
+                                                    {hasStoredGeminiKey && <span className="ml-2 text-green-500 normal-case">✓ Saved</span>}
+                                                </label>
                                                 <div className="flex gap-3">
                                                     <input
                                                         type="password"
                                                         value={apiKey}
                                                         onChange={(e) => setApiKey(e.target.value)}
-                                                        placeholder="AIzaSy..."
+                                                        placeholder={hasStoredGeminiKey ? "••••••••••••" : "AIzaSy..."}
                                                         className="flex-1 bg-bg-input border border-border-subtle rounded-lg px-4 py-2.5 text-xs text-text-primary focus:outline-none focus:border-accent-primary transition-colors"
                                                     />
-                                                    <button className="bg-bg-input hover:bg-bg-secondary border border-border-subtle text-text-primary px-5 py-2.5 rounded-lg text-xs font-medium transition-colors">
-                                                        Save
+                                                    <button
+                                                        onClick={handleSaveGeminiKey}
+                                                        disabled={apiKeySaving || !apiKey.trim()}
+                                                        className={`px-5 py-2.5 rounded-lg text-xs font-medium transition-colors ${apiKeySaved
+                                                                ? 'bg-green-500/20 text-green-400'
+                                                                : 'bg-bg-input hover:bg-bg-secondary border border-border-subtle text-text-primary disabled:opacity-50'
+                                                            }`}
+                                                    >
+                                                        {apiKeySaving ? 'Saving...' : apiKeySaved ? 'Saved!' : 'Save'}
                                                     </button>
                                                 </div>
                                             </div>
 
                                             <div className="bg-bg-item-surface rounded-xl p-5 border border-border-subtle">
-                                                <label className="block text-xs font-medium text-text-secondary uppercase tracking-wide mb-2">Groq API Key</label>
+                                                <label className="block text-xs font-medium text-text-secondary uppercase tracking-wide mb-2">
+                                                    Groq API Key
+                                                    {hasStoredGroqKey && <span className="ml-2 text-green-500 normal-case">✓ Saved</span>}
+                                                </label>
                                                 <div className="flex gap-3">
                                                     <input
                                                         type="password"
                                                         value={groqApiKey}
                                                         onChange={(e) => setGroqApiKey(e.target.value)}
-                                                        placeholder="gsk_..."
+                                                        placeholder={hasStoredGroqKey ? "••••••••••••" : "gsk_..."}
                                                         className="flex-1 bg-bg-input border border-border-subtle rounded-lg px-4 py-2.5 text-xs text-text-primary focus:outline-none focus:border-accent-primary transition-colors"
                                                     />
-                                                    <button className="bg-bg-input hover:bg-bg-secondary border border-border-subtle text-text-primary px-5 py-2.5 rounded-lg text-xs font-medium transition-colors">
-                                                        Save
+                                                    <button
+                                                        onClick={handleSaveGroqKey}
+                                                        disabled={groqKeySaving || !groqApiKey.trim()}
+                                                        className={`px-5 py-2.5 rounded-lg text-xs font-medium transition-colors ${groqKeySaved
+                                                                ? 'bg-green-500/20 text-green-400'
+                                                                : 'bg-bg-input hover:bg-bg-secondary border border-border-subtle text-text-primary disabled:opacity-50'
+                                                            }`}
+                                                    >
+                                                        {groqKeySaving ? 'Saving...' : groqKeySaved ? 'Saved!' : 'Save'}
                                                     </button>
                                                 </div>
                                                 <p className="text-xs text-text-tertiary mt-2">Used for fast text-only responses (optional)</p>

@@ -1,4 +1,4 @@
-import { globalShortcut, app } from "electron"
+import { globalShortcut, app, BrowserWindow } from "electron"
 import { AppState } from "./main" // Adjust the import path if necessary
 
 export class ShortcutsHelper {
@@ -99,16 +99,36 @@ export class ShortcutsHelper {
     globalShortcut.register("CommandOrControl+B", () => {
       const windowHelper = this.appState.getWindowHelper()
       const overlayWindow = windowHelper.getOverlayWindow()
+      const launcherWindow = windowHelper.getLauncherWindow()
       const currentMode = windowHelper.getCurrentWindowMode()
+      const focusedWindow = BrowserWindow.getFocusedWindow()
 
-      // Check if we're in overlay mode (NativelyInterface)
-      // This persists even when overlay is temporarily hidden via Cmd+B toggle
+      // console.log(`[Shortcuts] Cmd+B pressed. Mode: ${currentMode}, Focused: ${focusedWindow?.id}`)
+
+      // 1. If Launcher is focused, always toggle Launcher (hide it)
+      if (focusedWindow && launcherWindow && focusedWindow.id === launcherWindow.id) {
+        // console.log('[Shortcuts] Launcher focused -> Hiding Launcher')
+        launcherWindow.hide() // Focus lost implies next press will hit fallback logic
+        return
+      }
+
+      // 2. If Overlay is focused/visible, always toggle Overlay (hide it)
+      // Note: Overlay might be "focused" but transparent/click-through? 
+      // Usually if user interacts it is focused.
+      if (focusedWindow && overlayWindow && focusedWindow.id === overlayWindow.id) {
+        // console.log('[Shortcuts] Overlay focused -> Toggling Expand (Hide)')
+        overlayWindow.webContents.send('toggle-expand')
+        return
+      }
+
+      // 3. Fallback: No window focused (or other app focused). 
+      // Toggle based on Current Mode.
       if (currentMode === 'overlay' && overlayWindow) {
         // Toggle overlay visibility - send event to renderer to toggle expanded state
         overlayWindow.webContents.send('toggle-expand')
       } else {
         // Launcher mode - toggle launcher visibility
-        const launcherWindow = windowHelper.getLauncherWindow()
+        // console.log(`[Shortcuts] Toggling launcher visibility (Fallback)`)
         if (launcherWindow) {
           if (launcherWindow.isVisible()) {
             launcherWindow.hide()

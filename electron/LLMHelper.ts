@@ -53,8 +53,22 @@ export class LLMHelper {
       })
       // console.log(`[LLMHelper] Using Google Gemini 3 with model: ${this.geminiModel} (v1alpha API)`)
     } else {
-      throw new Error("Either provide Gemini API key or enable Ollama mode")
+      console.warn("[LLMHelper] No API key provided. Client will be uninitialized until key is set.")
     }
+  }
+
+  public setApiKey(apiKey: string) {
+    this.apiKey = apiKey;
+    this.client = new GoogleGenAI({
+      apiKey: apiKey,
+      httpOptions: { apiVersion: "v1alpha" }
+    })
+    console.log("[LLMHelper] Gemini API Key updated.");
+  }
+
+  public setGroqApiKey(apiKey: string) {
+    this.groqClient = new Groq({ apiKey, dangerouslyAllowBrowser: true });
+    console.log("[LLMHelper] Groq API Key updated.");
   }
 
   private cleanJsonResponse(text: string): string {
@@ -1126,6 +1140,21 @@ ANSWER DIRECTLY:`;
     }
   }
 
+  private async withTimeout<T>(promise: Promise<T>, timeoutMs: number, operationName: string): Promise<T> {
+    let timeoutHandle: NodeJS.Timeout;
+    const timeoutPromise = new Promise<T>((_, reject) => {
+      timeoutHandle = setTimeout(() => reject(new Error(`${operationName} timed out after ${timeoutMs}ms`)), timeoutMs);
+    });
+
+    return Promise.race([
+      promise.then(result => {
+        clearTimeout(timeoutHandle);
+        return result;
+      }),
+      timeoutPromise
+    ]);
+  }
+
   /**
    * Robust Meeting Summary Generation
    * Strategy:
@@ -1148,16 +1177,20 @@ ANSWER DIRECTLY:`;
       try {
         const groqPrompt = groqSystemPrompt || systemPrompt;
         // Use non-streaming for summary
-        const response = await this.groqClient.chat.completions.create({
-          model: GROQ_MODEL,
-          messages: [
-            { role: "system", content: groqPrompt },
-            { role: "user", content: `Context:\n${context}` }
-          ],
-          temperature: 0.3,
-          max_tokens: 8192,
-          stream: false
-        });
+        const response = await this.withTimeout(
+          this.groqClient.chat.completions.create({
+            model: GROQ_MODEL,
+            messages: [
+              { role: "system", content: groqPrompt },
+              { role: "user", content: `Context:\n${context}` }
+            ],
+            temperature: 0.3,
+            max_tokens: 8192,
+            stream: false
+          }),
+          45000,
+          "Groq Summary"
+        );
 
         const text = response.choices[0]?.message?.content || "";
         if (text.trim().length > 0) {
@@ -1179,7 +1212,11 @@ ANSWER DIRECTLY:`;
 
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const text = await this.generateWithFlash(contents);
+        const text = await this.withTimeout(
+          this.generateWithFlash(contents),
+          45000,
+          `Gemini Flash Summary (Attempt ${attempt})`
+        );
         if (text.trim().length > 0) {
           console.log(`[LLMHelper] ✅ Gemini Flash summary generated successfully (Attempt ${attempt}).`);
           return this.processResponse(text);
@@ -1204,14 +1241,19 @@ ANSWER DIRECTLY:`;
     for (let attempt = 1; attempt <= maxProRetries; attempt++) {
       try {
         console.log(`[LLMHelper] 🔄 Gemini Pro Attempt ${attempt}/${maxProRetries}...`);
-        const response = await this.client.models.generateContent({
-          model: GEMINI_PRO_MODEL,
-          contents: contents,
-          config: {
-            maxOutputTokens: MAX_OUTPUT_TOKENS,
-            temperature: 0.3,
-          }
-        });
+        const response = await this.withTimeout(
+          // @ts-ignore
+          this.client.models.generateContent({
+            model: GEMINI_PRO_MODEL,
+            contents: contents,
+            config: {
+              maxOutputTokens: MAX_OUTPUT_TOKENS,
+              temperature: 0.3,
+            }
+          }),
+          60000,
+          `Gemini Pro Summary (Attempt ${attempt})`
+        );
         const text = response.text || "";
 
         if (text.trim().length > 0) {

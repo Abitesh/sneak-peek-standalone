@@ -41,7 +41,7 @@ const FEATURES: FeatureSlide[] = [
         ],
         type: 'support',
         actionLabel: 'Contribute to development',
-        url: 'https://ko-fi.com/evinjohnn'
+        url: 'https://buymeacoffee.com/evinjohnn'
     }
 ];
 
