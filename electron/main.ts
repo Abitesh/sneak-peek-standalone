@@ -69,7 +69,7 @@ export class AppState {
 
   // View management
   private view: "queue" | "solutions" = "queue"
-  private isUndetectable: boolean = true
+  private isUndetectable: boolean = false
 
   private problemInfo: {
     problem_statement: string
@@ -843,13 +843,45 @@ export class AppState {
   }
 
   public createTray(): void {
-    const iconPath = process.env.NODE_ENV === 'development'
-      ? require('path').join(__dirname, '../src/components/icon.png')
-      : require('path').join(process.resourcesPath, 'src/components/icon.png');
+    this.showTray();
+  }
 
-    // For now, let's use a simpler path for local development testing
-    // In production, we'd need to ensure it's bundled.
-    const trayIcon = nativeImage.createFromPath(require('path').join(app.getAppPath(), 'src/components/icon.png')).resize({ width: 16, height: 16 });
+  public showTray(): void {
+    if (this.tray) return;
+
+    // Try to find a template image first for macOS
+    const resourcesPath = app.isPackaged ? process.resourcesPath : path.join(__dirname, '..');
+
+    // Potential paths for tray icon
+    const templatePath = path.join(resourcesPath, 'assets', 'iconTemplate.png');
+    const defaultIconPath = app.isPackaged
+      ? path.join(resourcesPath, 'src/components/icon.png')
+      : path.join(__dirname, '../src/components/icon.png');
+
+    let iconToUse = defaultIconPath;
+
+    // Check if template exists (sync check is fine for startup/rare toggle)
+    try {
+      if (require('fs').existsSync(templatePath)) {
+        iconToUse = templatePath;
+        console.log('[Tray] Using template icon:', templatePath);
+      } else {
+        // Also check src/components for dev
+        const devTemplatePath = path.join(__dirname, '../src/components/iconTemplate.png');
+        if (require('fs').existsSync(devTemplatePath)) {
+          iconToUse = devTemplatePath;
+          console.log('[Tray] Using dev template icon:', devTemplatePath);
+        } else {
+          console.log('[Tray] Template icon not found, using default:', defaultIconPath);
+        }
+      }
+    } catch (e) {
+      console.error('[Tray] Error checking for icon:', e);
+    }
+
+    const trayIcon = nativeImage.createFromPath(iconToUse).resize({ width: 16, height: 16 });
+    // IMPORTANT: specific template settings for macOS if needed, but 'Template' in name usually suffices
+    trayIcon.setTemplateImage(iconToUse.endsWith('Template.png'));
 
     this.tray = new Tray(trayIcon)
 
@@ -902,15 +934,17 @@ export class AppState {
     this.tray.setToolTip('Natively - Press Cmd+Shift+Space to show')
     this.tray.setContextMenu(contextMenu)
 
-    // Set a title for macOS (will appear in menu bar)
-    if (process.platform === 'darwin') {
-      // Tray now uses icon.png, no title needed
-    }
-
     // Double-click to show window
     this.tray.on('double-click', () => {
       this.centerAndShowWindow()
     })
+  }
+
+  public hideTray(): void {
+    if (this.tray) {
+      this.tray.destroy();
+      this.tray = null;
+    }
   }
 
   public setHasDebugged(value: boolean): void {
@@ -925,6 +959,43 @@ export class AppState {
     this.isUndetectable = state
     this.windowHelper.setContentProtection(state)
     this.settingsWindowHelper.setContentProtection(state)
+
+    // Broadcast change to all relevant windows
+    const mainWindow = this.windowHelper.getMainWindow();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('undetectable-changed', state);
+    }
+
+    // Also broadcast to launcher explicitly if it exists and isn't the main window
+    const launcher = this.windowHelper.getLauncherWindow();
+    if (launcher && !launcher.isDestroyed() && launcher !== mainWindow) {
+      launcher.webContents.send('undetectable-changed', state);
+    }
+
+    const settingsWin = this.settingsWindowHelper.getSettingsWindow();
+    if (settingsWin && !settingsWin.isDestroyed()) {
+      settingsWin.webContents.send('undetectable-changed', state);
+    }
+
+    const advancedWin = this.settingsWindowHelper.getAdvancedWindow(); // SettingsPopup
+    if (advancedWin && !advancedWin.isDestroyed()) {
+      advancedWin.webContents.send('undetectable-changed', state);
+    }
+
+
+    // --- STEALTH MODE LOGIC ---
+    // If True (Stealth Mode): Hide Dock, Hide Tray (or standard 'stealth' behavior)
+    // If False (Visible Mode): Show Dock, Show Tray
+
+    if (process.platform === 'darwin') {
+      if (state) {
+        app.dock.hide();
+        this.hideTray(); // User said: "Tray Hidden in 'stealth'"
+      } else {
+        app.dock.show();
+        this.showTray();
+      }
+    }
   }
 
   public getUndetectable(): boolean {
@@ -962,8 +1033,23 @@ async function initializeApp() {
     }
 
     console.log("App is ready")
+
+    // Apply initial stealth state logic
+    // Default isUndetectable = true (App initialized in stealth)
+    if (process.platform === 'darwin') {
+      app.dock.hide();
+    }
+
     appState.createWindow()
-    appState.createTray()
+    // appState.createTray() // Managed by setUndetectable or manual calls now. 
+    // If undetectable is true by default, tray should be hidden strictly? 
+    // User notes: "Tray Hidden in 'stealth', Shown in debug/settings"
+    // So initially Hidden.
+
+    if (!appState.getUndetectable()) {
+      appState.showTray();
+      if (process.platform === 'darwin') app.dock.show();
+    }
     // Register global shortcuts using ShortcutsHelper
     appState.shortcutsHelper.registerGlobalShortcuts()
 
@@ -1000,15 +1086,17 @@ async function initializeApp() {
       console.error('[Main] Failed to recover unprocessed meetings:', err);
     });
 
-    if (process.platform === 'darwin') {
-      app.dock.show(); // Ensure dock is visible (but icon already set)
-    }
+
+    // Note: We do NOT force dock show here anymore, respecting stealth mode.
   })
 
   app.on("activate", () => {
     console.log("App activated")
+    console.log("App activated")
     if (process.platform === 'darwin') {
-      app.dock.show();
+      if (!appState.getUndetectable()) {
+        app.dock.show();
+      }
     }
     if (appState.getMainWindow() === null) {
       appState.createWindow()

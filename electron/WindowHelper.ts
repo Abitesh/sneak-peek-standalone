@@ -138,7 +138,7 @@ export class WindowHelper {
     }
 
     this.launcherWindow = new BrowserWindow(launcherSettings)
-    this.launcherWindow.setContentProtection(true)
+    this.launcherWindow.setContentProtection(false)
     this.launcherWindow.loadURL(`${startUrl}?window=launcher`).catch((e) => { console.error("Failed to load URL:", e) })
     // this.launcherWindow.webContents.openDevTools({ mode: 'detach' });
 
@@ -167,7 +167,7 @@ export class WindowHelper {
     }
 
     this.overlayWindow = new BrowserWindow(overlaySettings)
-    this.overlayWindow.setContentProtection(true)
+    this.overlayWindow.setContentProtection(false)
 
     if (process.platform === "darwin") {
       this.overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
@@ -309,7 +309,10 @@ export class WindowHelper {
       this.launcherWindow.focus();
       this.isWindowVisible = true;
       if (process.platform === 'darwin') {
-        app.dock.show();
+        // Only show dock if NOT in stealth mode
+        if (!this.appState.getUndetectable()) {
+          app.dock.show();
+        }
       }
     }
   }

@@ -85,7 +85,7 @@ interface SettingsOverlayProps {
 
 const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) => {
     const [activeTab, setActiveTab] = useState('general');
-    const [isUndetectable, setIsUndetectable] = useState(true);
+    const [isUndetectable, setIsUndetectable] = useState(false);
     const [openOnLogin, setOpenOnLogin] = useState(false);
     const [themeMode, setThemeMode] = useState<'system' | 'light' | 'dark'>('system');
     const [isThemeDropdownOpen, setIsThemeDropdownOpen] = useState(false);
@@ -93,6 +93,16 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
     const themeDropdownRef = React.useRef<HTMLDivElement>(null);
 
     // Close dropdown when clicking outside
+    // Sync with global state changes
+    useEffect(() => {
+        if (window.electronAPI?.onUndetectableChanged) {
+            const unsubscribe = window.electronAPI.onUndetectableChanged((newState: boolean) => {
+                setIsUndetectable(newState);
+            });
+            return () => unsubscribe();
+        }
+    }, []);
+
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
             if (themeDropdownRef.current && !themeDropdownRef.current.contains(event.target as Node)) {

@@ -99,6 +99,8 @@ interface ElectronAPI {
   onGeminiStreamError: (callback: (error: string) => void) => () => void
   on: (channel: string, callback: (...args: any[]) => void) => () => void
 
+  onUndetectableChanged: (callback: (state: boolean) => void) => () => void
+
   // Theme API
   getThemeMode: () => Promise<{ mode: 'system' | 'light' | 'dark', resolved: 'light' | 'dark' }>
   setThemeMode: (mode: 'system' | 'light' | 'dark') => Promise<void>
@@ -532,6 +534,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on(channel, subscription)
     return () => {
       ipcRenderer.removeListener(channel, subscription)
+    }
+  },
+
+  onUndetectableChanged: (callback: (state: boolean) => void) => {
+    const subscription = (_: any, state: boolean) => callback(state)
+    ipcRenderer.on('undetectable-changed', subscription)
+    return () => {
+      ipcRenderer.removeListener('undetectable-changed', subscription)
     }
   },
 

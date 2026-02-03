@@ -2,7 +2,7 @@ import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { MessageSquare, Link, Camera, Zap, Heart } from 'lucide-react';
 
 const SettingsPopup = () => {
-    const [isUndetectable, setIsUndetectable] = useState(true);
+    const [isUndetectable, setIsUndetectable] = useState(false);
     const [useGeminiPro, setUseGeminiPro] = useState(() => {
         return localStorage.getItem('natively_model_preference') === 'pro';
     });
@@ -10,8 +10,23 @@ const SettingsPopup = () => {
     const isFirstRender = React.useRef(true);
     const isFirstUndetectableRender = React.useRef(true);
 
+    // Sync with global state changes
     useEffect(() => {
-        // Skip initial render
+        if (window.electronAPI?.onUndetectableChanged) {
+            const unsubscribe = window.electronAPI.onUndetectableChanged((newState: boolean) => {
+                setIsUndetectable(newState);
+            });
+            return () => unsubscribe();
+        }
+    }, []);
+
+    useEffect(() => {
+        // Skip initial render if needed, or just allow it to sync once.
+        // We need to differentiate between "user toggled here" and "state came from backend"
+        // But since we are setting state via API, and API broadcasts back, we might get loops?
+        // Actually, if we set state to X, backend broadcasts X. Frontend receives X.
+        // If frontend state is already X, no re-render. So safe.
+
         if (isFirstUndetectableRender.current) {
             isFirstUndetectableRender.current = false;
             return;

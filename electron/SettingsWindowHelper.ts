@@ -49,6 +49,7 @@ export class SettingsWindowHelper {
 
     public toggleWindow(x?: number, y?: number): void {
         const mainWindow = BrowserWindow.getAllWindows().find(w => !w.isDestroyed() && w !== this.settingsWindow && w !== this.advancedWindow);
+
         if (mainWindow && x !== undefined && y !== undefined) {
             const bounds = mainWindow.getBounds();
             this.offsetX = x - bounds.x;
@@ -56,6 +57,7 @@ export class SettingsWindowHelper {
         }
 
         if (this.settingsWindow && !this.settingsWindow.isDestroyed()) {
+
             // Fix: If window was just closed by blur (e.g. clicking the toggle button), don't re-open immediately
             if (!this.settingsWindow.isVisible() && (Date.now() - this.lastBlurTime < 250)) {
                 return;
@@ -177,13 +179,6 @@ export class SettingsWindowHelper {
         }
 
         this.settingsWindow = new BrowserWindow(windowSettings)
-
-        if (process.platform === "darwin") {
-            this.settingsWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
-            this.settingsWindow.setHiddenInMissionControl(true)
-            this.settingsWindow.setAlwaysOnTop(true, "floating")
-        }
-
         console.log(`[SettingsWindowHelper] Creating Settings Window with Content Protection: ${this.contentProtection}`);
         this.settingsWindow.setContentProtection(this.contentProtection);
 
@@ -241,12 +236,6 @@ export class SettingsWindowHelper {
                 preload: path.join(__dirname, "preload.js")
             }
         });
-
-        if (process.platform === "darwin") {
-            this.advancedWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
-            this.advancedWindow.setHiddenInMissionControl(true)
-            this.advancedWindow.setAlwaysOnTop(true, "floating")
-        }
 
         const advancedUrl = isDev
             ? `${startUrl}?window=advanced`

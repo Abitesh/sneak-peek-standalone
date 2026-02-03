@@ -69,7 +69,7 @@ const formatTime = (dateStr: string) => {
 
 const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) => {
     const [meetings, setMeetings] = useState<Meeting[]>([]);
-    const [isDetectable, setIsDetectable] = useState(false);
+    const [isDetectable, setIsDetectable] = useState(true);
     const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
     const [upcomingEvents, setUpcomingEvents] = useState<any[]>([]);
     const [isPrepared, setIsPrepared] = useState(false);
@@ -173,6 +173,16 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
     if (!window.electronAPI) {
         return <div className="text-white p-10">Error: Electron API not initialized. Check preload script.</div>;
     }
+
+    // Sync with global state
+    useEffect(() => {
+        if (window.electronAPI?.onUndetectableChanged) {
+            const unsubscribe = window.electronAPI.onUndetectableChanged((isUndetectable: boolean) => {
+                setIsDetectable(!isUndetectable);
+            });
+            return () => unsubscribe();
+        }
+    }, []);
 
     const toggleDetectable = () => {
         const newState = !isDetectable;
@@ -351,7 +361,7 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
                 ) : (
                     <motion.div
                         key="launcher"
-                        className="flex-1 flex flex-col overflow-hidden"
+                        className="flex-1 flex flex-col overflow-hidden relative"
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
@@ -741,6 +751,11 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
                     </motion.div>
                 )}
             </AnimatePresence>
+
+            {/* Undetectable Mode Overlay - Persistent across views, below header */}
+            {!isDetectable && (
+                <div className="absolute top-[40px] left-1 right-1 bottom-1 border border-dashed border-white/30 rounded-xl pointer-events-none z-30" />
+            )}
 
             {/* Global Chat Overlay */}
             <GlobalChatOverlay

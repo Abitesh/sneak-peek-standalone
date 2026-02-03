@@ -92,11 +92,21 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) =
     const [attachedContext, setAttachedContext] = useState<{ path: string, preview: string } | null>(null);
 
     // Settings State with Persistence
-    const [isUndetectable, setIsUndetectable] = useState(true);
+    const [isUndetectable, setIsUndetectable] = useState(false);
     const [hideChatHidesWidget, setHideChatHidesWidget] = useState(() => {
         const stored = localStorage.getItem('natively_hideChatHidesWidget');
         return stored ? stored === 'true' : true;
     });
+
+    // Global State Sync
+    useEffect(() => {
+        if (window.electronAPI?.onUndetectableChanged) {
+            const unsubscribe = window.electronAPI.onUndetectableChanged((state) => {
+                setIsUndetectable(state);
+            });
+            return () => unsubscribe();
+        }
+    }, []);
 
     // Persist Settings
     useEffect(() => {
@@ -1194,6 +1204,7 @@ Provide only the answer, nothing else.`;
                     overflow-hidden 
                     flex flex-col
                 ">
+
 
 
 
