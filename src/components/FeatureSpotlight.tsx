@@ -226,7 +226,7 @@ export const FeatureSpotlight: React.FC = () => {
                                 </p>
 
                                 {currentFeature.bullets && (
-                                    <div className={`flex flex-col w-full max-w-[340px] ${isSupport ? '0 items-center' : 'gap-1 items-center translate-y-2'}`}>
+                                    <div className={`flex flex-col w-full max-w-[340px] ${isSupport ? '0 items-center' : 'gap-1 items-center translate-y-2.5'}`}>
                                         {currentFeature.bullets.map((bullet, idx) => (
                                             <div key={idx} className={`flex items-center justify-center group/item transition-transform duration-200 px-2`}>
                                                 <span
