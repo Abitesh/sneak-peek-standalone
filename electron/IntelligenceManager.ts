@@ -454,6 +454,25 @@ export class IntelligenceManager extends EventEmitter {
             // Prepare transcript using the new clean pipeline
             // Use 180 seconds window for broader context
             const contextItems = this.getContext(180);
+
+            // Inject latest interim transcript if available (critical for latency)
+            if (this.lastInterimInterviewer && this.lastInterimInterviewer.text.trim().length > 0) {
+                // Check if it's not already in context (by timestamp proximity or exact text)
+                const lastItem = contextItems[contextItems.length - 1];
+                const isDuplicate = lastItem &&
+                    lastItem.role === 'interviewer' &&
+                    (lastItem.text === this.lastInterimInterviewer.text || Math.abs(lastItem.timestamp - this.lastInterimInterviewer.timestamp) < 1000); // 1s buffer
+
+                if (!isDuplicate) {
+                    console.log(`[IntelligenceManager] Injecting interim transcript: "${this.lastInterimInterviewer.text.substring(0, 50)}..."`);
+                    contextItems.push({
+                        role: 'interviewer',
+                        text: this.lastInterimInterviewer.text,
+                        timestamp: this.lastInterimInterviewer.timestamp
+                    });
+                }
+            }
+
             const transcriptTurns = contextItems.map(item => ({
                 role: item.role,
                 text: item.text,

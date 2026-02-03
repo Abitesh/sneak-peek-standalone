@@ -1053,21 +1053,22 @@ async function initializeApp() {
 
     console.log("App is ready")
 
-    // Apply initial stealth state logic
-    // Default isUndetectable = true (App initialized in stealth)
-    if (process.platform === 'darwin') {
-      app.dock.hide();
-    }
-
     appState.createWindow()
-    // appState.createTray() // Managed by setUndetectable or manual calls now. 
-    // If undetectable is true by default, tray should be hidden strictly? 
-    // User notes: "Tray Hidden in 'stealth', Shown in debug/settings"
-    // So initially Hidden.
 
-    if (!appState.getUndetectable()) {
+    // Apply initial stealth state based on isUndetectable setting
+    // Default isUndetectable = false, so dock is visible and tray is shown
+    if (appState.getUndetectable()) {
+      // Stealth mode: hide dock and tray
+      if (process.platform === 'darwin') {
+        app.dock.hide();
+      }
+      // Tray is hidden by default when in stealth
+    } else {
+      // Normal mode: show dock and tray
       appState.showTray();
-      if (process.platform === 'darwin') app.dock.show();
+      if (process.platform === 'darwin') {
+        app.dock.show();
+      }
     }
     // Register global shortcuts using ShortcutsHelper
     appState.shortcutsHelper.registerGlobalShortcuts()

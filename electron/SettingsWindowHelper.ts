@@ -57,31 +57,22 @@ export class SettingsWindowHelper {
 
         if (this.settingsWindow && !this.settingsWindow.isDestroyed()) {
             // Fix: If window was just closed by blur (e.g. clicking the toggle button), don't re-open immediately
-            const timeSinceBlur = Date.now() - this.lastBlurTime;
-            console.log(`[SettingsWindowHelper] Toggle check: isVisible=${this.settingsWindow.isVisible()}, timeSinceBlur=${timeSinceBlur}ms`);
-
-            if (!this.settingsWindow.isVisible() && (timeSinceBlur < 250)) {
-                console.log(`[SettingsWindowHelper] Ignoring toggle due to recent blur debounce (${timeSinceBlur}ms)`);
+            if (!this.settingsWindow.isVisible() && (Date.now() - this.lastBlurTime < 250)) {
                 return;
             }
 
             if (this.settingsWindow.isVisible()) {
-                console.log(`[SettingsWindowHelper] Hiding window`);
                 this.settingsWindow.hide()
             } else {
-                console.log(`[SettingsWindowHelper] Showing window at ${x}, ${y}`);
                 this.showWindow(x, y)
             }
         } else {
-            console.log(`[SettingsWindowHelper] Creating new window at ${x}, ${y}`);
             this.createWindow(x, y)
         }
     }
 
     public showWindow(x?: number, y?: number): void {
-        console.log(`[SettingsWindowHelper] showWindow called. Coords: ${x}, ${y}`);
         if (!this.settingsWindow || this.settingsWindow.isDestroyed()) {
-            console.log(`[SettingsWindowHelper] Window missing or destroyed, recreating...`);
             this.createWindow(x, y)
             return
         }
@@ -190,8 +181,7 @@ export class SettingsWindowHelper {
         if (process.platform === "darwin") {
             this.settingsWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
             this.settingsWindow.setHiddenInMissionControl(true)
-            // Use 'pop-up-menu' to be above floating overlay
-            this.settingsWindow.setAlwaysOnTop(true, "pop-up-menu")
+            this.settingsWindow.setAlwaysOnTop(true, "floating")
         }
 
         console.log(`[SettingsWindowHelper] Creating Settings Window with Content Protection: ${this.contentProtection}`);
@@ -206,9 +196,7 @@ export class SettingsWindowHelper {
 
         this.settingsWindow.once('ready-to-show', () => {
             if (showWhenReady) {
-                console.log('[SettingsWindowHelper] Window ready-to-show. Showing and focusing (level: pop-up-menu).');
                 this.settingsWindow?.show()
-                this.settingsWindow?.focus()
             }
         })
 
@@ -220,8 +208,6 @@ export class SettingsWindowHelper {
         this.settingsWindow.on('blur', () => {
             // Check if focus moved to advanced window
             if (this.advancedWindow && this.advancedWindow.isFocused()) return;
-
-            console.log(`[SettingsWindowHelper] Window blurred, closing...`);
             this.lastBlurTime = Date.now();
             this.closeWindow();
         })
