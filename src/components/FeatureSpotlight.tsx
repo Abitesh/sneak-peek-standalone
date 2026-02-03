@@ -191,11 +191,12 @@ export const FeatureSpotlight: React.FC = () => {
 
                             {/* Main Content Group */}
                             <div
-                                className={`flex flex-col items-center justify-center transition-all duration-300 ${isSupport ? '-mt-1 pb-14' : 'translate-y-2'}`}
+                                className={`flex flex-col items-center justify-center transition-all duration-300 ${isSupport ? '-mt-1 pb-14' : '-translate-y-2.5'}`}
                             >
+
                                 {/* Title */}
                                 <h2
-                                    className={`text-white drop-shadow-sm tracking-tight ${isSupport ? 'mb-1' : 'mb-2'} transition-all duration-300 group-hover:brightness-105`}
+                                    className={`text-white drop-shadow-sm tracking-tight ${isSupport ? 'mb-1' : 'mb-0'} transition-all duration-300 group-hover:brightness-105`}
                                     style={{
                                         fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text"',
                                         fontSize: (isPremium || isSupport) ? '30px' : '26px',
@@ -225,7 +226,7 @@ export const FeatureSpotlight: React.FC = () => {
                                 </p>
 
                                 {currentFeature.bullets && (
-                                    <div className={`flex flex-col w-full max-w-[340px] ${isSupport ? '0 items-center' : 'gap-1 items-center'}`}>
+                                    <div className={`flex flex-col w-full max-w-[340px] ${isSupport ? '0 items-center' : 'gap-1 items-center translate-y-2'}`}>
                                         {currentFeature.bullets.map((bullet, idx) => (
                                             <div key={idx} className={`flex items-center justify-center group/item transition-transform duration-200 px-2`}>
                                                 <span
@@ -241,8 +242,13 @@ export const FeatureSpotlight: React.FC = () => {
 
                                 {/* Footer: In-flow for equal spacing */}
                                 {currentFeature.footer && (
-                                    <div className="w-full text-center pointer-events-none mt-2">
-                                        <p className="text-[11px] text-[#F5F7FA] opacity-65 font-medium tracking-wide">
+                                    <div className="w-full text-center pointer-events-none mt-2 translate-y-5">
+                                        <p
+                                            className="text-[#F5F7FA] opacity-65 font-medium tracking-wide"
+                                            style={{
+                                                fontSize: (isPremium || isSupport) ? '13px' : '15px'
+                                            }}
+                                        >
                                             {currentFeature.footer}
                                         </p>
                                     </div>

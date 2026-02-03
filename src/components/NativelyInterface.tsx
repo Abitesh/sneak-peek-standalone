@@ -1436,7 +1436,12 @@ Provide only the answer, nothing else.`;
                                                     // Y: Below the main content + gap
                                                     const y = window.screenY + contentRect.bottom + GAP;
 
-                                                    window.electronAPI.invoke('toggle-settings-window', { x, y });
+                                                    console.log('[NativelyInterface] Toggling settings window at:', x, y);
+                                                    try {
+                                                        window.electronAPI.invoke('toggle-settings-window', { x, y });
+                                                    } catch (err) {
+                                                        console.error('[NativelyInterface] Failed to toggle settings window:', err);
+                                                    }
                                                 }}
                                                 className={`
                                             w-7 h-7 flex items-center justify-center rounded-lg 

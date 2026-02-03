@@ -49,7 +49,6 @@ export class SettingsWindowHelper {
 
     public toggleWindow(x?: number, y?: number): void {
         const mainWindow = BrowserWindow.getAllWindows().find(w => !w.isDestroyed() && w !== this.settingsWindow && w !== this.advancedWindow);
-
         if (mainWindow && x !== undefined && y !== undefined) {
             const bounds = mainWindow.getBounds();
             this.offsetX = x - bounds.x;
@@ -57,24 +56,32 @@ export class SettingsWindowHelper {
         }
 
         if (this.settingsWindow && !this.settingsWindow.isDestroyed()) {
-
             // Fix: If window was just closed by blur (e.g. clicking the toggle button), don't re-open immediately
-            if (!this.settingsWindow.isVisible() && (Date.now() - this.lastBlurTime < 250)) {
+            const timeSinceBlur = Date.now() - this.lastBlurTime;
+            console.log(`[SettingsWindowHelper] Toggle check: isVisible=${this.settingsWindow.isVisible()}, timeSinceBlur=${timeSinceBlur}ms`);
+
+            if (!this.settingsWindow.isVisible() && (timeSinceBlur < 250)) {
+                console.log(`[SettingsWindowHelper] Ignoring toggle due to recent blur debounce (${timeSinceBlur}ms)`);
                 return;
             }
 
             if (this.settingsWindow.isVisible()) {
+                console.log(`[SettingsWindowHelper] Hiding window`);
                 this.settingsWindow.hide()
             } else {
+                console.log(`[SettingsWindowHelper] Showing window at ${x}, ${y}`);
                 this.showWindow(x, y)
             }
         } else {
+            console.log(`[SettingsWindowHelper] Creating new window at ${x}, ${y}`);
             this.createWindow(x, y)
         }
     }
 
     public showWindow(x?: number, y?: number): void {
+        console.log(`[SettingsWindowHelper] showWindow called. Coords: ${x}, ${y}`);
         if (!this.settingsWindow || this.settingsWindow.isDestroyed()) {
+            console.log(`[SettingsWindowHelper] Window missing or destroyed, recreating...`);
             this.createWindow(x, y)
             return
         }
@@ -179,6 +186,13 @@ export class SettingsWindowHelper {
         }
 
         this.settingsWindow = new BrowserWindow(windowSettings)
+
+        if (process.platform === "darwin") {
+            this.settingsWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+            this.settingsWindow.setHiddenInMissionControl(true)
+            this.settingsWindow.setAlwaysOnTop(true, "floating")
+        }
+
         console.log(`[SettingsWindowHelper] Creating Settings Window with Content Protection: ${this.contentProtection}`);
         this.settingsWindow.setContentProtection(this.contentProtection);
 
@@ -203,6 +217,8 @@ export class SettingsWindowHelper {
         this.settingsWindow.on('blur', () => {
             // Check if focus moved to advanced window
             if (this.advancedWindow && this.advancedWindow.isFocused()) return;
+
+            console.log(`[SettingsWindowHelper] Window blurred, closing...`);
             this.lastBlurTime = Date.now();
             this.closeWindow();
         })
@@ -237,6 +253,12 @@ export class SettingsWindowHelper {
             }
         });
 
+        if (process.platform === "darwin") {
+            this.advancedWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+            this.advancedWindow.setHiddenInMissionControl(true)
+            this.advancedWindow.setAlwaysOnTop(true, "floating")
+        }
+
         const advancedUrl = isDev
             ? `${startUrl}?window=advanced`
             : `${startUrl}?window=advanced`
@@ -266,7 +288,7 @@ export class SettingsWindowHelper {
 
         this.settingsWindow.setPosition(newX, newY);
     }
-    private contentProtection: boolean = true; // Track state
+    private contentProtection: boolean = false; // Track state
 
     public setContentProtection(enable: boolean): void {
         console.log(`[SettingsWindowHelper] Setting content protection to: ${enable}`);

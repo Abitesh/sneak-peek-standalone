@@ -988,12 +988,31 @@ export class AppState {
     // If False (Visible Mode): Show Dock, Show Tray
 
     if (process.platform === 'darwin') {
+      const activeWindow = this.windowHelper.getMainWindow();
+
       if (state) {
         app.dock.hide();
         this.hideTray(); // User said: "Tray Hidden in 'stealth'"
+
+        // Critical Fix: Force focus back to the active window to prevent it from being backgrounded
+        // When Dock icon is hidden, macOS treats app as "accessory", potentially losing focus
+        if (activeWindow && !activeWindow.isDestroyed() && activeWindow.isVisible()) {
+          // Use a small timeout to allow the dock hide animation/state change to register
+          setTimeout(() => {
+            activeWindow.show();
+            activeWindow.focus();
+          }, 0);
+        }
       } else {
         app.dock.show();
         this.showTray();
+
+        // Restore focus when coming back to foreground/dock mode
+        if (activeWindow && !activeWindow.isDestroyed() && activeWindow.isVisible()) {
+          setTimeout(() => {
+            activeWindow.focus();
+          }, 0);
+        }
       }
     }
   }

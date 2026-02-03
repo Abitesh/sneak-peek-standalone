@@ -265,7 +265,19 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
 
     // Helper to format duration to mm:ss or mmm:ss
     const formatDurationPill = (durationStr: string) => {
-        // Assume format "X min"
+        // If it already contains a colon, assume it's formatted roughly (e.g. "4:48")
+        // and just ensure 2-digit padding for minutes if desired, or keep as is.
+        if (durationStr.includes(':')) {
+            const parts = durationStr.split(':');
+            if (parts.length === 2) {
+                const mm = parts[0].trim().padStart(2, '0');
+                const ss = parts[1].trim().padStart(2, '0');
+                return `${mm}:${ss}`;
+            }
+            return durationStr;
+        }
+
+        // Backward compatibility: Assume format "X min"
         const minutes = parseInt(durationStr.replace('min', '').trim()) || 0;
         const mm = minutes.toString().padStart(2, '0');
         return `${mm}:00`;
