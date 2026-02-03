@@ -460,6 +460,11 @@ export function initializeIpcHandlers(appState: AppState): void {
     return { success: true };
   });
 
+  ipcMain.handle("flush-database", async () => {
+    const result = DatabaseManager.getInstance().clearAllData();
+    return { success: result };
+  });
+
   ipcMain.handle("open-external", async (event, url: string) => {
     await shell.openExternal(url);
   });

@@ -99,9 +99,11 @@ export class ShortcutsHelper {
     globalShortcut.register("CommandOrControl+B", () => {
       const windowHelper = this.appState.getWindowHelper()
       const overlayWindow = windowHelper.getOverlayWindow()
+      const currentMode = windowHelper.getCurrentWindowMode()
 
-      // Check if overlay (NativelyInterface) is currently the active/visible window
-      if (overlayWindow && overlayWindow.isVisible()) {
+      // Check if we're in overlay mode (NativelyInterface)
+      // This persists even when overlay is temporarily hidden via Cmd+B toggle
+      if (currentMode === 'overlay' && overlayWindow) {
         // Toggle overlay visibility - send event to renderer to toggle expanded state
         overlayWindow.webContents.send('toggle-expand')
       } else {

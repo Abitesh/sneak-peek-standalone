@@ -16,6 +16,8 @@ export class WindowHelper {
   // Position/Size tracking for Launcher
   private launcherPosition: { x: number; y: number } | null = null
   private launcherSize: { width: number; height: number } | null = null
+  // Track current window mode (persists even when overlay is hidden via Cmd+B)
+  private currentWindowMode: 'launcher' | 'overlay' = 'launcher'
 
   private appState: AppState
 
@@ -241,6 +243,7 @@ export class WindowHelper {
   // Specific getters if needed
   public getLauncherWindow(): BrowserWindow | null { return this.launcherWindow }
   public getOverlayWindow(): BrowserWindow | null { return this.overlayWindow }
+  public getCurrentWindowMode(): 'launcher' | 'overlay' { return this.currentWindowMode }
 
   public isVisible(): boolean {
     return this.isWindowVisible
@@ -276,6 +279,7 @@ export class WindowHelper {
 
   public switchToOverlay(): void {
     console.log('[WindowHelper] Switching to OVERLAY');
+    this.currentWindowMode = 'overlay';
     if (this.launcherWindow && !this.launcherWindow.isDestroyed()) {
       this.launcherWindow.hide();
     }
@@ -300,6 +304,7 @@ export class WindowHelper {
 
   public switchToLauncher(): void {
     console.log('[WindowHelper] Switching to LAUNCHER');
+    this.currentWindowMode = 'launcher';
     if (this.overlayWindow && !this.overlayWindow.isDestroyed()) {
       this.overlayWindow.hide();
     }

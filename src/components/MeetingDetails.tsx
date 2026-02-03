@@ -4,6 +4,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import MeetingChatOverlay from './MeetingChatOverlay';
 import EditableTextBlock from './EditableTextBlock';
 import NativelyLogo from './icon.png';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 const formatTime = (ms: number) => {
     const date = new Date(ms);
@@ -241,117 +243,116 @@ ${meeting.detailedSummary.keyPoints?.map(item => `- ${item}`).join('\n') || 'Non
                         {/* Using standard divs for content, framer motion for layout */}
                         {activeTab === 'summary' && (
                             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                                {/* Overview */}
-                                <div className="mb-6 pb-6 border-b border-border-subtle">
-                                    <EditableTextBlock
-                                        initialValue={meeting.detailedSummary?.overview || ''}
-                                        onSave={handleOverviewSave}
-                                        tagName="p"
-                                        className="text-sm text-text-secondary leading-relaxed -ml-2 px-2 py-1 rounded-md transition-colors"
-                                        placeholder="Add an overview..."
-                                    />
+                                {/* Overview - Rendered as Markdown */}
+                                <div className="mb-6 pb-6 border-b border-border-subtle prose prose-sm dark:prose-invert max-w-none">
+                                    <ReactMarkdown
+                                        remarkPlugins={[remarkGfm]}
+                                        components={{
+                                            h1: ({ node, ...props }) => <h1 className="text-xl font-bold text-text-primary mt-4 mb-2" {...props} />,
+                                            h2: ({ node, ...props }) => <h2 className="text-lg font-semibold text-text-primary mt-4 mb-2" {...props} />,
+                                            h3: ({ node, ...props }) => <h3 className="text-base font-semibold text-text-primary mt-3 mb-1" {...props} />,
+                                            p: ({ node, ...props }) => <p className="text-sm text-text-secondary leading-relaxed mb-2" {...props} />,
+                                            ul: ({ node, ...props }) => <ul className="list-disc ml-4 mb-2 space-y-1" {...props} />,
+                                            ol: ({ node, ...props }) => <ol className="list-decimal ml-4 mb-2 space-y-1" {...props} />,
+                                            li: ({ node, ...props }) => <li className="text-sm text-text-secondary" {...props} />,
+                                            strong: ({ node, ...props }) => <strong className="font-semibold text-text-primary" {...props} />,
+                                            a: ({ node, ...props }) => <a className="text-blue-500 hover:underline" {...props} />,
+                                        }}
+                                    >
+                                        {meeting.detailedSummary?.overview || ''}
+                                    </ReactMarkdown>
                                 </div>
 
-                                {/* Action Items */}
-                                <section className="mb-8">
-                                    <div className="flex items-center justify-between mb-4">
-                                        <EditableTextBlock
-                                            initialValue={meeting.detailedSummary?.actionItemsTitle || 'Action Items'}
-                                            onSave={(val) => {
-                                                setMeeting(prev => ({
-                                                    ...prev,
-                                                    detailedSummary: { ...prev.detailedSummary!, actionItemsTitle: val }
-                                                }));
-                                                window.electronAPI?.updateMeetingSummary(meeting.id, { actionItemsTitle: val });
-                                            }}
-                                            tagName="h2"
-                                            className="text-lg font-semibold text-text-primary -ml-2 px-2 py-1 rounded-sm transition-colors"
-                                            multiline={false}
-                                        />
-                                    </div>
-                                    <ul className="space-y-3">
-                                        {(meeting.detailedSummary?.actionItems?.length ? meeting.detailedSummary.actionItems : ['']).map((item, i) => (
-                                            <li key={i} className="flex items-start gap-3 group">
-                                                <div className="mt-2 w-1.5 h-1.5 rounded-full bg-text-secondary group-hover:bg-blue-500 transition-colors shrink-0" />
-                                                <div className="flex-1">
-                                                    <EditableTextBlock
-                                                        initialValue={item}
-                                                        onSave={(val) => handleActionItemSave(i, val)}
-                                                        tagName="p"
-                                                        className="text-sm text-text-secondary leading-relaxed -ml-2 px-2 rounded-sm transition-colors"
-                                                        placeholder={meeting.detailedSummary?.actionItems?.length ? "Type an action item..." : "Click to add an action item..."}
-                                                        onEnter={() => {
-                                                            const newItems = [...(meeting.detailedSummary?.actionItems || [])];
-                                                            // Insert after current
-                                                            newItems.splice(i + 1, 0, "");
-                                                            setMeeting(prev => ({
-                                                                ...prev,
-                                                                detailedSummary: { ...prev.detailedSummary!, actionItems: newItems }
-                                                            }));
-                                                            // We rely on autoFocus logic in EditableTextBlock for the new item.
-                                                            // However, mapped components re-render. We need a way to track which index should be focused.
-                                                            // This is tricky with pure React re-renders unless we accept that the new component mounts with autoFocus.
-                                                            // Since we splice and re-render, the component at i+1 is techincally "new" (different key if we use index as key, which we are).
-                                                            // Using index as key is good here because we WANT the new item at that index to mount as new.
-                                                        }}
-                                                        autoFocus={item === "" && i === (meeting.detailedSummary?.actionItems?.length || 0)} // Rudimentary check for newly added empty item?
-                                                    // Actually, if we add text at i+1, the component at key=i+1 will be new.
-                                                    // So passing autoFocus={item === ""} might suffice if we only add empty items.
-                                                    // But existing empty items shouldn't auto-focus on load.
-                                                    // Better strategy: Simple autoFocus={true} on the new item is handled by React mounting it.
-                                                    // But we need to distinguish "initial load with empty item" vs "user created new item".
-                                                    // For now, let's rely on user clicking empty placeholder if it's the only one.
-                                                    // For "Enter", the newly created item at i+1 will mount. If we pass autoFocus={true} to it, it works.
-                                                    />
-                                                </div>
-                                            </li>
-                                        ))}
-                                    </ul>
-                                </section>
 
-                                {/* Key Points */}
-                                <section>
-                                    <div className="flex items-center justify-between mb-4">
-                                        <EditableTextBlock
-                                            initialValue={meeting.detailedSummary?.keyPointsTitle || 'Key Points'}
-                                            onSave={(val) => {
-                                                setMeeting(prev => ({
-                                                    ...prev,
-                                                    detailedSummary: { ...prev.detailedSummary!, keyPointsTitle: val }
-                                                }));
-                                                window.electronAPI?.updateMeetingSummary(meeting.id, { keyPointsTitle: val });
-                                            }}
-                                            tagName="h2"
-                                            className="text-lg font-semibold text-text-primary -ml-2 px-2 py-1 rounded-sm transition-colors"
-                                            multiline={false}
-                                        />
-                                    </div>
-                                    <ul className="space-y-3">
-                                        {(meeting.detailedSummary?.keyPoints?.length ? meeting.detailedSummary.keyPoints : ['']).map((item, i) => (
-                                            <li key={i} className="flex items-start gap-3 group">
-                                                <div className="mt-2 w-1.5 h-1.5 rounded-full bg-text-secondary group-hover:bg-purple-500 transition-colors shrink-0" />
-                                                <div className="flex-1">
-                                                    <EditableTextBlock
-                                                        initialValue={item}
-                                                        onSave={(val) => handleKeyPointSave(i, val)}
-                                                        tagName="p"
-                                                        className="text-sm text-text-secondary leading-relaxed -ml-2 px-2 rounded-sm transition-colors"
-                                                        placeholder={meeting.detailedSummary?.keyPoints?.length ? "Type a key point..." : "Click to add a key point..."}
-                                                        onEnter={() => {
-                                                            const newItems = [...(meeting.detailedSummary?.keyPoints || [])];
-                                                            newItems.splice(i + 1, 0, "");
-                                                            setMeeting(prev => ({
-                                                                ...prev,
-                                                                detailedSummary: { ...prev.detailedSummary!, keyPoints: newItems }
-                                                            }));
-                                                        }}
-                                                        autoFocus={item === "" && i === (meeting.detailedSummary?.keyPoints?.length ? meeting.detailedSummary.keyPoints.length - 1 : 0)}
-                                                    />
-                                                </div>
-                                            </li>
-                                        ))}
-                                    </ul>
-                                </section>
+                                {/* Action Items - Only show if there are items */}
+                                {meeting.detailedSummary?.actionItems && meeting.detailedSummary.actionItems.length > 0 && (
+                                    <section className="mb-8">
+                                        <div className="flex items-center justify-between mb-4">
+                                            <EditableTextBlock
+                                                initialValue={meeting.detailedSummary?.actionItemsTitle || 'Action Items'}
+                                                onSave={(val) => {
+                                                    setMeeting(prev => ({
+                                                        ...prev,
+                                                        detailedSummary: { ...prev.detailedSummary!, actionItemsTitle: val }
+                                                    }));
+                                                    window.electronAPI?.updateMeetingSummary(meeting.id, { actionItemsTitle: val });
+                                                }}
+                                                tagName="h2"
+                                                className="text-lg font-semibold text-text-primary -ml-2 px-2 py-1 rounded-sm transition-colors"
+                                                multiline={false}
+                                            />
+                                        </div>
+                                        <ul className="space-y-3">
+                                            {meeting.detailedSummary.actionItems.map((item, i) => (
+                                                <li key={i} className="flex items-start gap-3 group">
+                                                    <div className="mt-2 w-1.5 h-1.5 rounded-full bg-text-secondary group-hover:bg-blue-500 transition-colors shrink-0" />
+                                                    <div className="flex-1">
+                                                        <EditableTextBlock
+                                                            initialValue={item}
+                                                            onSave={(val) => handleActionItemSave(i, val)}
+                                                            tagName="p"
+                                                            className="text-sm text-text-secondary leading-relaxed -ml-2 px-2 rounded-sm transition-colors"
+                                                            placeholder="Type an action item..."
+                                                            onEnter={() => {
+                                                                const newItems = [...(meeting.detailedSummary?.actionItems || [])];
+                                                                newItems.splice(i + 1, 0, "");
+                                                                setMeeting(prev => ({
+                                                                    ...prev,
+                                                                    detailedSummary: { ...prev.detailedSummary!, actionItems: newItems }
+                                                                }));
+                                                            }}
+                                                        />
+                                                    </div>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </section>
+                                )}
+
+                                {/* Key Points - Only show if there are items */}
+                                {meeting.detailedSummary?.keyPoints && meeting.detailedSummary.keyPoints.length > 0 && (
+                                    <section>
+                                        <div className="flex items-center justify-between mb-4">
+                                            <EditableTextBlock
+                                                initialValue={meeting.detailedSummary?.keyPointsTitle || 'Key Points'}
+                                                onSave={(val) => {
+                                                    setMeeting(prev => ({
+                                                        ...prev,
+                                                        detailedSummary: { ...prev.detailedSummary!, keyPointsTitle: val }
+                                                    }));
+                                                    window.electronAPI?.updateMeetingSummary(meeting.id, { keyPointsTitle: val });
+                                                }}
+                                                tagName="h2"
+                                                className="text-lg font-semibold text-text-primary -ml-2 px-2 py-1 rounded-sm transition-colors"
+                                                multiline={false}
+                                            />
+                                        </div>
+                                        <ul className="space-y-3">
+                                            {meeting.detailedSummary.keyPoints.map((item, i) => (
+                                                <li key={i} className="flex items-start gap-3 group">
+                                                    <div className="mt-2 w-1.5 h-1.5 rounded-full bg-text-secondary group-hover:bg-purple-500 transition-colors shrink-0" />
+                                                    <div className="flex-1">
+                                                        <EditableTextBlock
+                                                            initialValue={item}
+                                                            onSave={(val) => handleKeyPointSave(i, val)}
+                                                            tagName="p"
+                                                            className="text-sm text-text-secondary leading-relaxed -ml-2 px-2 rounded-sm transition-colors"
+                                                            placeholder="Type a key point..."
+                                                            onEnter={() => {
+                                                                const newItems = [...(meeting.detailedSummary?.keyPoints || [])];
+                                                                newItems.splice(i + 1, 0, "");
+                                                                setMeeting(prev => ({
+                                                                    ...prev,
+                                                                    detailedSummary: { ...prev.detailedSummary!, keyPoints: newItems }
+                                                                }));
+                                                            }}
+                                                        />
+                                                    </div>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </section>
+                                )}
                             </motion.div>
                         )}
 

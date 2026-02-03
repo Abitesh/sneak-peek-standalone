@@ -12,6 +12,7 @@ export interface Meeting {
     duration: string;
     summary: string;
     detailedSummary?: {
+        overview?: string;
         actionItems: string[];
         keyPoints: string[];
     };
@@ -480,10 +481,30 @@ export class DatabaseManager {
         });
     }
 
+    public clearAllData(): boolean {
+        if (!this.db) return false;
+
+        try {
+            // Clear all tables (order matters due to foreign keys, but SQLite handles with ON DELETE CASCADE)
+            this.db.exec('DELETE FROM embedding_queue');
+            this.db.exec('DELETE FROM chunk_summaries');
+            this.db.exec('DELETE FROM chunks');
+            this.db.exec('DELETE FROM ai_interactions');
+            this.db.exec('DELETE FROM transcripts');
+            this.db.exec('DELETE FROM meetings');
+
+            console.log('[DatabaseManager] All data cleared from database.');
+            return true;
+        } catch (error) {
+            console.error('[DatabaseManager] Failed to clear all data:', error);
+            return false;
+        }
+    }
+
     public seedDemoMeeting() {
         if (!this.db) return;
 
-        const demoId = 'demo-meeting-002';
+        const demoId = 'demo-meeting-003';
 
         // Check if exists
         const exists = this.db.prepare('SELECT id FROM meetings WHERE id = ?').get(demoId);
@@ -492,40 +513,90 @@ export class DatabaseManager {
             return;
         }
 
-        const now = Date.now();
         // Set date to today 9:30 AM
         const today = new Date();
         today.setHours(9, 30, 0, 0);
 
-        const durationMs = 288000; // 4 min 48 sec
+        const durationMs = 300000; // 5 min
+
+        const summaryMarkdown = `# Next Steps
+
+1. Use Natively on at least 5 calls
+2. Try each of the 5 action buttons during calls
+
+## Overview
+
+Natively is your real-time AI meeting assistant. Get instant answers to questions on calls, super-fast AI responses, and comprehensive meeting notes.
+
+## Getting Started
+
+- Click **Start Session** from the dashboard, or join from an upcoming meeting notification.
+- Use the 5 quick action buttons for real-time assistance:
+  - **What to answer** - AI suggests what you should say based on the conversation
+  - **Shorten** - Condenses the last response for quicker delivery
+  - **Recap** - Summarizes the entire conversation so far
+  - **Follow Up Questions** - Suggests questions you can ask
+  - **Answer** - Speak your question and get an instant response
+- Show and hide Natively at any time with **Cmd+B** on Mac or **Ctrl+B** on Windows.
+- Drag and drop the widget anywhere on your screen by hovering over the top pill.
+
+## Screenshots
+
+- **Full Screen Screenshot**: Press **Cmd+H** to capture the entire screen
+- **Selective Screenshot**: Press **Cmd+Shift+H** to select a specific area
+- The AI will automatically analyze screenshots and help you with questions
+
+## AI Chat
+
+- Type anything in the input field and press **Enter** or click Submit for an answer
+- Attach screenshots for visual context with your questions
+- All responses are optimized for speaking out loud
+
+## Meeting Notes
+
+After every call you've recorded with Natively, you'll get:
+
+- **Action Items**: Never miss a detail with detailed next steps
+- **Key Points**: Review the main discussion points
+- **Meeting Chat**: Chat with your meeting notes and transcript for more insights
+- **Transcript**: View the full transcript anytime by clicking the Transcript tab
+
+## Settings
+
+- **Undetectable Mode**: Enable invisibility to screen share for complete privacy
+- **Language Preferences**: Change your recognition language in settings
+
+Contact natively.contact@gmail.com for support at anytime.`;
 
         const demoMeeting: Meeting = {
             id: demoId,
-            title: "Natively Demo with CEO Evin",
+            title: "Natively Demo & Guide",
             date: today.toISOString(),
-            duration: "4:48",
-            summary: "Discussion about Natively product features and roadmap.",
+            duration: "5:00",
+            summary: "Complete guide to using Natively - your real-time AI meeting assistant.",
             detailedSummary: {
-                actionItems: [
-                    'Review the "Telugu sara" phrase clarification',
-                    'Confirm if "Maria" refers to a team member or persona',
-                    'Schedule follow-up demo for next Tuesday'
-                ],
-                keyPoints: [
-                    'CEO emphasized the importance of real-time latency',
-                    'Discussed the new "Ghost Mode" privacy feature',
-                    'Clarified the pricing model for enterprise tier'
-                ]
+                overview: summaryMarkdown,
+                actionItems: [],
+                keyPoints: []
             },
             transcript: [
-                { speaker: 'user', text: "So, can you tell me more about the latency?", timestamp: 0 },
-                { speaker: 'interviewer', text: "Absolutely. We've optimized the pipeline to be under 200ms.", timestamp: 5000 },
-                { speaker: 'user', text: "That is impressive. What about 'Telugu sara'?", timestamp: 12000 },
-                { speaker: 'interviewer', text: "Could you clarify that phrase? I assume it's a specific test case.", timestamp: 15000 },
-                { speaker: 'user', text: "Yes, exactly.", timestamp: 20000 }
+                { speaker: 'interviewer', text: "Welcome to Natively! Let me show you how it works.", timestamp: 0 },
+                { speaker: 'user', text: "Thanks! I'm excited to try it out.", timestamp: 5000 },
+                { speaker: 'interviewer', text: "You have 5 quick action buttons. 'What to answer' listens to the conversation and suggests what you should say.", timestamp: 10000 },
+                { speaker: 'user', text: "That sounds helpful for interviews.", timestamp: 18000 },
+                { speaker: 'interviewer', text: "'Shorten' condenses the last response. 'Recap' summarizes the entire conversation so far.", timestamp: 22000 },
+                { speaker: 'user', text: "What about the other buttons?", timestamp: 30000 },
+                { speaker: 'interviewer', text: "'Follow Up Questions' suggests questions you can ask. 'Answer' lets you speak a question and get an instant response.", timestamp: 35000 },
+                { speaker: 'user', text: "Can I take screenshots during calls?", timestamp: 45000 },
+                { speaker: 'interviewer', text: "Yes! Press Cmd+H for full screen or Cmd+Shift+H to select an area. The AI will analyze it and help you.", timestamp: 50000 },
+                { speaker: 'user', text: "How do I hide Natively during screen share?", timestamp: 60000 },
+                { speaker: 'interviewer', text: "Press Cmd+B to toggle visibility anytime. You can also enable undetectable mode in settings.", timestamp: 65000 },
+                { speaker: 'user', text: "This is amazing. What happens after the call?", timestamp: 75000 },
+                { speaker: 'interviewer', text: "You get detailed meeting notes with action items, key points, full transcript, and a log of all AI interactions.", timestamp: 80000 }
             ],
             usage: [
-                { type: 'assist', timestamp: 1000, question: 'What should I ask about latency?', answer: 'Ask about specific ms targets.' }
+                { type: 'assist', timestamp: 15000, question: 'What features does Natively have?', answer: 'Natively offers 5 quick action buttons, screenshot analysis, real-time transcription, and comprehensive meeting notes.' },
+                { type: 'followup', timestamp: 40000, question: 'How do the action buttons work?', answer: 'Each button serves a specific purpose: suggest answers, shorten responses, recap conversations, generate follow-up questions, or get instant voice-to-answer responses.' }
             ]
         };
 
