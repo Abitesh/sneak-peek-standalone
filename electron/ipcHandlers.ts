@@ -301,7 +301,8 @@ export function initializeIpcHandlers(appState: AppState): void {
   ipcMain.handle("set-open-at-login", async (_, openAtLogin: boolean) => {
     app.setLoginItemSettings({
       openAtLogin,
-      openAsHidden: false
+      openAsHidden: false,
+      path: app.getPath('exe') // Explicitly point to executable for production reliability
     });
     return { success: true };
   });

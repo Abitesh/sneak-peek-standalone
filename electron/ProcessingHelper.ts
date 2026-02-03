@@ -65,6 +65,14 @@ export class ProcessingHelper {
     // CRITICAL: Re-initialize IntelligenceManager now that keys are loaded
     // This fixes the issue where buttons don't work in production because of late key loading
     this.appState.getIntelligenceManager().initializeLLMs();
+
+    // CRITICAL: Initialize RAGManager (Embeddings) with loaded key
+    // This fixes "RAG unavailable" in production where process.env is empty
+    const ragManager = this.appState.getRAGManager();
+    if (ragManager && geminiKey) {
+      console.log("[ProcessingHelper] Initializing RAGManager embeddings with loaded key");
+      ragManager.initializeEmbeddings(geminiKey);
+    }
   }
 
   public async processScreenshots(): Promise<void> {

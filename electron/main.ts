@@ -219,6 +219,7 @@ export class AppState {
     })
   }
 
+
   public quitAndInstallUpdate(): void {
     autoUpdater.quitAndInstall()
   }

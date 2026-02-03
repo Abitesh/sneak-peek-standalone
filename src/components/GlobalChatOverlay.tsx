@@ -231,7 +231,50 @@ const GlobalChatOverlay: React.FC<GlobalChatOverlayProps> = ({
             });
 
             // Use global RAG query
-            await window.electronAPI?.ragQueryGlobal(question);
+            const result = await window.electronAPI?.ragQueryGlobal(question);
+
+            if (result?.fallback) {
+                console.log("[GlobalChat] RAG unavailable, falling back to standard chat");
+                // Cleanup RAG listeners
+                tokenCleanup?.();
+                doneCleanup?.();
+                errorCleanup?.();
+
+                // Setup fallback listeners (Standard Gemini)
+                const oldTokenCleanup = window.electronAPI?.onGeminiStreamToken((token: string) => {
+                    setChatState('streaming_response');
+                    setMessages(prev => prev.map(msg =>
+                        msg.id === assistantMessageId
+                            ? { ...msg, content: msg.content + token }
+                            : msg
+                    ));
+                });
+
+                const oldDoneCleanup = window.electronAPI?.onGeminiStreamDone(() => {
+                    setMessages(prev => prev.map(msg =>
+                        msg.id === assistantMessageId
+                            ? { ...msg, isStreaming: false }
+                            : msg
+                    ));
+                    setChatState('idle');
+                    oldTokenCleanup?.();
+                    oldDoneCleanup?.();
+                    oldErrorCleanup?.();
+                });
+
+                const oldErrorCleanup = window.electronAPI?.onGeminiStreamError((error: string) => {
+                    console.error('[GlobalChat] Gemini stream error:', error);
+                    setMessages(prev => prev.filter(msg => msg.id !== assistantMessageId));
+                    setErrorMessage("Couldn't get a response. Please check your settings.");
+                    setChatState('error');
+                    oldTokenCleanup?.();
+                    oldDoneCleanup?.();
+                    oldErrorCleanup?.();
+                });
+
+                // Call standard chat
+                await window.electronAPI?.streamGeminiChat(question, undefined, undefined, { skipSystemPrompt: false });
+            }
 
         } catch (error) {
             console.error('[GlobalChat] Error:', error);
