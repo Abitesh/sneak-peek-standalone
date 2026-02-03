@@ -3,7 +3,14 @@ import { BrowserWindow, screen, app } from "electron"
 import { AppState } from "./main"
 import path from "node:path"
 
-const isDev = process.env.NODE_ENV === "development"
+const isEnvDev = process.env.NODE_ENV === "development"
+const isPackaged = app.isPackaged;
+const inAppBundle = process.execPath.includes('.app/') || process.execPath.includes('.app\\');
+
+console.log(`[WindowHelper] isEnvDev: ${isEnvDev}, isPackaged: ${isPackaged}, inAppBundle: ${inAppBundle}`);
+
+// Force production mode if running as packaged app or inside app bundle
+const isDev = isEnvDev && !isPackaged && !inAppBundle;
 
 const startUrl = isDev
   ? "http://localhost:5180"
@@ -123,26 +130,47 @@ export class WindowHelper {
         contextIsolation: true,
         preload: path.join(__dirname, "preload.js"),
         scrollBounce: true,
+        webSecurity: false, // DEBUG: Disable web security
       },
-      show: false,
+      show: true, // DEBUG: Force show
       titleBarStyle: 'hiddenInset',
       trafficLightPosition: { x: 14, y: 14 },
       vibrancy: 'under-window',
       visualEffectState: 'followWindow',
-      transparent: true,
+      transparent: false, // DEBUG: Disable transparency
       hasShadow: true,
-      backgroundColor: "#000000",
+      backgroundColor: "#FFFFFF", // DEBUG: White background
       focusable: true,
       resizable: true,
       movable: true,
       center: true,
-      icon: path.resolve(__dirname, "../assets/natively.icns")
+      icon: app.isPackaged
+        ? path.join(process.resourcesPath, "natively.icns")
+        : path.resolve(__dirname, "../assets/natively.icns")
     }
 
-    this.launcherWindow = new BrowserWindow(launcherSettings)
+    console.log(`[WindowHelper] Icon Path: ${launcherSettings.icon}`);
+    console.log(`[WindowHelper] Start URL: ${startUrl}`);
+
+    try {
+      this.launcherWindow = new BrowserWindow(launcherSettings)
+      console.log('[WindowHelper] BrowserWindow created successfully');
+    } catch (err) {
+      console.error('[WindowHelper] Failed to create BrowserWindow:', err);
+      return;
+    }
+
     this.launcherWindow.setContentProtection(false)
-    this.launcherWindow.loadURL(`${startUrl}?window=launcher`).catch((e) => { console.error("Failed to load URL:", e) })
-    // this.launcherWindow.webContents.openDevTools({ mode: 'detach' });
+
+    this.launcherWindow.loadURL(`${startUrl}?window=launcher`)
+      .then(() => console.log('[WindowHelper] loadURL success'))
+      .catch((e) => { console.error("[WindowHelper] Failed to load URL:", e) })
+
+    this.launcherWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+      console.error(`[WindowHelper] did-fail-load: ${errorCode} ${errorDescription}`);
+    });
+
+    this.launcherWindow.webContents.openDevTools({ mode: 'detach' }); // DEBUG: Open DevTools
 
     // --- 2. Create Overlay Window (Hidden initially) ---
     const overlaySettings: Electron.BrowserWindowConstructorOptions = {

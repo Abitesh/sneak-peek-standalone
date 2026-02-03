@@ -60,7 +60,7 @@ export class DatabaseManager {
                 fs.mkdirSync(dir, { recursive: true });
             }
 
-            this.db = new Database(this.dbPath, { verbose: console.log });
+            this.db = new Database(this.dbPath);
             this.runMigrations();
         } catch (error) {
             console.error('[DatabaseManager] Failed to initialize database:', error);
@@ -521,50 +521,50 @@ export class DatabaseManager {
 
         const summaryMarkdown = `# Next Steps
 
-1. Use Natively on at least 5 calls
-2. Try each of the 5 action buttons during calls
+1. Link your Google Calendar
+2. Use Natively on at least 5 calls
 
 ## Overview
 
-Natively is your real-time AI meeting assistant. Get instant answers to questions on calls, super-fast AI responses, and comprehensive meeting notes.
+Natively is your real-time AI meeting assistant. Get AI meeting briefs, instant answers to questions on calls, and move faster.
 
 ## Getting Started
 
-- Click **Start Session** from the dashboard, or join from an upcoming meeting notification.
-- Use the 5 quick action buttons for real-time assistance:
-  - **What to answer** - AI suggests what you should say based on the conversation
-  - **Shorten** - Condenses the last response for quicker delivery
-  - **Recap** - Summarizes the entire conversation so far
-  - **Follow Up Questions** - Suggests questions you can ask
-  - **Answer** - Speak your question and get an instant response
+- Click **Start Session** from the dashboard, or join and start a session from an upcoming meeting notification.
+- Use the quick action buttons for real-time assistance on calls.
 - Show and hide Natively at any time with **Cmd+B** on Mac or **Ctrl+B** on Windows.
-- Drag and drop the widget anywhere on your screen by hovering over the top pill.
+  - You can also drag and drop the widget anywhere on your screen by hovering over top pill widget.
+
+## Ask Anything
+
+**Click Live Insights**
+
+- Real-time questions, keywords, and suggestions detected from the transcript will now appear below the main Live Insights card. You can click any of these for answers.
+
+**AI Chat Anything**
+
+- Type anything and press **Enter** or click Submit to get an answer by default.
+- You can enable Smart Mode by clicking the lightning icon for coding assistance.
 
 ## Screenshots
 
-- **Full Screen Screenshot**: Press **Cmd+H** to capture the entire screen
-- **Selective Screenshot**: Press **Cmd+Shift+H** to select a specific area
-- The AI will automatically analyze screenshots and help you with questions
-
-## AI Chat
-
-- Type anything in the input field and press **Enter** or click Submit for an answer
-- Attach screenshots for visual context with your questions
-- All responses are optimized for speaking out loud
+- **Full Screen Screenshot**: Press **Cmd+H** to capture the entire screen.
+- **Selective Screenshot**: Press **Cmd+Shift+H** to select a specific area.
 
 ## Meeting Notes
 
-After every call you've recorded with Natively, you'll get:
+After every call you’ve recorded with Natively, you’ll get:
 
-- **Action Items**: Never miss a detail with detailed next steps
-- **Key Points**: Review the main discussion points
-- **Meeting Chat**: Chat with your meeting notes and transcript for more insights
-- **Transcript**: View the full transcript anytime by clicking the Transcript tab
+- **Next Steps:** Never miss a detail again with detailed action items and next steps.
+- **Detailed Notes:** Review notes for every discussion. If you zone out on calls, Natively has your back.
+- **Meeting Chat:** Chat with your meeting notes and transcript for more insights.
+- **Transcript:** View the direct transcript anytime by clicking “Transcript” after a call ends.
 
-## Settings
+## Making the Most of Natively
 
-- **Undetectable Mode**: Enable invisibility to screen share for complete privacy
-- **Language Preferences**: Change your recognition language in settings
+- **Manage Modes:** Add resumes, project briefs, sales scripts, or more with text input and file uploads to truly make Natively yours.
+- **Settings > Language Preferences:** Change your input and output language, so Natively can help you best. This includes real-time call translations.
+- **Undetectability:** Take Natively to the next level by unlocking our undetectability add on for complete invisibility to screen share.
 
 Contact natively.contact@gmail.com for support at anytime.`;
 
@@ -597,7 +597,8 @@ Contact natively.contact@gmail.com for support at anytime.`;
             usage: [
                 { type: 'assist', timestamp: 15000, question: 'What features does Natively have?', answer: 'Natively offers 5 quick action buttons, screenshot analysis, real-time transcription, and comprehensive meeting notes.' },
                 { type: 'followup', timestamp: 40000, question: 'How do the action buttons work?', answer: 'Each button serves a specific purpose: suggest answers, shorten responses, recap conversations, generate follow-up questions, or get instant voice-to-answer responses.' }
-            ]
+            ],
+            isProcessed: true
         };
 
         this.saveMeeting(demoMeeting, today.getTime(), durationMs);

@@ -8,33 +8,42 @@ require('dotenv').config();
 process.stdout?.on?.('error', () => { });
 process.stderr?.on?.('error', () => { });
 
-// Safe console wrapper to prevent EIO errors in detached process
+const logFile = path.join(app.getPath('documents'), 'natively_debug.log');
+
 const originalLog = console.log;
 const originalWarn = console.warn;
 const originalError = console.error;
 
+function logToFile(msg: string) {
+  try {
+    require('fs').appendFileSync(logFile, new Date().toISOString() + ' ' + msg + '\n');
+  } catch (e) {
+    // Ignore logging errors
+  }
+}
+
 console.log = (...args: any[]) => {
+  const msg = args.map(a => (a instanceof Error) ? a.stack || a.message : (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
+  logToFile('[LOG] ' + msg);
   try {
     originalLog.apply(console, args);
-  } catch {
-    // Silently ignore all console write errors (EIO, EPIPE, etc.)
-  }
+  } catch { }
 };
 
 console.warn = (...args: any[]) => {
+  const msg = args.map(a => (a instanceof Error) ? a.stack || a.message : (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
+  logToFile('[WARN] ' + msg);
   try {
     originalWarn.apply(console, args);
-  } catch {
-    // Silently ignore all console write errors (EIO, EPIPE, etc.)
-  }
+  } catch { }
 };
 
 console.error = (...args: any[]) => {
+  const msg = args.map(a => (a instanceof Error) ? a.stack || a.message : (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
+  logToFile('[ERROR] ' + msg);
   try {
     originalError.apply(console, args);
-  } catch {
-    // Silently ignore all console write errors (EIO, EPIPE, etc.)
-  }
+  } catch { }
 };
 
 import { initializeIpcHandlers } from "./ipcHandlers"

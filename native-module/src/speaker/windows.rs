@@ -1,4 +1,4 @@
-// Ported from Pluely
+// Ported logic
 use anyhow::Result;
 use std::collections::VecDeque;
 use std::sync::{mpsc, Arc, Mutex};

@@ -112,7 +112,7 @@ impl SpeakerInput {
                 Ordering::Release,
             );
 
-            // Extract audio data (Simpler logic from Pluely)
+            // Extract audio data
             if let Some(view) =
                 av::AudioPcmBuf::with_buf_list_no_copy(&ctx.format, input_data, None)
             {
@@ -201,7 +201,7 @@ fn process_audio_data(ctx: &mut Ctx, data: &[f32]) {
         }
     }
 
-    // Pluely Logic
+    // Processing Logic
     let buffer_size = data.len();
     let pushed = ctx.producer.push_slice(data);
 
