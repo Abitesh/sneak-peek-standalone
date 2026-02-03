@@ -642,7 +642,7 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
                                                                     animate={{ opacity: 1, scale: 1, y: 0 }}
                                                                     exit={{ opacity: 0, scale: 0.95, y: 5 }}
                                                                     transition={{ duration: 0.1 }}
-                                                                    className="absolute right-0 top-full mt-1 w-[90px] bg-bg-elevated/80 backdrop-blur-xl border border-border-subtle rounded-lg shadow-2xl z-50 overflow-hidden"
+                                                                    className="absolute right-0 top-full mt-1 w-[90px] bg-[#1E1E1E]/80 backdrop-blur-xl border border-border-subtle rounded-lg shadow-2xl z-50 overflow-hidden"
                                                                     onClick={(e) => e.stopPropagation()}
                                                                     onMouseEnter={() => setMenuEntered(true)}
                                                                     onMouseLeave={() => {

@@ -357,16 +357,31 @@ ${meeting.detailedSummary.keyPoints?.map(item => `- ${item}`).join('\n') || 'Non
                         {activeTab === 'transcript' && (
                             <motion.section initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                                 <div className="space-y-6">
-                                    {meeting.transcript?.map((entry, i) => (
-                                        <div key={i} className="group">
-                                            <div className="flex items-center gap-2 mb-1">
-                                                <span className="text-xs font-semibold text-text-secondary">{entry.speaker === 'user' ? 'Me' : 'Them'}</span>
-                                                <span className="text-xs text-text-tertiary font-mono">{entry.timestamp ? formatTime(entry.timestamp) : '0:00'}</span>
+                                    {(() => {
+                                        console.log('Raw Transcript:', meeting.transcript);
+                                        const filteredTranscript = meeting.transcript?.filter(entry => {
+                                            const isHidden = ['system', 'ai', 'assistant', 'model'].includes(entry.speaker?.toLowerCase());
+                                            if (isHidden) console.log('Filtered out:', entry);
+                                            return !isHidden;
+                                        }) || [];
+                                        console.log('Filtered Transcript:', filteredTranscript);
+
+                                        if (filteredTranscript.length === 0) {
+                                            return <p className="text-text-tertiary">No transcript available.</p>;
+                                        }
+
+                                        return filteredTranscript.map((entry, i) => (
+                                            <div key={i} className="group">
+                                                <div className="flex items-center gap-2 mb-1">
+                                                    <span className="text-xs font-semibold text-text-secondary">
+                                                        {entry.speaker === 'user' ? 'Me' : 'Them'}
+                                                    </span>
+                                                    <span className="text-xs text-text-tertiary font-mono">{entry.timestamp ? formatTime(entry.timestamp) : '0:00'}</span>
+                                                </div>
+                                                <p className="text-text-secondary text-[15px] leading-relaxed transition-colors select-text cursor-text">{entry.text}</p>
                                             </div>
-                                            <p className="text-text-secondary text-[15px] leading-relaxed transition-colors select-text cursor-text">{entry.text}</p>
-                                        </div>
-                                    ))}
-                                    {!meeting.transcript?.length && <p className="text-text-tertiary">No transcript available.</p>}
+                                        ));
+                                    })()}
                                 </div>
                             </motion.section>
                         )}

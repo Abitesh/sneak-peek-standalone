@@ -77,29 +77,39 @@ export class GoogleSTT extends EventEmitter {
         }
     }
 
+    private pendingLanguageChange?: NodeJS.Timeout;
+
     public setRecognitionLanguage(key: string): void {
-        const config = ENGLISH_VARIANTS[key];
-        if (!config) {
-            console.warn(`[GoogleSTT] Unknown language key: ${key}`);
-            return;
+        // Debounce to prevent rapid restarts (e.g. scrolling through list)
+        if (this.pendingLanguageChange) {
+            clearTimeout(this.pendingLanguageChange);
         }
 
-        console.log(`[GoogleSTT] Updating recognition language to: ${key} (${config.primary})`);
+        this.pendingLanguageChange = setTimeout(() => {
+            const config = ENGLISH_VARIANTS[key];
+            if (!config) {
+                console.warn(`[GoogleSTT] Unknown language key: ${key}`);
+                return;
+            }
 
-        // Update state
-        this.languageCode = config.primary;
-        // CAST: Google's type definition might be strict, ensuring string[] is accepted
-        this.alternativeLanguageCodes = config.alternates;
+            console.log(`[GoogleSTT] Updating recognition language to: ${key} (${config.primary})`);
 
-        console.log('[GoogleSTT] Primary:', this.languageCode);
-        console.log('[GoogleSTT] Alternates:', this.alternativeLanguageCodes.join(', '));
+            // Update state
+            this.languageCode = config.primary;
+            this.alternativeLanguageCodes = config.alternates;
 
-        // Restart if streaming
-        if (this.isStreaming) {
-            console.log('[GoogleSTT] Language changed while streaming. Restarting stream...');
-            this.stop();
-            this.start();
-        }
+            console.log('[GoogleSTT] Primary:', this.languageCode);
+            console.log('[GoogleSTT] Alternates:', this.alternativeLanguageCodes.join(', '));
+
+            // Restart if streaming
+            if (this.isStreaming) {
+                console.log('[GoogleSTT] Language changed while streaming. Restarting stream...');
+                this.stop();
+                this.start();
+            }
+
+            this.pendingLanguageChange = undefined;
+        }, 250);
     }
 
     public start(): void {

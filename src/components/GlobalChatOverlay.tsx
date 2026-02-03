@@ -108,7 +108,7 @@ const AssistantMessage: React.FC<{ content: string; isStreaming?: boolean }> = (
 // Main Component
 // ============================================
 
-type ChatState = 'idle' | 'waiting_for_llm' | 'streaming_response' | 'error' | 'closing';
+type ChatState = 'idle' | 'waiting_for_llm' | 'streaming_response' | 'error';
 
 const GlobalChatOverlay: React.FC<GlobalChatOverlayProps> = ({
     isOpen,
@@ -149,28 +149,18 @@ const GlobalChatOverlay: React.FC<GlobalChatOverlayProps> = ({
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
             if (e.key === 'Escape' && isOpen) {
-                handleClose();
+                onClose();
             }
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [isOpen]);
+    }, [isOpen, onClose]);
 
     // Click outside handler
     const handleBackdropClick = useCallback((e: React.MouseEvent) => {
         if (e.target === e.currentTarget) {
-            handleClose();
-        }
-    }, []);
-
-    const handleClose = useCallback(() => {
-        setChatState('closing');
-        setTimeout(() => {
             onClose();
-            setChatState('idle');
-            setMessages([]);
-            setErrorMessage(null);
-        }, 140);
+        }
     }, [onClose]);
 
     const handleInputKeyDown = (e: React.KeyboardEvent) => {
@@ -251,11 +241,15 @@ const GlobalChatOverlay: React.FC<GlobalChatOverlayProps> = ({
         }
     }, [chatState]);
 
-    if (!isOpen && chatState !== 'closing') return null;
-
     return (
-        <AnimatePresence>
-            {(isOpen || chatState === 'closing') && (
+        <AnimatePresence
+            onExitComplete={() => {
+                setChatState('idle');
+                setMessages([]);
+                setErrorMessage(null);
+            }}
+        >
+            {isOpen && (
                 <motion.div
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
@@ -292,7 +286,7 @@ const GlobalChatOverlay: React.FC<GlobalChatOverlayProps> = ({
                                 <span className="text-[13px] font-medium">Search all meetings</span>
                             </div>
                             <button
-                                onClick={handleClose}
+                                onClick={onClose}
                                 className="p-2 transition-colors group"
                             >
                                 <X size={16} className="text-text-tertiary group-hover:text-red-500 group-hover:drop-shadow-[0_0_8px_rgba(239,68,68,0.5)] transition-all duration-300" />

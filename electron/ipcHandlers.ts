@@ -163,6 +163,9 @@ export function initializeIpcHandlers(appState: AppState): void {
       intelligenceManager.addAssistantMessage(result);
       console.log(`[IPC] Updated IntelligenceManager.Last message: `, intelligenceManager.getLastAssistantMessage()?.substring(0, 50));
 
+      // Log Usage
+      intelligenceManager.logUsage('chat', message, result);
+
       return result;
     } catch (error: any) {
       // console.error("Error in gemini-chat handler:", error);
@@ -215,6 +218,8 @@ export function initializeIpcHandlers(appState: AppState): void {
         // Update IntelligenceManager with ASSISTANT message after completion
         if (fullResponse.trim().length > 0) {
           intelligenceManager.addAssistantMessage(fullResponse);
+          // Log Usage for streaming chat
+          intelligenceManager.logUsage('chat', message, fullResponse);
         }
 
       } catch (streamError: any) {

@@ -29,6 +29,7 @@ export interface Meeting {
     }>;
     calendarEventId?: string;
     source?: 'manual' | 'calendar';
+    isProcessed?: boolean;
 }
 
 export class DatabaseManager {
@@ -170,6 +171,10 @@ export class DatabaseManager {
             this.db.exec("ALTER TABLE meetings ADD COLUMN source TEXT");
         } catch (e) { /* Column likely exists */ }
 
+        try {
+            this.db.exec("ALTER TABLE meetings ADD COLUMN is_processed INTEGER DEFAULT 1"); // Default to 1 (true) for existing records
+        } catch (e) { /* Column likely exists */ }
+
         console.log('[DatabaseManager] Migrations completed.');
     }
 
@@ -184,8 +189,8 @@ export class DatabaseManager {
         }
 
         const insertMeeting = this.db.prepare(`
-            INSERT OR REPLACE INTO meetings (id, title, start_time, duration_ms, summary_json, created_at, calendar_event_id, source)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO meetings (id, title, start_time, duration_ms, summary_json, created_at, calendar_event_id, source, is_processed)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
 
         const insertTranscript = this.db.prepare(`
@@ -213,7 +218,8 @@ export class DatabaseManager {
                 summaryJson,
                 meeting.date, // Using the ISO string as created_at for sorting simply
                 meeting.calendarEventId || null,
-                meeting.source || 'manual'
+                meeting.source || 'manual',
+                meeting.isProcessed ? 1 : 0
             );
 
             // 2. Insert Transcript
@@ -436,6 +442,42 @@ export class DatabaseManager {
             console.error(`[DatabaseManager] Failed to delete meeting ${id}:`, error);
             return false;
         }
+    }
+
+    public getUnprocessedMeetings(): Meeting[] {
+        if (!this.db) return [];
+
+        // is_processed = 0 means false
+        const stmt = this.db.prepare(`
+            SELECT * FROM meetings 
+            WHERE is_processed = 0 
+            ORDER BY created_at DESC
+        `);
+
+        const rows = stmt.all() as any[];
+
+        return rows.map(row => {
+            // Reconstruct minimal meeting object for processing
+            // We mainly need ID to fetch transcripts later
+            const summaryData = JSON.parse(row.summary_json || '{}');
+            const minutes = Math.floor(row.duration_ms / 60000);
+            const seconds = Math.floor((row.duration_ms % 60000) / 1000);
+            const durationStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+
+            return {
+                id: row.id,
+                title: row.title,
+                date: row.created_at,
+                duration: durationStr,
+                summary: summaryData.legacySummary || '',
+                detailedSummary: summaryData.detailedSummary,
+                calendarEventId: row.calendar_event_id,
+                source: row.source,
+                isProcessed: false,
+                transcript: [] as any[], // Fetched separately via getMeetingDetails or manually if needed
+                usage: [] as any[]
+            };
+        });
     }
 
     public seedDemoMeeting() {

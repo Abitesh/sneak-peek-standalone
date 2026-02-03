@@ -995,6 +995,11 @@ async function initializeApp() {
       console.error('[Main] Failed to initialize CalendarManager:', e);
     }
 
+    // Recover unprocessed meetings (persistence check)
+    appState.getIntelligenceManager().recoverUnprocessedMeetings().catch(err => {
+      console.error('[Main] Failed to recover unprocessed meetings:', err);
+    });
+
     if (process.platform === 'darwin') {
       app.dock.show(); // Ensure dock is visible (but icon already set)
     }

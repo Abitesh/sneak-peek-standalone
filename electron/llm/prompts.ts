@@ -429,9 +429,6 @@ RULES:
 - Calm, neutral, professional.
 - Return ONLY valid JSON.
 
-Input Conversation:
-{CONTEXT}
-
 Response Format (JSON ONLY):
 {
   "overview": "1-2 sentence description",

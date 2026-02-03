@@ -72,6 +72,7 @@ export class WindowHelper {
   // Dedicated method for overlay window resizing - decoupled from launcher
   public setOverlayDimensions(width: number, height: number): void {
     if (!this.overlayWindow || this.overlayWindow.isDestroyed()) return
+    console.log('[WindowHelper] setOverlayDimensions:', width, height);
 
     const [currentX, currentY] = this.overlayWindow.getPosition()
     const primaryDisplay = screen.getPrimaryDisplay()
@@ -79,18 +80,14 @@ export class WindowHelper {
     const maxAllowedWidth = Math.floor(workArea.width * 0.9)
     const maxAllowedHeight = Math.floor(workArea.height * 0.9)
     const newWidth = Math.min(Math.max(width, 300), maxAllowedWidth) // min 300, max 90%
-    const newHeight = Math.min(Math.max(height, 200), maxAllowedHeight) // min 200, max 90%
+    const newHeight = Math.min(Math.max(height, 1), maxAllowedHeight) // min 1, max 90%
     const maxX = workArea.width - newWidth
     const maxY = workArea.height - newHeight
     const newX = Math.min(Math.max(currentX, 0), maxX)
     const newY = Math.min(Math.max(currentY, 0), maxY)
 
-    this.overlayWindow.setBounds({
-      x: newX,
-      y: newY,
-      width: newWidth,
-      height: newHeight
-    })
+    this.overlayWindow.setContentSize(newWidth, newHeight)
+    this.overlayWindow.setPosition(newX, newY)
   }
 
   public createWindow(): void {
@@ -148,9 +145,9 @@ export class WindowHelper {
     // --- 2. Create Overlay Window (Hidden initially) ---
     const overlaySettings: Electron.BrowserWindowConstructorOptions = {
       width: 600,
-      height: 600,
+      height: 1,
       minWidth: 300,
-      minHeight: 200,
+      minHeight: 1,
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,
@@ -160,13 +157,13 @@ export class WindowHelper {
       show: false,
       frame: false, // Frameless
       transparent: true,
-      hasShadow: false,
       backgroundColor: "#00000000",
       alwaysOnTop: true,
       focusable: true,
-      resizable: true,
+      resizable: false, // Enforce automatic resizing only
       movable: true,
       skipTaskbar: true, // Don't show separately in dock/taskbar
+      hasShadow: false, // Prevent shadow from adding perceived size/artifacts
     }
 
     this.overlayWindow = new BrowserWindow(overlaySettings)

@@ -1126,6 +1126,110 @@ ANSWER DIRECTLY:`;
     }
   }
 
+  /**
+   * Robust Meeting Summary Generation
+   * Strategy:
+   * 1. Groq (if context text < 100k tokens approx)
+   * 2. Gemini Flash (Retry 2x)
+   * 3. Gemini Pro (Retry 5x)
+   */
+  public async generateMeetingSummary(systemPrompt: string, context: string, groqSystemPrompt?: string): Promise<string> {
+    console.log(`[LLMHelper] generateMeetingSummary called. Context length: ${context.length}`);
+
+    // Helper: Estimate tokens (crude approximation: 4 chars = 1 token)
+    const estimateTokens = (text: string) => Math.ceil(text.length / 4);
+    const tokenCount = estimateTokens(context);
+    console.log(`[LLMHelper] Estimated tokens: ${tokenCount}`);
+
+    // ATTEMPT 1: Groq (if text-only and within limits)
+    // Groq Llama 3.3 70b has ~128k context, let's be safe with 100k
+    if (this.groqClient && tokenCount < 100000) {
+      console.log(`[LLMHelper] Attempting Groq for summary...`);
+      try {
+        const groqPrompt = groqSystemPrompt || systemPrompt;
+        // Use non-streaming for summary
+        const response = await this.groqClient.chat.completions.create({
+          model: GROQ_MODEL,
+          messages: [
+            { role: "system", content: groqPrompt },
+            { role: "user", content: `Context:\n${context}` }
+          ],
+          temperature: 0.3,
+          max_tokens: 8192,
+          stream: false
+        });
+
+        const text = response.choices[0]?.message?.content || "";
+        if (text.trim().length > 0) {
+          console.log(`[LLMHelper] ✅ Groq summary generated successfully.`);
+          return this.processResponse(text);
+        }
+      } catch (e: any) {
+        console.warn(`[LLMHelper] ⚠️ Groq summary failed: ${e.message}. Falling back to Gemini...`);
+      }
+    } else {
+      if (tokenCount >= 100000) {
+        console.log(`[LLMHelper] Context too large for Groq (${tokenCount} tokens). Skipping straight to Gemini.`);
+      }
+    }
+
+    // ATTEMPT 2: Gemini Flash (with 2 retries = 3 attempts total)
+    console.log(`[LLMHelper] Attempting Gemini Flash for summary...`);
+    const contents = [{ text: `${systemPrompt}\n\nCONTEXT:\n${context}` }];
+
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const text = await this.generateWithFlash(contents);
+        if (text.trim().length > 0) {
+          console.log(`[LLMHelper] ✅ Gemini Flash summary generated successfully (Attempt ${attempt}).`);
+          return this.processResponse(text);
+        }
+      } catch (e: any) {
+        console.warn(`[LLMHelper] ⚠️ Gemini Flash attempt ${attempt}/3 failed: ${e.message}`);
+        if (attempt < 3) {
+          await new Promise(r => setTimeout(r, 1000 * attempt)); // Linear backoff
+        }
+      }
+    }
+
+    // ATTEMPT 3: Gemini Pro (Infinite-ish loop)
+    // User requested "call gemini 3 pro until summary is generated"
+    // We will cap it at 5 heavily backed-off retries to avoid hanging processes forever,
+    // but effectively this acts as a very persistent retry.
+    console.log(`[LLMHelper] ⚠️ Flash exhausted. Switching to Gemini Pro for robust retry...`);
+    const maxProRetries = 5;
+
+    if (!this.client) throw new Error("Gemini client not initialized");
+
+    for (let attempt = 1; attempt <= maxProRetries; attempt++) {
+      try {
+        console.log(`[LLMHelper] 🔄 Gemini Pro Attempt ${attempt}/${maxProRetries}...`);
+        const response = await this.client.models.generateContent({
+          model: GEMINI_PRO_MODEL,
+          contents: contents,
+          config: {
+            maxOutputTokens: MAX_OUTPUT_TOKENS,
+            temperature: 0.3,
+          }
+        });
+        const text = response.text || "";
+
+        if (text.trim().length > 0) {
+          console.log(`[LLMHelper] ✅ Gemini Pro summary generated successfully.`);
+          return this.processResponse(text);
+        }
+      } catch (e: any) {
+        console.warn(`[LLMHelper] ⚠️ Gemini Pro attempt ${attempt} failed: ${e.message}`);
+        // Aggressive backoff for Pro: 2s, 4s, 8s, 16s, 32s
+        const backoff = 2000 * Math.pow(2, attempt - 1);
+        console.log(`[LLMHelper] Waiting ${backoff}ms before next retry...`);
+        await new Promise(r => setTimeout(r, backoff));
+      }
+    }
+
+    throw new Error("Failed to generate summary after all fallback attempts.");
+  }
+
   public async switchToOllama(model?: string, url?: string): Promise<void> {
     this.useOllama = true;
     if (url) this.ollamaUrl = url;

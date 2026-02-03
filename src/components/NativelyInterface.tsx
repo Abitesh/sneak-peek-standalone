@@ -25,6 +25,7 @@ import {
     Link,
     Code
 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { dracula } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import ModelSelector from './ui/ModelSelector';
@@ -114,6 +115,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) =
 
                 // Send exact dimensions to Electron
                 // Removed buffer to ensure tight fit
+                console.log('[NativelyInterface] ResizeObserver:', Math.ceil(rect.width), Math.ceil(rect.height));
                 window.electronAPI?.updateContentDimensions({
                     width: Math.ceil(rect.width),
                     height: Math.ceil(rect.height)
@@ -123,6 +125,20 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) =
 
         observer.observe(contentRef.current);
         return () => observer.disconnect();
+    }, []);
+
+    // Force initial sizing safety check
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            if (contentRef.current) {
+                const rect = contentRef.current.getBoundingClientRect();
+                window.electronAPI?.updateContentDimensions({
+                    width: Math.ceil(rect.width),
+                    height: Math.ceil(rect.height)
+                });
+            }
+        }, 600);
+        return () => clearTimeout(timer);
     }, []);
 
     // Auto-scroll
@@ -158,7 +174,8 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) =
         } else {
             // Slight delay to allow animation to clean up if needed, though immediate is safer for click-through
             // Using setTimeout to ensure the render cycle completes first
-            setTimeout(() => window.electronAPI.hideWindow(), 100);
+            // Increased to 400ms to allow "contract to bottom" exit animation to finish
+            setTimeout(() => window.electronAPI.hideWindow(), 400);
         }
     }, [isExpanded]);
 
@@ -773,10 +790,8 @@ Instructions:
 3. Be concise.`;
                 } else {
                     // Voice Only (Smart Extract)
+                    // We pass the instructions as CONTEXT so the backend logs the user question cleanly
                     prompt = `You are a real-time interview assistant. The user just repeated or paraphrased a question from their interviewer.
-
-User said: "${question}"
-
 Instructions:
 1. Extract the core question being asked
 2. Provide a clear, concise, and professional answer that the user can say out loud
@@ -787,8 +802,8 @@ Instructions:
 Provide only the answer, nothing else.`;
                 }
 
-                // Call Streaming API
-                await window.electronAPI.streamGeminiChat(prompt, currentAttachment?.path, undefined, { skipSystemPrompt: true });
+                // Call Streaming API: message = question, context = instructions
+                await window.electronAPI.streamGeminiChat(question, currentAttachment?.path, prompt, { skipSystemPrompt: true });
 
             } catch (err) {
                 // Initial invocation failing (e.g. IPC error before stream starts)
@@ -1153,16 +1168,23 @@ Provide only the answer, nothing else.`;
     };
 
     return (
-        <div ref={contentRef} className="flex flex-col items-center w-fit mx-auto min-h-0 bg-transparent p-0 rounded-[24px] font-sans text-slate-200 gap-2">
+        <div ref={contentRef} className="flex flex-col items-center w-fit mx-auto h-fit min-h-0 bg-transparent p-0 rounded-[24px] font-sans text-slate-200 gap-2">
 
-            {isExpanded && (
-                <>
-                    <TopPill
-                        expanded={isExpanded}
-                        onToggle={() => setIsExpanded(!isExpanded)}
-                        onQuit={() => onEndMeeting ? onEndMeeting() : window.electronAPI.quitApp()}
-                    />
-                    <div className="
+            <AnimatePresence>
+                {isExpanded && (
+                    <motion.div
+                        initial={{ opacity: 0, y: 20, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 20, scale: 0.95 }}
+                        transition={{ duration: 0.3, ease: "easeInOut" }}
+                        className="flex flex-col items-center gap-2 w-full"
+                    >
+                        <TopPill
+                            expanded={isExpanded}
+                            onToggle={() => setIsExpanded(!isExpanded)}
+                            onQuit={() => onEndMeeting ? onEndMeeting() : window.electronAPI.quitApp()}
+                        />
+                        <div className="
                     relative w-[600px] max-w-full
                     bg-[#1E1E1E]/95
                     backdrop-blur-2xl
@@ -1171,158 +1193,157 @@ Provide only the answer, nothing else.`;
                     rounded-[24px] 
                     overflow-hidden 
                     flex flex-col
-                    animate-in fade-in slide-in-from-bottom-4 duration-500 ease-sculpted
                 ">
 
 
 
-                        {/* Rolling Transcript Bar - Single-line interviewer speech */}
-                        {(rollingTranscript || isInterviewerSpeaking) && showTranscript && (
-                            <RollingTranscript
-                                text={rollingTranscript}
-                                isActive={isInterviewerSpeaking}
-                            />
-                        )}
+                            {/* Rolling Transcript Bar - Single-line interviewer speech */}
+                            {(rollingTranscript || isInterviewerSpeaking) && showTranscript && (
+                                <RollingTranscript
+                                    text={rollingTranscript}
+                                    isActive={isInterviewerSpeaking}
+                                />
+                            )}
 
-                        {/* Chat History - Only show if there are messages OR active states */}
-                        {(messages.length > 0 || isManualRecording || isProcessing) && (
-                            <div className="flex-1 overflow-y-auto p-4 space-y-3 max-h-[clamp(300px,35vh,450px)]" style={{ scrollbarWidth: 'none' }}>
-                                {messages.map((msg) => (
-                                    <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in-up`}>
-                                        <div className={`
+                            {/* Chat History - Only show if there are messages OR active states */}
+                            {(messages.length > 0 || isManualRecording || isProcessing) && (
+                                <div className="flex-1 overflow-y-auto p-4 space-y-3 max-h-[clamp(300px,35vh,450px)]" style={{ scrollbarWidth: 'none' }}>
+                                    {messages.map((msg) => (
+                                        <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in-up`}>
+                                            <div className={`
                       ${msg.role === 'user' ? 'max-w-[72.25%] px-[13.6px] py-[10.2px]' : 'max-w-[85%] px-4 py-3'} text-[14px] leading-relaxed relative group whitespace-pre-wrap
                       ${msg.role === 'user'
-                                                ? 'bg-blue-600/20 backdrop-blur-md border border-blue-500/30 text-blue-100 rounded-[20px] rounded-tr-[4px] shadow-sm font-medium'
-                                                : ''
-                                            }
+                                                    ? 'bg-blue-600/20 backdrop-blur-md border border-blue-500/30 text-blue-100 rounded-[20px] rounded-tr-[4px] shadow-sm font-medium'
+                                                    : ''
+                                                }
                       ${msg.role === 'system'
-                                                ? 'text-slate-200 font-normal'
-                                                : ''
-                                            }
+                                                    ? 'text-slate-200 font-normal'
+                                                    : ''
+                                                }
                       ${msg.role === 'interviewer'
-                                                ? 'text-white/40 italic pl-0 text-[13px]'
-                                                : ''
-                                            }
+                                                    ? 'text-white/40 italic pl-0 text-[13px]'
+                                                    : ''
+                                                }
                     `}>
-                                            {msg.role === 'interviewer' && (
-                                                <div className="flex items-center gap-1.5 mb-1 text-[10px] text-slate-600 font-medium uppercase tracking-wider">
-                                                    Interviewer
-                                                    {msg.isStreaming && <span className="w-1 h-1 bg-green-500 rounded-full animate-pulse" />}
-                                                </div>
-                                            )}
-                                            {msg.role === 'user' && msg.hasScreenshot && (
-                                                <div className="flex items-center gap-1 text-[10px] opacity-70 mb-1 border-b border-white/10 pb-1">
-                                                    <Image className="w-2.5 h-2.5" />
-                                                    <span>Screenshot attached</span>
-                                                </div>
-                                            )}
-                                            {renderMessageText(msg)}
-                                        </div>
-                                    </div>
-                                ))}
-
-                                {/* Active Recording State with Live Transcription */}
-                                {isManualRecording && (
-                                    <div className="flex flex-col items-end gap-1 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                                        {/* Live transcription preview */}
-                                        {(manualTranscript || voiceInput) && (
-                                            <div className="max-w-[85%] px-3.5 py-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-[18px] rounded-tr-[4px]">
-                                                <span className="text-[13px] text-emerald-300">
-                                                    {voiceInput}{voiceInput && manualTranscript ? ' ' : ''}{manualTranscript}
-                                                </span>
+                                                {msg.role === 'interviewer' && (
+                                                    <div className="flex items-center gap-1.5 mb-1 text-[10px] text-slate-600 font-medium uppercase tracking-wider">
+                                                        Interviewer
+                                                        {msg.isStreaming && <span className="w-1 h-1 bg-green-500 rounded-full animate-pulse" />}
+                                                    </div>
+                                                )}
+                                                {msg.role === 'user' && msg.hasScreenshot && (
+                                                    <div className="flex items-center gap-1 text-[10px] opacity-70 mb-1 border-b border-white/10 pb-1">
+                                                        <Image className="w-2.5 h-2.5" />
+                                                        <span>Screenshot attached</span>
+                                                    </div>
+                                                )}
+                                                {renderMessageText(msg)}
                                             </div>
-                                        )}
-                                        <div className="px-3 py-2 flex gap-1.5 items-center">
-                                            <div className="w-2 h-2 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                                            <div className="w-2 h-2 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                                            <div className="w-2 h-2 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                                            <span className="text-[10px] text-emerald-400/70 ml-1">Listening...</span>
                                         </div>
-                                    </div>
-                                )}
+                                    ))}
 
-                                {isProcessing && (
-                                    <div className="flex justify-start">
-                                        <div className="px-3 py-2 flex gap-1.5">
-                                            <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                                            <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                                            <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                                    {/* Active Recording State with Live Transcription */}
+                                    {isManualRecording && (
+                                        <div className="flex flex-col items-end gap-1 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                                            {/* Live transcription preview */}
+                                            {(manualTranscript || voiceInput) && (
+                                                <div className="max-w-[85%] px-3.5 py-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-[18px] rounded-tr-[4px]">
+                                                    <span className="text-[13px] text-emerald-300">
+                                                        {voiceInput}{voiceInput && manualTranscript ? ' ' : ''}{manualTranscript}
+                                                    </span>
+                                                </div>
+                                            )}
+                                            <div className="px-3 py-2 flex gap-1.5 items-center">
+                                                <div className="w-2 h-2 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                                                <div className="w-2 h-2 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                                                <div className="w-2 h-2 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                                                <span className="text-[10px] text-emerald-400/70 ml-1">Listening...</span>
+                                            </div>
                                         </div>
-                                    </div>
-                                )}
-                                <div ref={messagesEndRef} />
-                            </div>
-                        )}
+                                    )}
 
-                        {/* Quick Actions - Minimal & Clean */}
-                        <div className={`flex flex-nowrap justify-center items-center gap-1.5 px-4 pb-3 overflow-x-hidden ${rollingTranscript && showTranscript ? 'pt-1' : 'pt-3'}`}>
-                            <button onClick={handleWhatToSay} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium text-slate-400 bg-white/5 border border-white/0 hover:text-slate-200 hover:bg-white/10 hover:border-white/5 transition-all active:scale-95 duration-200 interaction-base interaction-press whitespace-nowrap shrink-0">
-                                <Pencil className="w-3 h-3 opacity-70" /> What to answer?
-                            </button>
-                            <button onClick={() => handleFollowUp('shorten')} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium text-slate-400 bg-white/5 border border-white/0 hover:text-slate-200 hover:bg-white/10 hover:border-white/5 transition-all active:scale-95 duration-200 interaction-base interaction-press whitespace-nowrap shrink-0">
-                                <MessageSquare className="w-3 h-3 opacity-70" /> Shorten
-                            </button>
-                            <button onClick={handleRecap} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium text-slate-400 bg-white/5 border border-white/0 hover:text-slate-200 hover:bg-white/10 hover:border-white/5 transition-all active:scale-95 duration-200 interaction-base interaction-press whitespace-nowrap shrink-0">
-                                <RefreshCw className="w-3 h-3 opacity-70" /> Recap
-                            </button>
-                            <button onClick={handleFollowUpQuestions} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium text-slate-400 bg-white/5 border border-white/0 hover:text-slate-200 hover:bg-white/10 hover:border-white/5 transition-all active:scale-95 duration-200 interaction-base interaction-press whitespace-nowrap shrink-0">
-                                <HelpCircle className="w-3 h-3 opacity-70" /> Follow Up Question
-                            </button>
-                            <button
-                                onClick={handleAnswerNow}
-                                className={`flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium transition-all active:scale-95 duration-200 interaction-base interaction-press min-w-[74px] whitespace-nowrap shrink-0 ${isManualRecording
-                                    ? 'bg-red-500/10 text-red-400 ring-1 ring-red-500/20'
-                                    : 'bg-white/5 text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10'
-                                    }`}
-                            >
-                                {isManualRecording ? (
-                                    <>
-                                        <div className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" />
-                                        Stop
-                                    </>
-                                ) : (
-                                    <><Zap className="w-3 h-3 opacity-70" /> Answer</>
-                                )}
-                            </button>
-                        </div>
-
-                        {/* Input Area */}
-                        <div className="p-3 pt-0">
-                            {/* Latent Context Preview (Attached Screenshot) */}
-                            {attachedContext && (
-                                <div className="mb-2 flex items-center justify-between bg-white/5 border border-white/10 rounded-lg p-2 animate-in fade-in slide-in-from-bottom-1">
-                                    <div className="flex items-center gap-3">
-                                        <div className="relative group">
-                                            <img
-                                                src={attachedContext.preview}
-                                                alt="Context"
-                                                className="h-10 w-auto rounded border border-white/20"
-                                            />
-                                            <div className="absolute inset-0 bg-black/20 group-hover:bg-transparent transition-colors rounded" />
+                                    {isProcessing && (
+                                        <div className="flex justify-start">
+                                            <div className="px-3 py-2 flex gap-1.5">
+                                                <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                                                <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                                                <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                                            </div>
                                         </div>
-                                        <div className="flex flex-col">
-                                            <span className="text-[11px] font-medium text-white">Screenshot attached</span>
-                                            <span className="text-[10px] text-slate-400">Ask a question or click Answer</span>
-                                        </div>
-                                    </div>
-                                    <button
-                                        onClick={() => setAttachedContext(null)}
-                                        className="p-1 hover:bg-white/10 rounded-full text-slate-400 hover:text-white transition-colors"
-                                    >
-                                        <X className="w-3.5 h-3.5" />
-                                    </button>
+                                    )}
+                                    <div ref={messagesEndRef} />
                                 </div>
                             )}
 
-                            <div className="relative group">
-                                <input
-                                    ref={textInputRef}
-                                    type="text"
-                                    value={inputValue}
-                                    onChange={(e) => setInputValue(e.target.value)}
-                                    onKeyDown={(e) => e.key === 'Enter' && handleManualSubmit()}
+                            {/* Quick Actions - Minimal & Clean */}
+                            <div className={`flex flex-nowrap justify-center items-center gap-1.5 px-4 pb-3 overflow-x-hidden ${rollingTranscript && showTranscript ? 'pt-1' : 'pt-3'}`}>
+                                <button onClick={handleWhatToSay} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium text-slate-400 bg-white/5 border border-white/0 hover:text-slate-200 hover:bg-white/10 hover:border-white/5 transition-all active:scale-95 duration-200 interaction-base interaction-press whitespace-nowrap shrink-0">
+                                    <Pencil className="w-3 h-3 opacity-70" /> What to answer?
+                                </button>
+                                <button onClick={() => handleFollowUp('shorten')} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium text-slate-400 bg-white/5 border border-white/0 hover:text-slate-200 hover:bg-white/10 hover:border-white/5 transition-all active:scale-95 duration-200 interaction-base interaction-press whitespace-nowrap shrink-0">
+                                    <MessageSquare className="w-3 h-3 opacity-70" /> Shorten
+                                </button>
+                                <button onClick={handleRecap} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium text-slate-400 bg-white/5 border border-white/0 hover:text-slate-200 hover:bg-white/10 hover:border-white/5 transition-all active:scale-95 duration-200 interaction-base interaction-press whitespace-nowrap shrink-0">
+                                    <RefreshCw className="w-3 h-3 opacity-70" /> Recap
+                                </button>
+                                <button onClick={handleFollowUpQuestions} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium text-slate-400 bg-white/5 border border-white/0 hover:text-slate-200 hover:bg-white/10 hover:border-white/5 transition-all active:scale-95 duration-200 interaction-base interaction-press whitespace-nowrap shrink-0">
+                                    <HelpCircle className="w-3 h-3 opacity-70" /> Follow Up Question
+                                </button>
+                                <button
+                                    onClick={handleAnswerNow}
+                                    className={`flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium transition-all active:scale-95 duration-200 interaction-base interaction-press min-w-[74px] whitespace-nowrap shrink-0 ${isManualRecording
+                                        ? 'bg-red-500/10 text-red-400 ring-1 ring-red-500/20'
+                                        : 'bg-white/5 text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10'
+                                        }`}
+                                >
+                                    {isManualRecording ? (
+                                        <>
+                                            <div className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" />
+                                            Stop
+                                        </>
+                                    ) : (
+                                        <><Zap className="w-3 h-3 opacity-70" /> Answer</>
+                                    )}
+                                </button>
+                            </div>
 
-                                    className="
+                            {/* Input Area */}
+                            <div className="p-3 pt-0">
+                                {/* Latent Context Preview (Attached Screenshot) */}
+                                {attachedContext && (
+                                    <div className="mb-2 flex items-center justify-between bg-white/5 border border-white/10 rounded-lg p-2 animate-in fade-in slide-in-from-bottom-1">
+                                        <div className="flex items-center gap-3">
+                                            <div className="relative group">
+                                                <img
+                                                    src={attachedContext.preview}
+                                                    alt="Context"
+                                                    className="h-10 w-auto rounded border border-white/20"
+                                                />
+                                                <div className="absolute inset-0 bg-black/20 group-hover:bg-transparent transition-colors rounded" />
+                                            </div>
+                                            <div className="flex flex-col">
+                                                <span className="text-[11px] font-medium text-white">Screenshot attached</span>
+                                                <span className="text-[10px] text-slate-400">Ask a question or click Answer</span>
+                                            </div>
+                                        </div>
+                                        <button
+                                            onClick={() => setAttachedContext(null)}
+                                            className="p-1 hover:bg-white/10 rounded-full text-slate-400 hover:text-white transition-colors"
+                                        >
+                                            <X className="w-3.5 h-3.5" />
+                                        </button>
+                                    </div>
+                                )}
+
+                                <div className="relative group">
+                                    <input
+                                        ref={textInputRef}
+                                        type="text"
+                                        value={inputValue}
+                                        onChange={(e) => setInputValue(e.target.value)}
+                                        onKeyDown={(e) => e.key === 'Enter' && handleManualSubmit()}
+
+                                        className="
                                     w-full 
                                     bg-[#1E1E1E] 
                                     hover:bg-[#252525] 
@@ -1338,32 +1359,32 @@ Provide only the answer, nothing else.`;
                                     text-[13px] leading-relaxed
                                     placeholder:text-slate-500
                                 "
-                                />
+                                    />
 
-                                {/* Custom Rich Placeholder */}
-                                {!inputValue && (
-                                    <div className="absolute left-3 top-1/2 -translate-y-1/2 flex items-center gap-1.5 pointer-events-none text-[13px] text-slate-400">
-                                        <span>Ask anything on screen or conversation, or</span>
-                                        <div className="flex items-center gap-1 opacity-80">
-                                            <kbd className="px-1.5 py-0.5 rounded border border-white/10 bg-white/5 text-[10px] font-sans">⌘</kbd>
-                                            <span className="text-[10px]">+</span>
-                                            <kbd className="px-1.5 py-0.5 rounded border border-white/10 bg-white/5 text-[10px] font-sans">H</kbd>
+                                    {/* Custom Rich Placeholder */}
+                                    {!inputValue && (
+                                        <div className="absolute left-3 top-1/2 -translate-y-1/2 flex items-center gap-1.5 pointer-events-none text-[13px] text-slate-400">
+                                            <span>Ask anything on screen or conversation, or</span>
+                                            <div className="flex items-center gap-1 opacity-80">
+                                                <kbd className="px-1.5 py-0.5 rounded border border-white/10 bg-white/5 text-[10px] font-sans">⌘</kbd>
+                                                <span className="text-[10px]">+</span>
+                                                <kbd className="px-1.5 py-0.5 rounded border border-white/10 bg-white/5 text-[10px] font-sans">H</kbd>
+                                            </div>
+                                            <span>for screenshot</span>
                                         </div>
-                                        <span>for screenshot</span>
-                                    </div>
-                                )}
+                                    )}
 
-                                {!inputValue && (
-                                    <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 pointer-events-none opacity-20">
-                                        <span className="text-[10px]">↵</span>
-                                    </div>
-                                )}
-                            </div>
+                                    {!inputValue && (
+                                        <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 pointer-events-none opacity-20">
+                                            <span className="text-[10px]">↵</span>
+                                        </div>
+                                    )}
+                                </div>
 
-                            {/* Bottom Row */}
-                            <div className="flex items-center justify-between mt-3 px-0.5">
-                                <div className="flex items-center gap-1.5">
-                                    <button className="
+                                {/* Bottom Row */}
+                                <div className="flex items-center justify-between mt-3 px-0.5">
+                                    <div className="flex items-center gap-1.5">
+                                        <button className="
                                     flex items-center gap-1.5 
                                     text-[#FFD60A] 
                                     bg-[#FFD60A]/10 
@@ -1374,70 +1395,71 @@ Provide only the answer, nothing else.`;
                                     transition-colors
                                     interaction-base interaction-press
                                 ">
-                                        <Sparkles className="w-2.5 h-2.5" />
-                                        Smart
-                                    </button>
+                                            <Sparkles className="w-2.5 h-2.5" />
+                                            Smart
+                                        </button>
 
-                                    <div className="w-px h-3 bg-white/10 mx-1" />
+                                        <div className="w-px h-3 bg-white/10 mx-1" />
 
-                                    {/* Settings Gear */}
-                                    <div className="relative">
-                                        <button
-                                            onClick={(e) => {
-                                                if (isSettingsOpen) {
-                                                    // If open, just close it (toggle will handle logic but we can be explicit or just toggle)
-                                                    // Actually toggle-settings-window handles hiding if visible, so logic is same.
-                                                    window.electronAPI.invoke('toggle-settings-window');
-                                                    return;
-                                                }
+                                        {/* Settings Gear */}
+                                        <div className="relative">
+                                            <button
+                                                onClick={(e) => {
+                                                    if (isSettingsOpen) {
+                                                        // If open, just close it (toggle will handle logic but we can be explicit or just toggle)
+                                                        // Actually toggle-settings-window handles hiding if visible, so logic is same.
+                                                        window.electronAPI.invoke('toggle-settings-window');
+                                                        return;
+                                                    }
 
-                                                if (!contentRef.current) return;
+                                                    if (!contentRef.current) return;
 
-                                                const contentRect = contentRef.current.getBoundingClientRect();
-                                                const buttonRect = e.currentTarget.getBoundingClientRect();
-                                                const POPUP_WIDTH = 270; // Matches SettingsWindowHelper actual width
-                                                const GAP = 8; // Same gap as between TopPill and main body (gap-2 = 8px)
+                                                    const contentRect = contentRef.current.getBoundingClientRect();
+                                                    const buttonRect = e.currentTarget.getBoundingClientRect();
+                                                    const POPUP_WIDTH = 270; // Matches SettingsWindowHelper actual width
+                                                    const GAP = 8; // Same gap as between TopPill and main body (gap-2 = 8px)
 
-                                                // X: Left-aligned relative to the Settings Button
-                                                const x = window.screenX + buttonRect.left;
+                                                    // X: Left-aligned relative to the Settings Button
+                                                    const x = window.screenX + buttonRect.left;
 
-                                                // Y: Below the main content + gap
-                                                const y = window.screenY + contentRect.bottom + GAP;
+                                                    // Y: Below the main content + gap
+                                                    const y = window.screenY + contentRect.bottom + GAP;
 
-                                                window.electronAPI.invoke('toggle-settings-window', { x, y });
-                                            }}
-                                            className={`
+                                                    window.electronAPI.invoke('toggle-settings-window', { x, y });
+                                                }}
+                                                className={`
                                             w-7 h-7 flex items-center justify-center rounded-lg 
                                             interaction-base interaction-press
                                             ${isSettingsOpen ? 'text-white bg-white/10' : 'text-slate-500 hover:text-slate-300 hover:bg-white/5'}
                                         `}
-                                            title="Settings"
-                                        >
-                                            <SlidersHorizontal className="w-3.5 h-3.5" />
-                                        </button>
+                                                title="Settings"
+                                            >
+                                                <SlidersHorizontal className="w-3.5 h-3.5" />
+                                            </button>
+                                        </div>
+
                                     </div>
 
-                                </div>
-
-                                <button
-                                    onClick={handleManualSubmit}
-                                    disabled={!inputValue.trim()}
-                                    className={`
+                                    <button
+                                        onClick={handleManualSubmit}
+                                        disabled={!inputValue.trim()}
+                                        className={`
                                     w-7 h-7 rounded-full flex items-center justify-center 
                                     interaction-base interaction-press
                                     ${inputValue.trim()
-                                            ? 'bg-[#007AFF] text-white shadow-lg shadow-blue-500/20 hover:bg-[#0071E3]'
-                                            : 'bg-white/5 text-white/10 cursor-not-allowed'
-                                        }
+                                                ? 'bg-[#007AFF] text-white shadow-lg shadow-blue-500/20 hover:bg-[#0071E3]'
+                                                : 'bg-white/5 text-white/10 cursor-not-allowed'
+                                            }
                                 `}
-                                >
-                                    <ArrowRight className="w-3.5 h-3.5" />
-                                </button>
+                                    >
+                                        <ArrowRight className="w-3.5 h-3.5" />
+                                    </button>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                </>
-            )}
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </div>
     );
 };

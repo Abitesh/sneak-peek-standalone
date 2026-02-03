@@ -255,6 +255,15 @@ export class IntelligenceManager extends EventEmitter {
             timestamp: Date.now()
         });
 
+        // Also add to fullTranscript so it persists in the session history (and summaries)
+        this.fullTranscript.push({
+            speaker: 'assistant',
+            text: cleanText,
+            timestamp: Date.now(),
+            final: true,
+            confidence: 1.0
+        });
+
         this.lastAssistantMessage = cleanText;
 
         // Temporal RAG: Track response history for anti-repetition
@@ -311,6 +320,19 @@ export class IntelligenceManager extends EventEmitter {
             }
         }
         return null;
+    }
+
+    /**
+     * Get full session context from accumulated transcript (User + Interviewer + Assistant)
+     */
+    private getFullSessionContext(): string {
+        return this.fullTranscript.map(segment => {
+            const role = this.mapSpeakerToRole(segment.speaker);
+            const label = role === 'interviewer' ? 'INTERVIEWER' :
+                role === 'user' ? 'ME' :
+                    'ASSISTANT';
+            return `[${label}]: ${segment.text}`;
+        }).join('\n');
     }
 
     private mapSpeakerToRole(speaker: string): 'interviewer' | 'user' | 'assistant' {
@@ -481,12 +503,12 @@ export class IntelligenceManager extends EventEmitter {
             this.fullUsage.push({
                 type: 'assist',
                 timestamp: Date.now(),
-                question: question || 'inferred',
+                question: question || 'What to Answer',
                 answer: fullAnswer
             });
 
             // Emit completion event (legacy consumers + done signal)
-            this.emit('suggested_answer', fullAnswer, question || 'inferred from context', confidence);
+            this.emit('suggested_answer', fullAnswer, question || 'What to Answer', confidence);
 
             this.setMode('idle');
             return fullAnswer;
@@ -499,10 +521,6 @@ export class IntelligenceManager extends EventEmitter {
         }
     }
 
-    /**
-     * MODE 3: Follow-Up (Refinement)
-     * Modify the last assistant message
-     */
     /**
      * MODE 3: Follow-Up (Refinement)
      * Modify the last assistant message
@@ -542,6 +560,28 @@ export class IntelligenceManager extends EventEmitter {
                 // Store refined answer
                 this.addAssistantMessage(fullRefined);
                 this.emit('refined_answer', fullRefined, intent);
+
+                // Log Usage
+                // Production-ready labeling map
+                const intentMap: Record<string, string> = {
+                    'shorten': 'Shorten Answer',
+                    'expand': 'Expand Answer',
+                    'rephrase': 'Rephrase Answer',
+                    'add_example': 'Add Example',
+                    'more_confident': 'Make More Confident',
+                    'more_casual': 'Make More Casual',
+                    'more_formal': 'Make More Formal',
+                    'simplify': 'Simplify Answer'
+                };
+
+                const displayQuestion = userRequest || intentMap[intent] || `Refining: ${intent}`;
+
+                this.fullUsage.push({
+                    type: 'followup',
+                    timestamp: Date.now(),
+                    question: displayQuestion,
+                    answer: fullRefined
+                });
             }
 
             this.setMode('idle');
@@ -586,6 +626,14 @@ export class IntelligenceManager extends EventEmitter {
 
             if (fullSummary) {
                 this.emit('recap', fullSummary);
+
+                // Log Usage
+                this.fullUsage.push({
+                    type: 'chat', // Using 'chat' for generic interaction, or add 'recap' type if supported by UI
+                    timestamp: Date.now(),
+                    question: 'Recap Meeting',
+                    answer: fullSummary
+                });
             }
             this.setMode('idle');
             return fullSummary;
@@ -632,6 +680,7 @@ export class IntelligenceManager extends EventEmitter {
                 this.fullUsage.push({
                     type: 'followup_questions',
                     timestamp: Date.now(),
+                    question: 'Generate Follow-up Questions',
                     answer: fullQuestions
                 });
             }
@@ -671,7 +720,7 @@ export class IntelligenceManager extends EventEmitter {
                 this.fullUsage.push({
                     type: 'chat',
                     timestamp: Date.now(),
-                    question: question,
+                    question: question, // Already passed correctly from user input
                     answer: answer
                 });
             }
@@ -693,7 +742,26 @@ export class IntelligenceManager extends EventEmitter {
     /**
      * Handle incoming transcript from native audio service
      */
+    private lastInterimInterviewer: TranscriptSegment | null = null;
+
+    /**
+     * Handle incoming transcript from native audio service
+     */
     handleTranscript(segment: TranscriptSegment): void {
+        // Track interim segments for interviewer to prevent data loss on stop
+        if (segment.speaker === 'interviewer') {
+            // DEBUG LOGGING
+            if (Math.random() < 0.05 || segment.final) {
+                console.log(`[IntelligenceManager] RX Interviewer Segment: Final=${segment.final} Text="${segment.text.substring(0, 50)}..."`);
+            }
+
+            if (!segment.final) {
+                this.lastInterimInterviewer = segment;
+            } else {
+                this.lastInterimInterviewer = null;
+            }
+        }
+
         this.addTranscript(segment);
     }
 
@@ -731,6 +799,18 @@ export class IntelligenceManager extends EventEmitter {
     private sessionStartTime: number = Date.now();
 
     /**
+     * Public method to log usage from external sources (e.g. IPC direct chat)
+     */
+    public logUsage(type: string, question: string, answer: string): void {
+        this.fullUsage.push({
+            type,
+            timestamp: Date.now(),
+            question,
+            answer
+        });
+    }
+
+    /**
      * Save the current session to persistent storage
      */
     /**
@@ -739,6 +819,15 @@ export class IntelligenceManager extends EventEmitter {
      */
     public async stopMeeting(): Promise<void> {
         console.log('[IntelligenceManager] Stopping meeting and queueing save...');
+
+        // 0. Force-save any pending interim transcript (e.g. interviewer was speaking when stopped)
+        if (this.lastInterimInterviewer) {
+            console.log('[IntelligenceManager] Force-saving pending interim transcript:', this.lastInterimInterviewer.text);
+            // Clone and mark as final so addTranscript accepts it
+            const finalSegment = { ...this.lastInterimInterviewer, final: true };
+            this.addTranscript(finalSegment);
+            this.lastInterimInterviewer = null;
+        }
 
         // 1. Snapshot valid data BEFORE resetting
         const durationMs = Date.now() - this.sessionStartTime;
@@ -753,7 +842,7 @@ export class IntelligenceManager extends EventEmitter {
             usage: [...this.fullUsage],
             startTime: this.sessionStartTime,
             durationMs: durationMs,
-            context: this.getFormattedContext(600) // Capture context now while state matches
+            context: this.getFullSessionContext() // Use FULL session context, not just recent window
         };
 
         // 2. Reset state immediately so new meeting can start or UI is clean
@@ -777,7 +866,8 @@ export class IntelligenceManager extends EventEmitter {
             summary: "Generating summary...",
             detailedSummary: { actionItems: [], keyPoints: [] },
             transcript: snapshot.transcript,
-            usage: snapshot.usage
+            usage: snapshot.usage,
+            isProcessed: false // Mark as unprocessed initially
         };
 
         try {
@@ -808,10 +898,11 @@ export class IntelligenceManager extends EventEmitter {
         try {
             // Generate Title (only if not set by calendar)
             if (this.recapLLM && (!this.currentMeetingMetadata || !this.currentMeetingMetadata.title)) {
-                const titlePrompt = `Generate a concise 3-6 word title for this meeting context. Output ONLY the title text. Do not use quotes or conversational filler. Context:\n${data.context.substring(0, 5000)}`;
-                const groqTitlePrompt = `${GROQ_TITLE_PROMPT}\n\nContext:\n${data.context.substring(0, 5000)}`;
+                const titlePrompt = `Generate a concise 3-6 word title for this meeting context. Output ONLY the title text. Do not use quotes or conversational filler.`;
+                const groqTitlePrompt = GROQ_TITLE_PROMPT;
 
-                const generatedTitle = await this.llmHelper.chatWithGemini(titlePrompt, undefined, undefined, true, groqTitlePrompt);
+                // Use robust Groq-first generation for title
+                const generatedTitle = await this.llmHelper.generateMeetingSummary(titlePrompt, data.context.substring(0, 5000), groqTitlePrompt);
                 if (generatedTitle) title = generatedTitle.replace(/["*]/g, '').trim();
             }
 
@@ -819,30 +910,29 @@ export class IntelligenceManager extends EventEmitter {
             // Only generate if we have sufficient context/transcript
             if (this.recapLLM && data.transcript.length > 2) {
                 const summaryPrompt = `You are a silent meeting summarizer. Convert this conversation into concise internal meeting notes.
+    
+    RULES:
+    - Do NOT invent information not present in the context
+    - You MAY infer implied action items or next steps if they are logical consequences of the discussion
+    - Do NOT explain or define concepts mentioned
+    - Do NOT use filler phrases like "The meeting covered..." or "Discussed various..."
+    - Do NOT mention transcripts, AI, or summaries
+    - Do NOT sound like an AI assistant
+    - Sound like a senior PM's internal notes
+    
+    STYLE: Calm, neutral, professional, skim-friendly. Short bullets, no sub-bullets.
+    
+    Return ONLY valid JSON (no markdown code blocks):
+    {
+      "overview": "1-2 sentence description of what was discussed",
+      "keyPoints": ["3-6 specific bullets - each = one concrete topic or point discussed"],
+      "actionItems": ["specific next steps, assigned tasks, or implied follow-ups. If absolutely none found, return empty array"]
+    }`;
 
-RULES:
-- Do NOT invent or infer information not explicitly stated
-- Do NOT explain or define concepts mentioned
-- Do NOT use filler phrases like "The meeting covered..." or "Discussed various..."
-- Do NOT mention transcripts, AI, or summaries
-- Do NOT sound like an AI assistant
-- Sound like a senior PM's internal notes
+                const groqSummaryPrompt = GROQ_SUMMARY_JSON_PROMPT; // Context is now removed from the template
 
-STYLE: Calm, neutral, professional, skim-friendly. Short bullets, no sub-bullets.
-
-Return ONLY valid JSON (no markdown code blocks):
-{
-  "overview": "1-2 sentence description of what was discussed",
-  "keyPoints": ["3-6 specific bullets - each = one concrete topic or point discussed"],
-  "actionItems": ["specific next steps if any exist, otherwise empty array"]
-}
-
-CONVERSATION:
-${data.context.substring(0, 10000)}`;
-
-                const groqSummaryPrompt = GROQ_SUMMARY_JSON_PROMPT.replace('{CONTEXT}', data.context.substring(0, 10000));
-
-                const generatedSummary = await this.llmHelper.chatWithGemini(summaryPrompt, undefined, undefined, true, groqSummaryPrompt);
+                // Use the new robust summary generation method
+                const generatedSummary = await this.llmHelper.generateMeetingSummary(summaryPrompt, data.context.substring(0, 10000), groqSummaryPrompt);
 
                 if (generatedSummary) {
                     // Try to extract JSON - handle both raw JSON and markdown-wrapped
@@ -879,7 +969,8 @@ ${data.context.substring(0, 10000)}`;
                 transcript: data.transcript,
                 usage: data.usage,
                 calendarEventId: calendarEventId,
-                source: source
+                source: source,
+                isProcessed: true // Mark as processed
             };
 
             // Save to SQLite
@@ -894,6 +985,57 @@ ${data.context.substring(0, 10000)}`;
 
         } catch (error) {
             console.error('[IntelligenceManager] Failed to save meeting:', error);
+        }
+    }
+
+    /**
+     * Recover meetings that were started but not fully processed (e.g. app crash)
+     */
+    public async recoverUnprocessedMeetings(): Promise<void> {
+        console.log('[IntelligenceManager] Checking for unprocessed meetings...');
+        const db = DatabaseManager.getInstance();
+        const unprocessed = db.getUnprocessedMeetings();
+
+        if (unprocessed.length === 0) {
+            console.log('[IntelligenceManager] No unprocessed meetings found.');
+            return;
+        }
+
+        console.log(`[IntelligenceManager] Found ${unprocessed.length} unprocessed meetings. recovering...`);
+
+        for (const m of unprocessed) {
+            try {
+                const details = db.getMeetingDetails(m.id);
+                if (!details) continue;
+
+                console.log(`[IntelligenceManager] Recovering meeting ${m.id}...`);
+
+                // Reconstruct context from transcript
+                // Format: [SPEAKER]: text
+                const context = details.transcript?.map(t => {
+                    const label = t.speaker === 'interviewer' ? 'INTERVIEWER' :
+                        t.speaker === 'user' ? 'ME' : 'ASSISTANT';
+                    return `[${label}]: ${t.text}`;
+                }).join('\n') || "";
+
+                const parts = details.duration.split(':');
+                const durationMs = ((parseInt(parts[0]) * 60) + parseInt(parts[1])) * 1000;
+                const startTime = new Date(details.date).getTime();
+
+                const snapshot = {
+                    transcript: details.transcript as TranscriptSegment[],
+                    usage: details.usage,
+                    startTime: startTime,
+                    durationMs: durationMs,
+                    context: context
+                };
+
+                await this.processAndSaveMeeting(snapshot, m.id);
+                console.log(`[IntelligenceManager] Recovered meeting ${m.id}`);
+
+            } catch (e) {
+                console.error(`[IntelligenceManager] Failed to recover meeting ${m.id}`, e);
+            }
         }
     }
     /**

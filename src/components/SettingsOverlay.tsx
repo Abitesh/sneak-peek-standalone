@@ -3,7 +3,7 @@ import {
     X, Mic, Speaker, Monitor, Keyboard, User, LifeBuoy, LogOut,
     Command, ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
     AppWindow, Camera, RotateCcw, Eye, Layout, MessageSquare, Crop,
-    ChevronDown, Check, BadgeCheck, Power, Palette, Calendar, Ghost, Sun, Moon, RefreshCw, Info, Globe
+    ChevronDown, Check, BadgeCheck, Power, Palette, Calendar, Ghost, Sun, Moon, RefreshCw, Info, Globe, FlaskConical
 } from 'lucide-react';
 import { AboutSection } from './AboutSection';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -125,52 +125,95 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                 const langs = await window.electronAPI.getRecognitionLanguages();
                 setAvailableLanguages(langs);
 
-                // Convert to options for select
-                const options = Object.entries(langs).map(([key, config]: [string, any]) => ({
-                    deviceId: key, // Reusing CustomSelect interface
-                    label: config.label,
-                    kind: 'audioinput' as MediaDeviceKind,
-                    groupId: '',
-                    toJSON: () => ({})
-                }));
+                // Define the specific order and labels requested by user
+                const desiredOrder = [
+                    { key: 'english-india', label: 'English (India)' },
+                    { key: 'english-us', label: 'English (United States)' },
+                    { key: 'english-uk', label: 'English (United Kingdom)' },
+                    { key: 'english-au', label: 'English (Australia)' },
+                    { key: 'english-ca', label: 'English (Canada)' },
+                ];
+
+                // Create options list starting with Auto
+                const options = [
+                    {
+                        deviceId: 'auto',
+                        label: 'Auto (Recommended)',
+                        kind: 'audioinput' as MediaDeviceKind,
+                        groupId: '',
+                        toJSON: () => ({})
+                    }
+                ];
+
+                // Add the rest if they exist in backend response
+                desiredOrder.forEach(({ key, label }) => {
+                    if (langs[key]) {
+                        options.push({
+                            deviceId: key,
+                            label: label, // Use requested label
+                            kind: 'audioinput' as MediaDeviceKind,
+                            groupId: '',
+                            toJSON: () => ({})
+                        });
+                    }
+                });
+
                 setLanguageOptions(options);
 
-                // Smart Default Logic
+                // Load stored preference
                 const stored = localStorage.getItem('natively_recognition_language');
-                if (stored && langs[stored]) {
+
+                // If stored is 'auto' or not set, default to 'auto'
+                if (!stored || stored === 'auto') {
+                    setRecognitionLanguage('auto');
+                    // We still need to set the actual backend language based on system locale
+                    // But for UI, we show 'auto'
+                    applyAutoLanguage(langs);
+                } else if (langs[stored]) {
                     setRecognitionLanguage(stored);
                 } else {
-                    // Detect from navigator
-                    const systemLocale = navigator.language; // e.g. "en-US", "en-GB"
-                    let match = 'english-us'; // Fallback
-
-                    // Try to find a match in alternates or primary
-                    for (const [key, config] of Object.entries(langs)) {
-                        if ((config as any).primary === systemLocale || (config as any).alternates.includes(systemLocale)) {
-                            match = key;
-                            break;
-                        }
-                    }
-
-                    // Special case for India if not matched above (though en-IN should match)
-                    if (systemLocale === 'en-IN') match = 'english-india';
-
-                    setRecognitionLanguage(match);
-                    localStorage.setItem('natively_recognition_language', match);
-                    window.electronAPI.setRecognitionLanguage(match);
+                    // Fallback if stored key no longer exists
+                    setRecognitionLanguage('auto');
+                    applyAutoLanguage(langs);
                 }
             }
         };
         loadLanguages();
     }, []);
 
+    const applyAutoLanguage = (langs: any) => {
+        const systemLocale = navigator.language;
+        let match = 'english-us';
+
+        // Logic to find best match from available langs
+        for (const [key, config] of Object.entries(langs)) {
+            if ((config as any).primary === systemLocale || (config as any).alternates.includes(systemLocale)) {
+                match = key;
+                break;
+            }
+        }
+        if (systemLocale === 'en-IN') match = 'english-india';
+
+        // Send actual code to backend, but keep UI as 'auto' (handled by separating state if needed, 
+        // but here 'recognitionLanguage' state tracks the dropdown value)
+        if (window.electronAPI?.setRecognitionLanguage) {
+            window.electronAPI.setRecognitionLanguage(match);
+        }
+    };
+
     const handleLanguageChange = (key: string) => {
         setRecognitionLanguage(key);
         localStorage.setItem('natively_recognition_language', key);
-        if (window.electronAPI?.setRecognitionLanguage) {
-            window.electronAPI.setRecognitionLanguage(key);
+
+        if (key === 'auto') {
+            applyAutoLanguage(availableLanguages);
+        } else {
+            if (window.electronAPI?.setRecognitionLanguage) {
+                window.electronAPI.setRecognitionLanguage(key);
+            }
         }
     };
+
 
     // Sync transcript setting
     useEffect(() => {
@@ -813,100 +856,117 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                             {activeTab === 'audio' && (
                                 <div className="space-y-6 animated fadeIn">
                                     <div>
-                                        <h3 className="text-lg font-medium text-text-primary mb-4">Audio Configuration</h3>
-                                        <div className="space-y-4">
-                                            {/* Preferred English Accent */}
-                                            <div className="flex items-center justify-between">
-                                                <div>
-                                                    <h3 className="text-sm font-bold text-text-primary">Preferred English Accent</h3>
-                                                    <p className="text-xs text-text-secondary mt-0.5">Improves accuracy by prioritizing your accent.</p>
-                                                </div>
-                                                <div className="w-[220px]">
-                                                    <CustomSelect
-                                                        label=""
-                                                        icon={null}
-                                                        value={recognitionLanguage}
-                                                        options={languageOptions}
-                                                        onChange={handleLanguageChange}
-                                                        placeholder="Select Language"
-                                                    />
-                                                </div>
-                                            </div>
+                                        <h3 className="text-lg font-medium text-text-primary mb-6">Audio Configuration</h3>
 
-                                            <div className="h-px bg-border-subtle my-4" />
-
-                                            <CustomSelect
-                                                label="Input Device"
-                                                icon={<Mic size={16} />}
-                                                value={selectedInput}
-                                                options={inputDevices}
-                                                onChange={(id) => {
-                                                    setSelectedInput(id);
-                                                    localStorage.setItem('preferredInputDeviceId', id);
-                                                }}
-                                                placeholder="Default Microphone"
-                                            />
-
+                                        <div className="space-y-6">
+                                            {/* Speech Recognition Section */}
                                             <div>
-                                                <div className="flex justify-between text-xs text-text-secondary mb-2 px-1">
-                                                    <span>Input Level</span>
-                                                </div>
-                                                <div className="h-1.5 bg-bg-input rounded-full overflow-hidden">
-                                                    <div
-                                                        className="h-full bg-green-500 transition-all duration-100 ease-out"
-                                                        style={{ width: `${micLevel}%` }}
-                                                    />
+                                                <CustomSelect
+                                                    label="Preferred English Accent"
+                                                    icon={null}
+                                                    value={recognitionLanguage}
+                                                    options={languageOptions}
+                                                    onChange={handleLanguageChange}
+                                                    placeholder="Select Accent"
+                                                />
+
+                                                <div className="flex gap-2 items-center mt-2 px-1">
+                                                    <Info size={14} className="text-text-secondary shrink-0" />
+                                                    <p className="text-xs text-text-secondary whitespace-nowrap">
+                                                        Improves accuracy by prioritizing your accent. Other English accents are still supported.
+                                                    </p>
                                                 </div>
                                             </div>
 
-                                            <div className="h-px bg-border-subtle my-4" />
+                                            <div className="h-px bg-border-subtle" />
 
-                                            <CustomSelect
-                                                label="Output Device"
-                                                icon={<Speaker size={16} />}
-                                                value={selectedOutput}
-                                                options={outputDevices}
-                                                onChange={(id) => {
-                                                    setSelectedOutput(id);
-                                                    localStorage.setItem('preferredOutputDeviceId', id);
-                                                }}
-                                                placeholder="Default Speakers"
-                                            />
-
-                                            <div className="flex justify-end">
-                                                <button
-                                                    onClick={() => {
-                                                        const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3'); // Simple test sound
-                                                        // Try to set sinkId if supported
-                                                        if (selectedOutput && (audio as any).setSinkId) {
-                                                            (audio as any).setSinkId(selectedOutput)
-                                                                .catch((e: any) => console.error("Error setting sink", e));
-                                                        }
-                                                        audio.play().catch(e => console.error("Error playing test sound", e));
+                                            <div className="space-y-4">
+                                                <CustomSelect
+                                                    label="Input Device"
+                                                    icon={<Mic size={16} />}
+                                                    value={selectedInput}
+                                                    options={inputDevices}
+                                                    onChange={(id) => {
+                                                        setSelectedInput(id);
+                                                        localStorage.setItem('preferredInputDeviceId', id);
                                                     }}
-                                                    className="text-xs bg-bg-input hover:bg-bg-elevated text-text-primary px-3 py-1.5 rounded-md transition-colors flex items-center gap-2"
-                                                >
-                                                    <Speaker size={12} /> Test Sound
-                                                </button>
-                                            </div>
+                                                    placeholder="Default Microphone"
+                                                />
 
-                                            <div className="h-px bg-border-subtle my-4" />
-
-                                            {/* Experimental ScreenCaptureKit Toggle */}
-                                            <div className="flex items-center justify-between">
                                                 <div>
-                                                    <h3 className="text-sm font-bold text-text-primary">Experimental: CoreAudio Backend</h3>
-                                                    <p className="text-xs text-text-secondary mt-0.5">Use legacy CoreAudio Tap instead of ScreenCaptureKit (May be unstable)</p>
+                                                    <div className="flex justify-between text-xs text-text-secondary mb-2 px-1">
+                                                        <span>Input Level</span>
+                                                    </div>
+                                                    <div className="h-1.5 bg-bg-input rounded-full overflow-hidden">
+                                                        <div
+                                                            className="h-full bg-green-500 transition-all duration-100 ease-out"
+                                                            style={{ width: `${micLevel}%` }}
+                                                        />
+                                                    </div>
                                                 </div>
-                                                <div
-                                                    onClick={() => {
-                                                        const newState = !useLegacyAudio;
-                                                        setUseLegacyAudio(newState);
-                                                        window.localStorage.setItem('useLegacyAudioBackend', newState ? 'true' : 'false');
+
+                                                <div className="h-px bg-border-subtle my-4" />
+
+                                                <CustomSelect
+                                                    label="Output Device"
+                                                    icon={<Speaker size={16} />}
+                                                    value={selectedOutput}
+                                                    options={outputDevices}
+                                                    onChange={(id) => {
+                                                        setSelectedOutput(id);
+                                                        localStorage.setItem('preferredOutputDeviceId', id);
                                                     }}
-                                                    className={`w-11 h-6 rounded-full relative cursor-pointer transition-colors ${useLegacyAudio ? 'bg-accent-primary' : 'bg-bg-toggle-switch border border-border-muted'}`}
-                                                >
-                                                    <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${useLegacyAudio ? 'translate-x-5' : 'translate-x-0'}`} />
+                                                    placeholder="Default Speakers"
+                                                />
+
+                                                <div className="flex justify-end">
+                                                    <button
+                                                        onClick={() => {
+                                                            const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3'); // Simple test sound
+                                                            // Try to set sinkId if supported
+                                                            if (selectedOutput && (audio as any).setSinkId) {
+                                                                (audio as any).setSinkId(selectedOutput)
+                                                                    .catch((e: any) => console.error("Error setting sink", e));
+                                                            }
+                                                            audio.play().catch(e => console.error("Error playing test sound", e));
+                                                        }}
+                                                        className="text-xs bg-bg-input hover:bg-bg-elevated text-text-primary px-3 py-1.5 rounded-md transition-colors flex items-center gap-2"
+                                                    >
+                                                        <Speaker size={12} /> Test Sound
+                                                    </button>
+                                                </div>
+
+                                                <div className="h-px bg-border-subtle my-4" />
+
+                                                {/* Experimental ScreenCaptureKit Toggle */}
+                                                {/* Experimental ScreenCaptureKit Toggle */}
+                                                <div className="bg-amber-500/5 rounded-xl border border-amber-500/20 p-4">
+                                                    <div className="flex items-center justify-between">
+                                                        <div className="flex items-start gap-3">
+                                                            <div className="mt-0.5 p-1.5 rounded-lg bg-amber-500/10 text-amber-500">
+                                                                <FlaskConical size={18} />
+                                                            </div>
+                                                            <div>
+                                                                <div className="flex items-center gap-2 mb-0.5">
+                                                                    <h3 className="text-sm font-bold text-text-primary">CoreAudio Backend</h3>
+                                                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-600 uppercase tracking-wide">Beta</span>
+                                                                </div>
+                                                                <p className="text-xs text-text-secondary leading-relaxed max-w-[300px]">
+                                                                    Legacy audio capture method. Use only if you experience issues with the default engine.
+                                                                </p>
+                                                            </div>
+                                                        </div>
+                                                        <div
+                                                            onClick={() => {
+                                                                const newState = !useLegacyAudio;
+                                                                setUseLegacyAudio(newState);
+                                                                window.localStorage.setItem('useLegacyAudioBackend', newState ? 'true' : 'false');
+                                                            }}
+                                                            className={`w-11 h-6 rounded-full relative cursor-pointer transition-colors shrink-0 ${useLegacyAudio ? 'bg-amber-500' : 'bg-bg-toggle-switch border border-border-muted'}`}
+                                                        >
+                                                            <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${useLegacyAudio ? 'translate-x-5' : 'translate-x-0'}`} />
+                                                        </div>
+                                                    </div>
                                                 </div>
                                             </div>
                                         </div>
