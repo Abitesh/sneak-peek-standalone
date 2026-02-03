@@ -190,7 +190,8 @@ export class SettingsWindowHelper {
         if (process.platform === "darwin") {
             this.settingsWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
             this.settingsWindow.setHiddenInMissionControl(true)
-            this.settingsWindow.setAlwaysOnTop(true, "floating")
+            // Use 'pop-up-menu' to be above floating overlay
+            this.settingsWindow.setAlwaysOnTop(true, "pop-up-menu")
         }
 
         console.log(`[SettingsWindowHelper] Creating Settings Window with Content Protection: ${this.contentProtection}`);
@@ -205,7 +206,9 @@ export class SettingsWindowHelper {
 
         this.settingsWindow.once('ready-to-show', () => {
             if (showWhenReady) {
+                console.log('[SettingsWindowHelper] Window ready-to-show. Showing and focusing (level: pop-up-menu).');
                 this.settingsWindow?.show()
+                this.settingsWindow?.focus()
             }
         })
 

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowRight, Check, Bell, Sparkles, Heart } from 'lucide-react';
+import { ArrowRight, Check, Bell, Sparkles, Heart, Rocket } from 'lucide-react';
 import mainui from "../UI_comp/mainui.png";
 
 // --- Types ---
@@ -191,12 +191,12 @@ export const FeatureSpotlight: React.FC = () => {
 
                             {/* Main Content Group */}
                             <div
-                                className={`flex flex-col items-center justify-center transition-all duration-300 ${isSupport ? '-mt-1 pb-14' : '-translate-y-2.5'}`}
+                                className={`flex flex-col items-center justify-center transition-all duration-300 -translate-y-2.5`}
                             >
 
                                 {/* Title */}
                                 <h2
-                                    className={`text-white drop-shadow-sm tracking-tight ${isSupport ? 'mb-1' : 'mb-0'} transition-all duration-300 group-hover:brightness-105`}
+                                    className={`text-white drop-shadow-sm tracking-tight mb-0 transition-all duration-300 group-hover:brightness-105 ${isSupport ? 'translate-y-1.5' : ''}`}
                                     style={{
                                         fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text"',
                                         fontSize: (isPremium || isSupport) ? '30px' : '26px',
@@ -211,7 +211,7 @@ export const FeatureSpotlight: React.FC = () => {
 
                                 {/* Subtitle */}
                                 <p
-                                    className="antialiased mb-2" // Standardized mb-2 for equal spacing
+                                    className={`antialiased mb-2 ${isSupport ? 'translate-y-1.5' : ''}`} // Standardized mb-2 for equal spacing
                                     style={{
                                         fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text"',
                                         fontSize: (isPremium || isSupport) ? '16px' : '15px',
@@ -226,7 +226,7 @@ export const FeatureSpotlight: React.FC = () => {
                                 </p>
 
                                 {currentFeature.bullets && (
-                                    <div className={`flex flex-col w-full max-w-[340px] ${isSupport ? '0 items-center' : 'gap-1 items-center translate-y-2.5'}`}>
+                                    <div className={`flex flex-col w-full max-w-[340px] gap-1 items-center translate-y-2.5`}>
                                         {currentFeature.bullets.map((bullet, idx) => (
                                             <div key={idx} className={`flex items-center justify-center group/item transition-transform duration-200 px-2`}>
                                                 <span
@@ -253,111 +253,116 @@ export const FeatureSpotlight: React.FC = () => {
                                         </p>
                                     </div>
                                 )}
-                            </div>
 
-                            {/* Primary Action Button - Hidden for Premium slide, moved inside for equal spacing */}
-                            {!isPremium && (
-                                <motion.button
-                                    onClick={handleActionClick}
-                                    whileHover="hover"
-                                    className={`
-                                        group relative
-                                        flex items-center justify-center gap-3
-                                        rounded-full
-                                        transition-all duration-200 ease-out
-                                        hover:brightness-105
-                                        active:scale-[0.98]
-                                        overflow-hidden
-                                        cursor-pointer
-                                        ${isSupport
-                                            ? 'absolute bottom-5 left-1/2 -translate-x-1/2 z-20 px-10 py-2.5 text-[13px] font-medium text-[#1C1C1E] hover:-translate-y-[1px]'
-                                            : 'px-10 py-2.5 text-[13px] font-medium hover:-translate-y-[1px] text-[#F5F7FA]'
-                                        }
-                                    `}
-                                    style={isSupport ? {
-                                        background: 'linear-gradient(180deg, #F1D88B 0%, #E6C87A 100%)',
-                                        boxShadow: `
-                                            0 6px 20px rgba(230, 200, 122, 0.35),
-                                            inset 0 1px 0 rgba(255,255,255,0.35)
-                                        `
-                                    } : {
-                                        minWidth: '220px',
-                                        backgroundColor: isInterested ? 'rgba(255, 255, 255, 0.12)' : 'rgba(255, 255, 255, 0.08)',
-                                        backdropFilter: 'blur(14px)',
-                                        WebkitBackdropFilter: 'blur(14px)',
-                                    }}
-                                >
-                                    {/* Gradient Border (Standard Connect Button Only) */}
-                                    {!isSupport && (
-                                        <div
-                                            className="absolute inset-0 rounded-full pointer-events-none transition-opacity duration-300 group-hover:opacity-80"
-                                            style={{
-                                                padding: '1px',
-                                                background: 'linear-gradient(to right, #FFFFFF, #A1A1AA)',
-                                                WebkitMask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
-                                                WebkitMaskComposite: 'xor',
-                                                maskComposite: 'exclude',
-                                                opacity: 0.6,
-                                            }}
-                                        />
-                                    )}
 
-                                    {/* Inner Highlight for Standard Button */}
-                                    {!isSupport && (
-                                        <div
-                                            className="absolute inset-0 rounded-full pointer-events-none"
-                                            style={{
-                                                boxShadow: 'inset 0 1px 0 0 rgba(255, 255, 255, 0.08)',
-                                            }}
-                                        />
-                                    )}
-
-                                    <AnimatePresence mode="wait" initial={false}>
-                                        <motion.span
-                                            key={isInterested ? 'interested' : 'cta'}
-                                            initial={{ opacity: 0, y: isInterested ? 5 : -5 }}
-                                            animate={{ opacity: 1, y: 0 }}
-                                            exit={{ opacity: 0, y: isInterested ? -5 : 5 }}
-                                            className="flex items-center gap-2.5 relative z-10"
-                                        >
-                                            <span>
-                                                {isInterested && !isSupport
-                                                    ? 'Interested'
-                                                    : (isSupport ? 'Fund development' : (currentFeature.actionLabel || 'Mark interest'))
-                                                }
-                                            </span>
-
-                                            {/* Icon: ArrowReference for Support, Bell for Features */}
-                                            {/* Icon: ArrowReference for Support, Bell for Features */}
-                                            <motion.div
-                                                variants={{
-                                                    hover: isInterested ? {
-                                                        rotate: [0, -10, 10, -10, 10, 0],
-                                                        transition: { duration: 0.5, repeat: Infinity, repeatDelay: 2 }
-                                                    } : (isSupport ? {
-                                                        x: [0, 4, 0],
-                                                        transition: { duration: 1.5, repeat: Infinity, ease: "easeInOut" }
-                                                    } : {})
+                                {/* Primary Action Button - Moved inside structure for equal spacing */}
+                                {!isPremium && (
+                                    <motion.button
+                                        onClick={handleActionClick}
+                                        whileHover="hover"
+                                        className={`
+                                            group relative
+                                            flex items-center justify-center gap-3
+                                            rounded-full
+                                            transition-all duration-200 ease-out
+                                            hover:brightness-105
+                                            active:scale-[0.98]
+                                            overflow-hidden
+                                            cursor-pointer
+                                            ${isSupport
+                                                ? 'mt-2 translate-y-5 px-6 py-2 text-[13px] font-medium text-[#1C1C1E]'
+                                                : 'px-10 py-2.5 text-[13px] font-medium text-[#F5F7FA]'
+                                            }
+                                        `}
+                                        style={isSupport ? {
+                                            background: 'linear-gradient(180deg, #F1D88B 0%, #E6C87A 100%)',
+                                            boxShadow: `
+                                                0 6px 20px rgba(230, 200, 122, 0.35),
+                                                inset 0 1px 0 rgba(255,255,255,0.35)
+                                            `
+                                        } : {
+                                            minWidth: '220px',
+                                            backgroundColor: isInterested ? 'rgba(255, 255, 255, 0.12)' : 'rgba(255, 255, 255, 0.08)',
+                                            backdropFilter: 'blur(14px)',
+                                            WebkitBackdropFilter: 'blur(14px)',
+                                        }}
+                                    >
+                                        {/* Gradient Border (Standard Connect Button Only) */}
+                                        {!isSupport && (
+                                            <div
+                                                className="absolute inset-0 rounded-full pointer-events-none transition-opacity duration-300 group-hover:opacity-80"
+                                                style={{
+                                                    padding: '1px',
+                                                    background: 'linear-gradient(to right, #FFFFFF, #A1A1AA)',
+                                                    WebkitMask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
+                                                    WebkitMaskComposite: 'xor',
+                                                    maskComposite: 'exclude',
+                                                    opacity: 0.6,
                                                 }}
+                                            />
+                                        )}
+
+                                        {/* Inner Highlight for Standard Button */}
+                                        {!isSupport && (
+                                            <div
+                                                className="absolute inset-0 rounded-full pointer-events-none"
+                                                style={{
+                                                    boxShadow: 'inset 0 1px 0 0 rgba(255, 255, 255, 0.08)',
+                                                }}
+                                            />
+                                        )}
+
+                                        <AnimatePresence mode="wait" initial={false}>
+                                            <motion.span
+                                                key={isInterested ? 'interested' : 'cta'}
+                                                initial={{ opacity: 0, y: isInterested ? 5 : -5 }}
+                                                animate={{ opacity: 1, y: 0 }}
+                                                exit={{ opacity: 0, y: isInterested ? -5 : 5 }}
+                                                className="flex items-center gap-2.5 relative z-10"
                                             >
-                                                {isSupport ? (
-                                                    <ArrowRight
-                                                        size={14}
-                                                        className="text-[#1C1C1E] transition-colors duration-300"
-                                                        strokeWidth={2}
-                                                    />
-                                                ) : (
-                                                    <Bell
-                                                        size={14}
-                                                        className={`${isInterested ? 'text-blue-400' : 'opacity-80'}`}
-                                                        fill={isInterested ? "currentColor" : "none"}
-                                                    />
-                                                )}
-                                            </motion.div>
-                                        </motion.span>
-                                    </AnimatePresence>
-                                </motion.button>
-                            )}
+                                                <span>
+                                                    {isInterested && !isSupport
+                                                        ? 'Interested'
+                                                        : (isSupport ? (
+                                                            <span className="flex items-center gap-2">
+                                                                <Rocket size={14} className="text-[#1C1C1E]" strokeWidth={2.5} />
+                                                                Fund development
+                                                            </span>
+                                                        ) : (currentFeature.actionLabel || 'Mark interest'))
+                                                    }
+                                                </span>
+
+                                                {/* Icon: ArrowReference for Support, Bell for Features */}
+                                                <motion.div
+                                                    variants={{
+                                                        hover: isInterested ? {
+                                                            rotate: [0, -10, 10, -10, 10, 0],
+                                                            transition: { duration: 0.5, repeat: Infinity, repeatDelay: 2 }
+                                                        } : (isSupport ? {
+                                                            x: [0, 4, 0],
+                                                            transition: { duration: 1.5, repeat: Infinity, ease: "easeInOut" }
+                                                        } : {})
+                                                    }}
+                                                >
+                                                    {isSupport ? (
+                                                        <ArrowRight
+                                                            size={14}
+                                                            className="text-[#1C1C1E] transition-colors duration-300"
+                                                            strokeWidth={2}
+                                                        />
+                                                    ) : (
+                                                        <Bell
+                                                            size={14}
+                                                            className={`${isInterested ? 'text-blue-400' : 'opacity-80'}`}
+                                                            fill={isInterested ? "currentColor" : "none"}
+                                                        />
+                                                    )}
+                                                </motion.div>
+                                            </motion.span>
+                                        </AnimatePresence>
+                                    </motion.button>
+                                )}
+                            </div>
                         </div>
 
 
