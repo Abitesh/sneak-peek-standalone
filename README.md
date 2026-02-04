@@ -103,6 +103,7 @@ The built app will be in the `release` folder.
 **Pros:**
 - Super fast inference
 - Free tier available
+
 **Cons:**
 - No multimodal (vision) responses via Groq directly in this implementation context (usually text-only)
 
