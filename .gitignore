@@ -4,6 +4,7 @@ logs
 release
 /release
 .release
+demo.mp4
 
 
 npm-debug.log*

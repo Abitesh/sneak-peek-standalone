@@ -240,6 +240,7 @@ export function initializeIpcHandlers(appState: AppState): void {
   })
 
   ipcMain.handle("quit-and-install-update", () => {
+    console.log('[IPC] quit-and-install-update handler called')
     appState.quitAndInstallUpdate()
   })
 
@@ -523,6 +524,13 @@ export function initializeIpcHandlers(appState: AppState): void {
 
   ipcMain.handle("seed-demo", async () => {
     DatabaseManager.getInstance().seedDemoMeeting();
+
+    // Trigger RAG processing for the new demo meeting
+    const ragManager = appState.getRAGManager();
+    if (ragManager && ragManager.isReady()) {
+      ragManager.reprocessMeeting('demo-meeting-004').catch(console.error);
+    }
+
     return { success: true };
   });
 

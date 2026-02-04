@@ -44,8 +44,14 @@ const UpdateBanner: React.FC = () => {
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, []);
 
-    const handleRestart = () => {
-        window.electronAPI.restartAndInstall();
+    const handleRestart = async () => {
+        console.log('[UpdateBanner] Restart button clicked - calling restartAndInstall...');
+        try {
+            await window.electronAPI.restartAndInstall();
+            console.log('[UpdateBanner] restartAndInstall call completed');
+        } catch (err) {
+            console.error('[UpdateBanner] restartAndInstall failed:', err);
+        }
     };
 
     const handleDismiss = () => {

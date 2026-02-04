@@ -1,6 +1,6 @@
 {
   "name": "natively",
-  "version": "1.0.2",
+  "version": "1.0.4",
   "main": "./dist-electron/main.js",
   "description": "Natively is a meeting notes app that uses AI to generate notes from your meetings.",
   "scripts": {
@@ -49,6 +49,13 @@
       "target": [
         {
           "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
           "arch": [
             "x64",
             "arm64"
@@ -114,7 +121,6 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "",
   "devDependencies": {
     "@electron/rebuild": "^4.0.3",
     "@napi-rs/cli": "^3.5.1",

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain } from "electron"
+import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, shell } from "electron"
 import path from "path"
 import { autoUpdater } from "electron-updater"
 require('dotenv').config();
@@ -170,7 +170,7 @@ export class AppState {
 
   private setupAutoUpdater(): void {
     autoUpdater.autoDownload = false
-    autoUpdater.autoInstallOnAppQuit = true
+    autoUpdater.autoInstallOnAppQuit = false  // Manual install only via button
 
     autoUpdater.on("checking-for-update", () => {
       console.log("[AutoUpdater] Checking for update...")
@@ -221,8 +221,44 @@ export class AppState {
   }
 
 
-  public quitAndInstallUpdate(): void {
-    autoUpdater.quitAndInstall()
+  public async quitAndInstallUpdate(): Promise<void> {
+    console.log('[AutoUpdater] quitAndInstall called - applying update...')
+
+    // On macOS, unsigned apps can't auto-restart via quitAndInstall
+    // Workaround: open the DMG from GitHub releases for proper installer UI
+    if (process.platform === 'darwin') {
+      try {
+        // Get update info to construct DMG URL
+        const updateInfo = (autoUpdater as any).updateInfoAndProvider?.info
+        console.log('[AutoUpdater] Update info:', updateInfo?.version)
+
+        if (updateInfo?.version) {
+          // Construct DMG URL based on architecture
+          const arch = process.arch === 'arm64' ? '-arm64' : ''
+          const dmgUrl = `https://github.com/evinjohnn/natively-cluely-ai-assistant/releases/download/v${updateInfo.version}/Natively-${updateInfo.version}${arch}.dmg`
+
+          console.log('[AutoUpdater] Opening DMG URL:', dmgUrl)
+          // Open in browser which will download and open the DMG
+          await shell.openExternal(dmgUrl)
+
+          // Quit the app so user can install new version
+          setTimeout(() => app.quit(), 1000)
+          return
+        }
+      } catch (err) {
+        console.error('[AutoUpdater] Failed to open DMG URL:', err)
+      }
+    }
+
+    // Fallback to standard quitAndInstall (works on Windows/Linux or if signed)
+    setImmediate(() => {
+      try {
+        autoUpdater.quitAndInstall(false, true)
+      } catch (err) {
+        console.error('[AutoUpdater] quitAndInstall failed:', err)
+        app.exit(0)
+      }
+    })
   }
 
   public async checkForUpdates(): Promise<void> {
@@ -1080,7 +1116,7 @@ function setMacDockIcon() {
     : path.resolve(__dirname, "../assets/natively.icns");
 
   console.log("[DockIcon] Using:", iconPath);
-  app.dock.setIcon(iconPath);
+  app.dock.setIcon(nativeImage.createFromPath(iconPath));
 }
 
 async function initializeApp() {
@@ -1103,6 +1139,11 @@ async function initializeApp() {
     app.setName("Natively"); // Fix App Name in Menu
 
     CredentialsManager.getInstance().init();
+
+    // Anonymous install ping - one-time, non-blocking
+    // See electron/services/InstallPingManager.ts for privacy details
+    const { sendAnonymousInstallPing } = require('./services/InstallPingManager');
+    sendAnonymousInstallPing();
 
     // Load stored API keys into ProcessingHelper/LLMHelper
     appState.processingHelper.loadStoredCredentials();

@@ -360,7 +360,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
             }),
             window.electronAPI.onUpdateAvailable(() => {
                 setUpdateStatus('available');
-                onClose(); // Close settings to show the banner
+                // Don't close settings - let user see the button change to "Update Available"
             }),
             window.electronAPI.onUpdateNotAvailable(() => {
                 setUpdateStatus('uptodate');
@@ -772,7 +772,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                             </div>
 
                                             {/* Version */}
-                                            <div className="flex items-center justify-between">
+                                            <div className="flex items-center justify-between gap-4">
                                                 <div className="flex items-center gap-4">
                                                     <div className="w-10 h-10 bg-bg-item-surface rounded-lg border border-border-subtle flex items-center justify-center text-text-tertiary">
                                                         <BadgeCheck size={20} />
@@ -805,7 +805,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                                         }
                                                     }}
                                                     disabled={updateStatus === 'checking'}
-                                                    className={`px-5 py-2 rounded-lg text-[13px] font-bold transition-all translate-y-1 flex items-center gap-2 ${updateStatus === 'checking' ? 'bg-bg-input text-text-tertiary cursor-wait' :
+                                                    className={`px-5 py-2 rounded-lg text-[13px] font-bold transition-all translate-y-1 flex items-center gap-2 shrink-0 ${updateStatus === 'checking' ? 'bg-bg-input text-text-tertiary cursor-wait' :
                                                         updateStatus === 'available' ? 'bg-accent-primary text-white hover:bg-accent-secondary shadow-lg shadow-blue-500/20' :
                                                             updateStatus === 'uptodate' ? 'bg-green-500/10 text-green-400 border border-green-500/20' :
                                                                 updateStatus === 'error' ? 'bg-red-500/10 text-red-400 border border-red-500/20' :
@@ -833,7 +833,10 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                                             Error
                                                         </>
                                                     ) : (
-                                                        'Check for updates'
+                                                        <>
+                                                            <RefreshCw size={14} />
+                                                            Check for updates
+                                                        </>
                                                     )}
                                                 </button>
                                             </div>

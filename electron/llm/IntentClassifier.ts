@@ -9,6 +9,7 @@ export type ConversationIntent =
     | 'behavioral'         // "Give me an example of..."
     | 'example_request'    // "Can you give a concrete example?"
     | 'summary_probe'      // "So to summarize..."
+    | 'coding'             // "Write code for X" or implementation questions
     | 'general';           // Default fallback
 
 export interface IntentResult {
@@ -28,6 +29,7 @@ const INTENT_ANSWER_SHAPES: Record<ConversationIntent, string> = {
     behavioral: 'Lead with a specific example or story. Use the STAR pattern implicitly. Focus on actions and outcomes.',
     example_request: 'Provide ONE concrete, detailed example. Make it realistic and specific.',
     summary_probe: 'Confirm the summary briefly and add one clarifying point if needed.',
+    coding: 'Provide a smart, production-ready code implementation. Start with a brief approach description, then the code block, then a concise explanation of why this approach works.',
     general: 'Respond naturally based on context. Keep it conversational and direct.'
 };
 
@@ -66,6 +68,11 @@ function detectIntentByPattern(lastInterviewerTurn: string): IntentResult | null
     // Summary probe patterns
     if (/(so to summarize|in summary|so basically|so you.re saying|let me make sure)/i.test(text)) {
         return { intent: 'summary_probe', confidence: 0.85, answerShape: INTENT_ANSWER_SHAPES.summary_probe };
+    }
+
+    // Coding patterns (Broad detection for programming/implementation)
+    if (/(write code|program|implement|function for|algorithm|how to code|setup a .* project|using .* library|debug this|snippet|boilerplate|example of .* in .*|optimize|refactor|best practice for .* code|utility method|component for|logic for)/i.test(text)) {
+        return { intent: 'coding', confidence: 0.9, answerShape: INTENT_ANSWER_SHAPES.coding };
     }
 
     return null; // No clear pattern detected

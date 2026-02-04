@@ -2,6 +2,10 @@
 
 [Natively] - The invisible desktop assistant that provides real-time insights, answers, and support during meetings, interviews, presentations, and professional conversations.
 
+## 🎬 Demo
+
+![Natively Demo](demo.gif)
+
 ## 🚀 Quick Start Guide
 **For Personal Use:**
 Download the latest version from [Releases](https://github.com/evinjohnn/natively-cluely-ai-assistant/releases)
@@ -10,17 +14,65 @@ Download the latest version from [Releases](https://github.com/evinjohnn/nativel
 - **Node.js**: Installed on your computer (v20+ recommended)
 - **Git**: Installed on your computer
 - **Rust**: Required for building the native audio capture module
+
 - **AI Credentials**:
   - **Gemini API Key**: Get it from [Google AI Studio](https://makersuite.google.com/app/apikey)
   - **Google Service Account**: Required for real-time speech-to-text accuracy.
-    1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-    2. Create a project and enable "Cloud Speech-to-Text API"
-    3. Go to **IAM & Admin > Service Accounts**
-    4. Create a Service Account -> Keys -> Add Key -> JSON
-    5. Save the JSON file path for `.env`
+### Bring Your Own Google Speech-to-Text (BYOK)
 
-    > **💡 Pro Tip:** You can get **$300 in free Google Cloud credits** by signing up for the [Google Cloud Free Trial](https://cloud.google.com/free). This is more than enough to run the Speech-to-Text API for months without cost.
-- **Optional**: [Ollama](https://ollama.ai) installed locally for private LLM usage (Recommended for privacy)
+**CRITICAL: Google Service Account is REQUIRED for transcription.**
+Natively relies on Google Speech-to-Text for real-time transcription. Without a valid Google Service Account, the application's core transcription features will NOT function.
+
+You must provide your own Google Cloud Service Account JSON key.
+**Your credentials never leave your machine and are used only locally.** We do not proxy, log, upload, or store your keys — ever.
+
+#### Why BYOK?
+- You control billing & quotas
+- No shared keys, no rate limits
+- No hidden usage or tracking
+- Works offline (except for Google STT calls)
+
+#### What You Need
+- A Google Cloud account
+- Billing enabled
+- A Service Account with Speech-to-Text access
+- A JSON key file
+
+#### Create a Google STT Service Account
+
+**1. Create / Select a Google Cloud Project**
+- Go to [Google Cloud Console](https://console.cloud.google.com/)
+- Create a new project or select an existing one
+- Enable billing
+
+**2. Enable Speech-to-Text API**
+- Go to **APIs & Services** -> **Library**
+- Search for and enable **Cloud Speech-to-Text API**
+
+**3. Create a Service Account**
+- Go to **IAM & Admin** -> **Service Accounts** -> **Create Service Account**
+- Name: `natively-stt` (or similar)
+- Description: Optional
+
+**4. Assign Permission**
+- Add this specific role: **Speech-to-Text User** (`roles/speech.client`)
+- *Do NOT use Owner or Editor roles unless testing*
+
+**5. Create a JSON Key**
+- Open the newly created service account
+- Go to **Keys** -> **Add Key** -> **Create new key**
+- Choose **JSON**
+- Download the file and save it safely.
+- **Action**: Set the Service Account location in the Natively settings to this file.
+
+#### How to Claim the $300 Credit
+
+1. Go to [cloud.google.com](https://cloud.google.com)
+2. Click "Get started for free"
+3. Sign in with a Google account
+4. Enter billing details (card required for verification)
+5. Accept the free trial
+6. You will instantly receive $300 credit valid for 90 days
 
 ### Installation Steps
 

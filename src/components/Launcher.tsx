@@ -69,7 +69,7 @@ const formatTime = (dateStr: string) => {
 
 const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) => {
     const [meetings, setMeetings] = useState<Meeting[]>([]);
-    const [isDetectable, setIsDetectable] = useState(true);
+    const [isDetectable, setIsDetectable] = useState(false);
     const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
     const [upcomingEvents, setUpcomingEvents] = useState<any[]>([]);
     const [isPrepared, setIsPrepared] = useState(false);
@@ -174,16 +174,6 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
         return <div className="text-white p-10">Error: Electron API not initialized. Check preload script.</div>;
     }
 
-    // Sync with global state
-    useEffect(() => {
-        if (window.electronAPI?.onUndetectableChanged) {
-            const unsubscribe = window.electronAPI.onUndetectableChanged((isUndetectable: boolean) => {
-                setIsDetectable(!isUndetectable);
-            });
-            return () => unsubscribe();
-        }
-    }, []);
-
     const toggleDetectable = () => {
         const newState = !isDetectable;
         setIsDetectable(newState);
@@ -265,19 +255,7 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
 
     // Helper to format duration to mm:ss or mmm:ss
     const formatDurationPill = (durationStr: string) => {
-        // If it already contains a colon, assume it's formatted roughly (e.g. "4:48")
-        // and just ensure 2-digit padding for minutes if desired, or keep as is.
-        if (durationStr.includes(':')) {
-            const parts = durationStr.split(':');
-            if (parts.length === 2) {
-                const mm = parts[0].trim().padStart(2, '0');
-                const ss = parts[1].trim().padStart(2, '0');
-                return `${mm}:${ss}`;
-            }
-            return durationStr;
-        }
-
-        // Backward compatibility: Assume format "X min"
+        // Assume format "X min"
         const minutes = parseInt(durationStr.replace('min', '').trim()) || 0;
         const mm = minutes.toString().padStart(2, '0');
         return `${mm}:00`;
@@ -373,7 +351,7 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
                 ) : (
                     <motion.div
                         key="launcher"
-                        className="flex-1 flex flex-col overflow-hidden relative"
+                        className="flex-1 flex flex-col overflow-hidden"
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
@@ -402,12 +380,12 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
                                         </button>
 
                                         {/* Detectable Toggle Pill */}
-                                        <div className="flex items-center gap-3 bg-bg-input border border-border-muted rounded-full px-3 py-1.5 min-w-[140px]">
+                                        <div className="flex items-center gap-3 bg-[#101011] border border-border-muted rounded-full px-3 py-1.5 min-w-[140px]">
                                             {isDetectable ? (
                                                 <Ghost
                                                     size={14}
                                                     strokeWidth={2} // Using 2 for clearer visibility
-                                                    className="text-text-primary transition-colors"
+                                                    className="text-white transition-colors"
                                                 />
                                             ) : (
                                                 <svg
@@ -416,24 +394,24 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
                                                     viewBox="0 0 24 24"
                                                     fill="none"
                                                     xmlns="http://www.w3.org/2000/svg"
-                                                    className="transition-colors text-text-primary"
+                                                    className="transition-colors"
                                                 >
                                                     <path
                                                         d="M12 2C7.58172 2 4 5.58172 4 10V22L7 19L9.5 21.5L12 19L14.5 21.5L17 19L20 22V10C20 5.58172 16.4183 2 12 2Z"
-                                                        fill="currentColor"
+                                                        fill="white"
                                                     />
-                                                    <circle cx="9" cy="10" r="1.5" fill="currentColor" className="text-bg-primary" />
-                                                    <circle cx="15" cy="10" r="1.5" fill="currentColor" className="text-bg-primary" />
+                                                    <circle cx="9" cy="10" r="1.5" fill="black" />
+                                                    <circle cx="15" cy="10" r="1.5" fill="black" />
                                                 </svg>
                                             )}
-                                            <span className={`text-xs font-medium flex-1 transition-colors text-text-secondary`}>
+                                            <span className={`text-xs font-medium flex-1 transition-colors text-[#B7B7B8]`}>
                                                 {isDetectable ? "Detectable" : "Undetectable"}
                                             </span>
                                             <div
-                                                className={`w-8 h-4 rounded-full relative cursor-pointer transition-colors ${!isDetectable ? 'bg-blue-500' : 'bg-text-tertiary'}`}
+                                                className={`w-8 h-4 rounded-full relative cursor-pointer transition-colors ${!isDetectable ? 'bg-blue-500' : 'bg-zinc-700'}`}
                                                 onClick={toggleDetectable}
                                             >
-                                                <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-bg-primary transition-all ${!isDetectable ? 'left-[18px]' : 'left-0.5'}`} />
+                                                <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${!isDetectable ? 'left-[18px]' : 'left-0.5'}`} />
                                             </div>
                                         </div>
                                     </div>
@@ -522,7 +500,7 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
                                                         <span className="text-[11px] text-text-tertiary">• Starts in {Math.max(0, Math.ceil((new Date(nextMeeting.startTime).getTime() - Date.now()) / 60000))} min</span>
                                                     </div>
 
-                                                    <h2 className="text-xl font-bold text-text-primary leading-tight mb-1 line-clamp-2">
+                                                    <h2 className="text-xl font-bold text-white leading-tight mb-1 line-clamp-2">
                                                         {nextMeeting.title}
                                                     </h2>
 
@@ -543,14 +521,14 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
                                                 <div className="p-4 bg-bg-elevated/50 border-t border-border-subtle flex items-center gap-3">
                                                     <button
                                                         onClick={() => handlePrepare(nextMeeting)}
-                                                        className="flex-1 bg-white/10 hover:bg-white/20 border border-white/10 text-white dark:text-white text-text-primary dark:bg-white/10 bg-black/5 hover:bg-black/10 dark:hover:bg-white/20 border-black/5 dark:border-white/10 px-4 py-2 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-2"
+                                                        className="flex-1 bg-white/10 hover:bg-white/20 border border-white/10 text-white px-4 py-2 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-2"
                                                     >
                                                         <Zap size={13} className="text-yellow-400" />
                                                         Prepare
                                                     </button>
                                                     <button
                                                         onClick={onStartMeeting} // For now just start, later could link
-                                                        className="px-4 py-2 rounded-lg text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-black/5 dark:hover:bg-white/5 transition-all"
+                                                        className="px-4 py-2 rounded-lg text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-white/5 transition-all"
                                                     >
                                                         Start now
                                                     </button>
@@ -602,7 +580,7 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
                         </section>
 
                         {/* BOTTOM SECTION: Black Background (Scrollable content) */}
-                        <main className="flex-1 overflow-y-auto custom-scrollbar bg-bg-secondary">
+                        <main className="flex-1 overflow-y-auto custom-scrollbar bg-bg-primary">
                             <section className="px-8 py-8 min-h-full">
                                 <div className="max-w-4xl mx-auto space-y-8">
 
@@ -615,10 +593,10 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
                                                     <motion.div
                                                         key={m.id}
                                                         layoutId={`meeting-${m.id}`}
-                                                        className="group relative flex items-center justify-between px-3 py-2 rounded-lg bg-transparent hover:bg-bg-item-active transition-colors cursor-pointer"
+                                                        className="group relative flex items-center justify-between px-3 py-2 rounded-lg bg-transparent hover:bg-[#18181B] transition-colors cursor-pointer"
                                                         onClick={() => handleOpenMeeting(m)}
                                                     >
-                                                        <div className={`font-medium text-[14px] max-w-[60%] truncate ${m.title === 'Processing...' ? 'text-blue-400 italic animate-pulse' : 'text-text-primary'}`}>
+                                                        <div className={`font-medium text-[14px] max-w-[60%] truncate ${m.title === 'Processing...' ? 'text-blue-400 italic animate-pulse' : 'text-[#F4F4F5]'}`}>
                                                             {m.title}
                                                         </div>
 
@@ -631,12 +609,12 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
                                                                 </div>
                                                             ) : (
                                                                 <>
-                                                                    <span className="relative z-10 bg-bg-item-surface text-text-secondary text-[9px] px-1.5 py-0.5 rounded-full font-medium min-w-[35px] text-center tracking-wide">
+                                                                    <span className="relative z-10 bg-[#242426] text-[#9F9FAA] text-[9px] px-1.5 py-0.5 rounded-full font-medium min-w-[35px] text-center tracking-wide">
                                                                         {formatDurationPill(m.duration)}
                                                                     </span>
 
                                                                     {/* Time Text (Should fade out on hover) */}
-                                                                    <span className="text-[13px] text-text-tertiary font-medium min-w-[60px] text-right transition-all duration-200 ease-out group-hover:opacity-0 group-hover:translate-x-2 delayed-hover-exit">
+                                                                    <span className="text-[13px] text-[#D4D4D8] font-medium min-w-[60px] text-right transition-all duration-200 ease-out group-hover:opacity-0 group-hover:translate-x-2 delayed-hover-exit">
                                                                         {formatTime(m.date)}
                                                                     </span>
                                                                 </>
@@ -646,7 +624,7 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
                                                         {/* Context Menu Trigger (Slides in on hover) */}
                                                         <div className="absolute right-3 top-1/2 -translate-y-1/2 opacity-0 translate-x-4 transition-all duration-300 ease-out group-hover:opacity-100 group-hover:translate-x-0">
                                                             <button
-                                                                className="p-1.5 text-text-secondary hover:text-text-primary transition-colors"
+                                                                className="p-1.5 text-text-secondary hover:text-white transition-colors"
                                                                 onClick={(e) => {
                                                                     e.stopPropagation();
                                                                     setActiveMenuId(activeMenuId === m.id ? null : m.id);
@@ -664,7 +642,7 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
                                                                     animate={{ opacity: 1, scale: 1, y: 0 }}
                                                                     exit={{ opacity: 0, scale: 0.95, y: 5 }}
                                                                     transition={{ duration: 0.1 }}
-                                                                    className="absolute right-0 top-full mt-1 w-[90px] bg-[#1E1E1E]/80 backdrop-blur-xl border border-border-subtle rounded-lg shadow-2xl z-50 overflow-hidden"
+                                                                    className="absolute right-0 top-full mt-1 w-[90px] bg-[#1E1E1E]/80 backdrop-blur-xl border border-white/10 rounded-lg shadow-2xl z-50 overflow-hidden"
                                                                     onClick={(e) => e.stopPropagation()}
                                                                     onMouseEnter={() => setMenuEntered(true)}
                                                                     onMouseLeave={() => {
@@ -673,7 +651,7 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
                                                                 >
                                                                     <div className="p-1 flex flex-col gap-0.5">
                                                                         <button
-                                                                            className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-text-primary hover:bg-bg-item-active rounded-lg transition-colors text-left"
+                                                                            className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-text-primary hover:bg-white/10 rounded-lg transition-colors text-left"
                                                                             onClick={async () => {
                                                                                 setActiveMenuId(null);
                                                                                 // Fetch full details if needed
@@ -744,7 +722,7 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
                         animate={{ x: 0, opacity: 1, scale: 1 }}
                         exit={{ x: 300, opacity: 0, scale: 0.95 }}
                         transition={{ type: "spring", stiffness: 350, damping: 30, mass: 1 }}
-                        className="fixed bottom-10 right-10 z-[2000] flex items-center gap-4 pl-4 pr-6 py-3.5 rounded-[18px] bg-bg-elevated/40 backdrop-blur-xl saturate-[180%] border border-border-subtle shadow-[0_40px_80px_-20px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.3),inset_0_-1px_0_rgba(255,255,255,0.05)] ring-1 ring-black/10"
+                        className="fixed bottom-10 right-10 z-[2000] flex items-center gap-4 pl-4 pr-6 py-3.5 rounded-[18px] bg-[#2A2A2E]/40 backdrop-blur-xl saturate-[180%] border border-white/10 shadow-[0_40px_80px_-20px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.3),inset_0_-1px_0_rgba(255,255,255,0.05)] ring-1 ring-black/10"
                     >
                         {/* Liquid Icon Orb */}
                         <div className="relative flex items-center justify-center w-9 h-9 rounded-full bg-gradient-to-b from-blue-400/20 to-blue-600/20 shadow-[inset_0_1px_0_rgba(255,255,255,0.2)] border border-white/5">
@@ -754,7 +732,7 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
 
                         {/* Text Content */}
                         <div className="flex flex-col gap-0.5">
-                            <span className="text-[14px] font-semibold text-text-primary leading-none tracking-tight drop-shadow-md">Refreshed</span>
+                            <span className="text-[14px] font-semibold text-white/95 leading-none tracking-tight drop-shadow-md">Refreshed</span>
                             <span className="text-[11px] text-blue-200/60 font-medium leading-none tracking-wide">Synced with calendar</span>
                         </div>
 
@@ -763,11 +741,6 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
                     </motion.div>
                 )}
             </AnimatePresence>
-
-            {/* Undetectable Mode Overlay - Persistent across views, below header */}
-            {!isDetectable && (
-                <div className="absolute top-[40px] left-1 right-1 bottom-1 border border-dashed border-white/30 rounded-xl pointer-events-none z-30" />
-            )}
 
             {/* Global Chat Overlay */}
             <GlobalChatOverlay

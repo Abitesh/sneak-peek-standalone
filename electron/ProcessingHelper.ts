@@ -72,6 +72,14 @@ export class ProcessingHelper {
     if (ragManager && geminiKey) {
       console.log("[ProcessingHelper] Initializing RAGManager embeddings with loaded key");
       ragManager.initializeEmbeddings(geminiKey);
+
+      // CRITICAL: Retry pending embeddings now that we have a key
+      // This ensures any meetings that failed or were queued during startup get processed
+      console.log("[ProcessingHelper] Retrying pending embeddings...");
+      ragManager.retryPendingEmbeddings().catch(console.error);
+
+      // CRITICAL: Ensure demo meeting has chunks
+      ragManager.ensureDemoMeetingProcessed().catch(console.error);
     }
   }
 

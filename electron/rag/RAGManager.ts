@@ -221,4 +221,73 @@ export class RAGManager {
     deleteMeetingData(meetingId: string): void {
         this.vectorStore.deleteChunksForMeeting(meetingId);
     }
+
+    /**
+     * Manually trigger processing for a meeting
+     * Useful for demo meetings or reprocessing failed ones
+     */
+    async reprocessMeeting(meetingId: string): Promise<void> {
+        console.log(`[RAGManager] Reprocessing meeting ${meetingId}`);
+
+        // delete existing RAG data first to avoid duplicates
+        this.deleteMeetingData(meetingId);
+
+        // Fetch meeting details from DB
+        const { DatabaseManager } = require('../db/DatabaseManager');
+        const meeting = DatabaseManager.getInstance().getMeetingDetails(meetingId);
+
+        if (!meeting) {
+            console.error(`[RAGManager] Meeting ${meetingId} not found for reprocessing`);
+            return;
+        }
+
+        if (!meeting.transcript || meeting.transcript.length === 0) {
+            console.log(`[RAGManager] Meeting ${meetingId} has no transcript, skipping`);
+            return;
+        }
+
+        // Convert to RawSegment format
+        const segments = meeting.transcript.map((t: any) => ({
+            speaker: t.speaker,
+            text: t.text,
+            timestamp: t.timestamp
+        }));
+
+        // Get summary if available
+        let summary: string | undefined;
+        if (meeting.detailedSummary) {
+            summary = [
+                ...(meeting.detailedSummary.overview ? [meeting.detailedSummary.overview] : []),
+                ...(meeting.detailedSummary.keyPoints || []),
+                ...(meeting.detailedSummary.actionItems || []).map((a: any) => `Action: ${a}`)
+            ].join('. ');
+        } else if (meeting.summary) {
+            summary = meeting.summary;
+        }
+
+        await this.processMeeting(meetingId, segments, summary);
+    }
+
+    /**
+     * Ensure demo meeting is processed
+     * Checks if demo meeting exists but has no chunks, then processes it
+     */
+    async ensureDemoMeetingProcessed(): Promise<void> {
+        const demoId = 'demo-meeting-004';
+
+        // Check if demo meeting exists in DB
+        const { DatabaseManager } = require('../db/DatabaseManager');
+        const meeting = DatabaseManager.getInstance().getMeetingDetails(demoId);
+
+        if (!meeting) return; // No demo meeting, nothing to do
+
+        // Check if already processed
+        if (this.isMeetingProcessed(demoId)) {
+            // console.log('[RAGManager] Demo meeting already processed');
+            return;
+        }
+
+        console.log('[RAGManager] Demo meeting found but not processed. Processing now...');
+        await this.reprocessMeeting(demoId);
+    }
 }
