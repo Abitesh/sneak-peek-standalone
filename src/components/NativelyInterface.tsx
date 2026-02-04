@@ -100,6 +100,11 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) =
 
     // Global State Sync
     useEffect(() => {
+        // Fetch initial state
+        if (window.electronAPI?.getUndetectable) {
+            window.electronAPI.getUndetectable().then(setIsUndetectable);
+        }
+
         if (window.electronAPI?.onUndetectableChanged) {
             const unsubscribe = window.electronAPI.onUndetectableChanged((state) => {
                 setIsUndetectable(state);

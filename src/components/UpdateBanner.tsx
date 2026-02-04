@@ -101,8 +101,8 @@ const UpdateBanner: React.FC = () => {
                                     </div>
                                 ) : (
                                     <p className="text-[13px] text-[#ffffff8a] leading-relaxed mb-6 font-medium">
-                                        A new version of Natively is ready to install.<br />
-                                        Restart now to finish updating.
+                                        A new version of Natively is ready.<br />
+                                        Install now to update.
                                     </p>
                                 )}
 
@@ -120,7 +120,7 @@ const UpdateBanner: React.FC = () => {
                                             onClick={handleRestart}
                                             className="flex-1 py-[6px] bg-[#0091FF]/70 hover:bg-[#0091FF] active:scale-[0.98] text-[13px] font-medium text-white rounded-[8px] transition-all duration-200 shadow-[0_1px_2px_rgba(0,0,0,0.2)]"
                                         >
-                                            Restart
+                                            Install
                                         </button>
                                     </div>
                                 )}

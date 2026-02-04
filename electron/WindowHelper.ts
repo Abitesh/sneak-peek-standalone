@@ -10,7 +10,7 @@ const inAppBundle = process.execPath.includes('.app/') || process.execPath.inclu
 console.log(`[WindowHelper] isEnvDev: ${isEnvDev}, isPackaged: ${isPackaged}, inAppBundle: ${inAppBundle}`);
 
 // Force production mode if running as packaged app or inside app bundle
-const isDev = isEnvDev && !isPackaged && !inAppBundle;
+const isDev = isEnvDev && !isPackaged;
 
 const startUrl = isDev
   ? "http://localhost:5180"
@@ -314,10 +314,8 @@ export class WindowHelper {
   public switchToOverlay(): void {
     console.log('[WindowHelper] Switching to OVERLAY');
     this.currentWindowMode = 'overlay';
-    if (this.launcherWindow && !this.launcherWindow.isDestroyed()) {
-      this.launcherWindow.hide();
-    }
 
+    // Show Overlay FIRST
     if (this.overlayWindow && !this.overlayWindow.isDestroyed()) {
       // Reset overlay position to center or last known? 
       // For now, center it nicely
@@ -334,15 +332,18 @@ export class WindowHelper {
       this.overlayWindow.setAlwaysOnTop(true, "floating");
       this.isWindowVisible = true;
     }
+
+    // Hide Launcher SECOND
+    if (this.launcherWindow && !this.launcherWindow.isDestroyed()) {
+      this.launcherWindow.hide();
+    }
   }
 
   public switchToLauncher(): void {
     console.log('[WindowHelper] Switching to LAUNCHER');
     this.currentWindowMode = 'launcher';
-    if (this.overlayWindow && !this.overlayWindow.isDestroyed()) {
-      this.overlayWindow.hide();
-    }
 
+    // Show Launcher FIRST
     if (this.launcherWindow && !this.launcherWindow.isDestroyed()) {
       this.launcherWindow.show();
       this.launcherWindow.focus();
@@ -353,6 +354,11 @@ export class WindowHelper {
           app.dock.show();
         }
       }
+    }
+
+    // Hide Overlay SECOND
+    if (this.overlayWindow && !this.overlayWindow.isDestroyed()) {
+      this.overlayWindow.hide();
     }
   }
 

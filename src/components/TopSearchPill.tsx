@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { Search, Sparkles, FileText } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -28,6 +29,7 @@ interface TopSearchPillProps {
     onAIQuery: (query: string) => void;
     onLiteralSearch: (query: string) => void;
     onOpenMeeting: (meetingId: string) => void;
+    onExpansionChange?: (isExpanded: boolean) => void;
 }
 
 // ============================================
@@ -88,7 +90,8 @@ const TopSearchPill: React.FC<TopSearchPillProps> = ({
     meetings,
     onAIQuery,
     onLiteralSearch,
-    onOpenMeeting
+    onOpenMeeting,
+    onExpansionChange
 }) => {
     const [state, setState] = useState<PillState>('idle');
     const [query, setQuery] = useState('');
@@ -96,6 +99,11 @@ const TopSearchPill: React.FC<TopSearchPillProps> = ({
 
     const inputRef = useRef<HTMLInputElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
+
+    // Notify parent of expansion changes
+    useEffect(() => {
+        onExpansionChange?.(state !== 'idle');
+    }, [state, onExpansionChange]);
 
     // Compute results
     const sessionResults = useMemo(() => {
@@ -223,18 +231,21 @@ const TopSearchPill: React.FC<TopSearchPillProps> = ({
     return (
         <>
             {/* Backdrop blur overlay */}
-            <AnimatePresence>
-                {isExpanded && (
-                    <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        transition={{ duration: 0.15 }}
-                        className="fixed inset-0 bg-black/30 backdrop-blur-[8px] z-30"
-                        onClick={close}
-                    />
-                )}
-            </AnimatePresence>
+            {createPortal(
+                <AnimatePresence>
+                    {isExpanded && (
+                        <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            transition={{ duration: 0.15 }}
+                            className="fixed inset-0 bg-black/30 backdrop-blur-[8px] z-[90]"
+                            onClick={close}
+                        />
+                    )}
+                </AnimatePresence>,
+                document.body
+            )}
 
             {/* Search Pill Container */}
             <div

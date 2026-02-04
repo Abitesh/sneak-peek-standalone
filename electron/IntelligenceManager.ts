@@ -221,6 +221,10 @@ export class IntelligenceManager extends EventEmitter {
 
             // Add to session transcript
             this.fullTranscript.push(segment);
+            // Cap transcript at 2000 segments to prevent memory leaks
+            if (this.fullTranscript.length > 2000) {
+                this.fullTranscript = this.fullTranscript.slice(-2000);
+            }
         }
 
         // Check for follow-up intent if user is speaking
@@ -266,6 +270,11 @@ export class IntelligenceManager extends EventEmitter {
             final: true,
             confidence: 1.0
         });
+
+        // Cap transcript
+        if (this.fullTranscript.length > 2000) {
+            this.fullTranscript = this.fullTranscript.slice(-2000);
+        }
 
         this.lastAssistantMessage = cleanText;
 
@@ -528,6 +537,10 @@ export class IntelligenceManager extends EventEmitter {
                 question: question || 'What to Answer',
                 answer: fullAnswer
             });
+            // Cap usage history
+            if (this.fullUsage.length > 500) {
+                this.fullUsage = this.fullUsage.slice(-500);
+            }
 
             // Emit completion event (legacy consumers + done signal)
             this.emit('suggested_answer', fullAnswer, question || 'What to Answer', confidence);
@@ -604,6 +617,10 @@ export class IntelligenceManager extends EventEmitter {
                     question: displayQuestion,
                     answer: fullRefined
                 });
+                // Cap usage history
+                if (this.fullUsage.length > 500) {
+                    this.fullUsage = this.fullUsage.slice(-500);
+                }
             }
 
             this.setMode('idle');
@@ -656,6 +673,10 @@ export class IntelligenceManager extends EventEmitter {
                     question: 'Recap Meeting',
                     answer: fullSummary
                 });
+                // Cap usage history
+                if (this.fullUsage.length > 500) {
+                    this.fullUsage = this.fullUsage.slice(-500);
+                }
             }
             this.setMode('idle');
             return fullSummary;
@@ -705,6 +726,10 @@ export class IntelligenceManager extends EventEmitter {
                     question: 'Generate Follow-up Questions',
                     answer: fullQuestions
                 });
+                // Cap usage history
+                if (this.fullUsage.length > 500) {
+                    this.fullUsage = this.fullUsage.slice(-500);
+                }
             }
             this.setMode('idle');
             return fullQuestions;
@@ -745,6 +770,10 @@ export class IntelligenceManager extends EventEmitter {
                     question: question, // Already passed correctly from user input
                     answer: answer
                 });
+                // Cap usage history
+                if (this.fullUsage.length > 500) {
+                    this.fullUsage = this.fullUsage.slice(-500);
+                }
             }
 
             this.setMode('idle');

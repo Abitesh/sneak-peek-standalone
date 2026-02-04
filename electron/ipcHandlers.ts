@@ -540,7 +540,16 @@ export function initializeIpcHandlers(appState: AppState): void {
   });
 
   ipcMain.handle("open-external", async (event, url: string) => {
-    await shell.openExternal(url);
+    try {
+      const parsed = new URL(url);
+      if (['http:', 'https:', 'mailto:'].includes(parsed.protocol)) {
+        await shell.openExternal(url);
+      } else {
+        console.warn(`[IPC] Blocked potentially unsafe open-external: ${url}`);
+      }
+    } catch {
+      console.warn(`[IPC] Invalid URL in open-external: ${url}`);
+    }
   });
 
   // ==========================================

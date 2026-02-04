@@ -225,28 +225,25 @@ export class AppState {
     console.log('[AutoUpdater] quitAndInstall called - applying update...')
 
     // On macOS, unsigned apps can't auto-restart via quitAndInstall
-    // Workaround: open the DMG from GitHub releases for proper installer UI
+    // Workaround: Open the folder containing the downloaded update so user can install manually
     if (process.platform === 'darwin') {
       try {
-        // Get update info to construct DMG URL
-        const updateInfo = (autoUpdater as any).updateInfoAndProvider?.info
-        console.log('[AutoUpdater] Update info:', updateInfo?.version)
+        // Get the downloaded update file path (e.g., .../Natively-1.0.9-mac.zip)
+        const updateFile = (autoUpdater as any).downloadedUpdateHelper?.file
+        console.log('[AutoUpdater] Downloaded update file:', updateFile)
 
-        if (updateInfo?.version) {
-          // Construct DMG URL based on architecture
-          const arch = process.arch === 'arm64' ? '-arm64' : ''
-          const dmgUrl = `https://github.com/evinjohnn/natively-cluely-ai-assistant/releases/download/v${updateInfo.version}/Natively-${updateInfo.version}${arch}.dmg`
-
-          console.log('[AutoUpdater] Opening DMG URL:', dmgUrl)
-          // Open in browser which will download and open the DMG
-          await shell.openExternal(dmgUrl)
+        if (updateFile) {
+          const updateDir = path.dirname(updateFile)
+          // Open the directory containing the update in Finder
+          await shell.openPath(updateDir)
+          console.log('[AutoUpdater] Opened update directory:', updateDir)
 
           // Quit the app so user can install new version
           setTimeout(() => app.quit(), 1000)
           return
         }
       } catch (err) {
-        console.error('[AutoUpdater] Failed to open DMG URL:', err)
+        console.error('[AutoUpdater] Failed to open update directory:', err)
       }
     }
 

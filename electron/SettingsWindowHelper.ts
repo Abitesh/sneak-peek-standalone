@@ -169,7 +169,7 @@ export class SettingsWindowHelper {
             show: false,
             skipTaskbar: true,
             webPreferences: {
-                nodeIntegration: true,
+                nodeIntegration: false,
                 contextIsolation: true,
                 preload: path.join(__dirname, "preload.js"),
                 backgroundThrottling: false // Keep window ready even when hidden
@@ -242,7 +242,7 @@ export class SettingsWindowHelper {
             skipTaskbar: true,
             parent: this.settingsWindow, // Make it a child of settings? Or independent? Independent is safer for now.
             webPreferences: {
-                nodeIntegration: true,
+                nodeIntegration: false,
                 contextIsolation: true,
                 preload: path.join(__dirname, "preload.js")
             }
