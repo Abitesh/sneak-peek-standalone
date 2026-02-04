@@ -5,16 +5,29 @@ import { RefreshCw } from 'lucide-react';
 const UpdateBanner: React.FC = () => {
     const [updateInfo, setUpdateInfo] = useState<any>(null);
     const [isVisible, setIsVisible] = useState(false);
+    const [downloadProgress, setDownloadProgress] = useState(0);
+    const [status, setStatus] = useState<'idle' | 'downloading' | 'ready'>('idle');
 
     useEffect(() => {
+        // Listen for download progress
+        const unsubProgress = window.electronAPI.onDownloadProgress((progressObj) => {
+            setIsVisible(true);
+            setStatus('downloading');
+            setDownloadProgress(progressObj.percent);
+        });
+
         // Listen for update-downloaded event
-        const unsubscribe = window.electronAPI.onUpdateDownloaded((info) => {
+        const unsubDownloaded = window.electronAPI.onUpdateDownloaded((info) => {
             console.log('[UpdateBanner] Update ready:', info);
             setUpdateInfo(info);
+            setStatus('ready');
             setIsVisible(true);
         });
 
-        return () => unsubscribe();
+        return () => {
+            unsubProgress();
+            unsubDownloaded();
+        };
     }, []);
 
     // Demo mode: Press Cmd+Shift+U to show the banner
@@ -23,6 +36,7 @@ const UpdateBanner: React.FC = () => {
             if (e.metaKey && e.shiftKey && e.key.toLowerCase() === 'u') {
                 e.preventDefault();
                 setUpdateInfo({ version: '1.0.2' });
+                setStatus('ready');
                 setIsVisible(true);
             }
         };
@@ -59,34 +73,51 @@ const UpdateBanner: React.FC = () => {
                             <div className="p-6 flex flex-col items-center text-center">
                                 {/* Subtle Icon */}
                                 <div className="mb-4 text-[#ffffffcc] opacity-90">
-                                    <RefreshCw size={26} strokeWidth={2} />
+                                    <RefreshCw size={26} strokeWidth={2} className={status === 'downloading' ? 'animate-spin' : ''} />
                                 </div>
 
                                 {/* Typography: Calm, sentence-case, confident */}
                                 <h3 className="text-[17px] font-semibold text-[#ffffffe6] mb-1 tracking-tight">
-                                    Update ready
+                                    {status === 'downloading' ? 'Downloading Update...' : 'Update Ready'}
                                 </h3>
-                                <p className="text-[13px] text-[#ffffff8a] leading-relaxed mb-6 font-medium">
-                                    A new version of Natively is ready to install.<br />
-                                    Restart now to finish updating.
-                                </p>
+
+                                {status === 'downloading' ? (
+                                    <div className="w-full mt-2 mb-4">
+                                        <div className="w-full bg-white/10 h-1.5 rounded-full overflow-hidden">
+                                            <motion.div
+                                                className="bg-accent-primary h-full rounded-full"
+                                                initial={{ width: 0 }}
+                                                animate={{ width: downloadProgress + '%' }}
+                                                transition={{ ease: "linear" }}
+                                            />
+                                        </div>
+                                        <p className="text-[11px] text-[#ffffff8a] mt-2 font-medium tabular-nums">{Math.round(downloadProgress)}%</p>
+                                    </div>
+                                ) : (
+                                    <p className="text-[13px] text-[#ffffff8a] leading-relaxed mb-6 font-medium">
+                                        A new version of Natively is ready to install.<br />
+                                        Restart now to finish updating.
+                                    </p>
+                                )}
 
                                 {/* Buttons: Horizontal, balanced, native feel */}
-                                <div className="flex w-full gap-3">
-                                    <button
-                                        onClick={handleDismiss}
-                                        className="flex-1 py-[6px] text-[13px] font-medium text-[#ffffff99] hover:text-white hover:bg-[#ffffff10] rounded-[8px] transition-all duration-200"
-                                    >
-                                        Not now
-                                    </button>
+                                {status === 'ready' && (
+                                    <div className="flex w-full gap-3">
+                                        <button
+                                            onClick={handleDismiss}
+                                            className="flex-1 py-[6px] text-[13px] font-medium text-[#ffffff99] hover:text-white hover:bg-[#ffffff10] rounded-[8px] transition-all duration-200"
+                                        >
+                                            Not now
+                                        </button>
 
-                                    <button
-                                        onClick={handleRestart}
-                                        className="flex-1 py-[6px] bg-[#0091FF]/70 hover:bg-[#0091FF] active:scale-[0.98] text-[13px] font-medium text-white rounded-[8px] transition-all duration-200 shadow-[0_1px_2px_rgba(0,0,0,0.2)]"
-                                    >
-                                        Restart
-                                    </button>
-                                </div>
+                                        <button
+                                            onClick={handleRestart}
+                                            className="flex-1 py-[6px] bg-[#0091FF]/70 hover:bg-[#0091FF] active:scale-[0.98] text-[13px] font-medium text-white rounded-[8px] transition-all duration-200 shadow-[0_1px_2px_rgba(0,0,0,0.2)]"
+                                        >
+                                            Restart
+                                        </button>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </motion.div>

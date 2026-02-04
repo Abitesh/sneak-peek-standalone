@@ -251,6 +251,10 @@ export function initializeIpcHandlers(appState: AppState): void {
     await appState.checkForUpdates()
   })
 
+  ipcMain.handle("download-update", async () => {
+    appState.downloadUpdate()
+  })
+
   // Window movement handlers
   ipcMain.handle("move-window-left", async () => {
     appState.moveWindowLeft()

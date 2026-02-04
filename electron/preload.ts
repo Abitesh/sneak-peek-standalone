@@ -124,8 +124,10 @@ interface ElectronAPI {
   onUpdateChecking: (callback: () => void) => () => void
   onUpdateNotAvailable: (callback: (info: any) => void) => () => void
   onUpdateError: (callback: (err: string) => void) => () => void
+  onDownloadProgress: (callback: (progressObj: any) => void) => () => void
   restartAndInstall: () => Promise<void>
   checkForUpdates: () => Promise<void>
+  downloadUpdate: () => Promise<void>
 
   // RAG (Retrieval-Augmented Generation) API
   ragQueryMeeting: (meetingId: string, query: string) => Promise<{ success?: boolean; fallback?: boolean; error?: string }>
@@ -609,8 +611,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.removeListener("update-error", subscription)
     }
   },
+  onDownloadProgress: (callback: (progressObj: any) => void) => {
+    const subscription = (_: any, progressObj: any) => callback(progressObj)
+    ipcRenderer.on("download-progress", subscription)
+    return () => {
+      ipcRenderer.removeListener("download-progress", subscription)
+    }
+  },
   restartAndInstall: () => ipcRenderer.invoke("quit-and-install-update"),
   checkForUpdates: () => ipcRenderer.invoke("check-for-updates"),
+  downloadUpdate: () => ipcRenderer.invoke("download-update"),
 
   // RAG API
   ragQueryMeeting: (meetingId: string, query: string) => ipcRenderer.invoke('rag:query-meeting', { meetingId, query }),

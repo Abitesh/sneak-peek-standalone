@@ -779,25 +779,62 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                                     </div>
                                                     <div>
                                                         <h3 className="text-sm font-bold text-text-primary">Version</h3>
-                                                        <p className="text-xs text-text-secondary mt-0.5">You are currently using Natively version 1.0.0</p>
+                                                        <p className="text-xs text-text-secondary mt-0.5">
+                                                            You are currently using Natively version 1.0.1.
+                                                            <button
+                                                                onClick={() => window.electronAPI.invoke('open-external', 'https://github.com/evinjohnn/natively-cluely-ai-assistant/releases')}
+                                                                className="text-accent-primary hover:underline ml-1"
+                                                            >
+                                                                Check releases
+                                                            </button>
+                                                        </p>
                                                     </div>
                                                 </div>
                                                 <button
-                                                    onClick={handleCheckForUpdates}
+                                                    onClick={async () => {
+                                                        if (updateStatus === 'available') {
+                                                            try {
+                                                                // @ts-ignore
+                                                                await window.electronAPI.downloadUpdate();
+                                                                onClose(); // Close settings to show the banner
+                                                            } catch (err) {
+                                                                console.error("Failed to start download:", err);
+                                                            }
+                                                        } else {
+                                                            handleCheckForUpdates();
+                                                        }
+                                                    }}
                                                     disabled={updateStatus === 'checking'}
                                                     className={`px-5 py-2 rounded-lg text-[13px] font-bold transition-all translate-y-1 flex items-center gap-2 ${updateStatus === 'checking' ? 'bg-bg-input text-text-tertiary cursor-wait' :
-                                                        updateStatus === 'available' ? 'bg-accent-primary text-white' :
-                                                            updateStatus === 'uptodate' ? 'bg-green-500/20 text-green-400' :
-                                                                updateStatus === 'error' ? 'bg-red-500/20 text-red-400' :
+                                                        updateStatus === 'available' ? 'bg-accent-primary text-white hover:bg-accent-secondary shadow-lg shadow-blue-500/20' :
+                                                            updateStatus === 'uptodate' ? 'bg-green-500/10 text-green-400 border border-green-500/20' :
+                                                                updateStatus === 'error' ? 'bg-red-500/10 text-red-400 border border-red-500/20' :
                                                                     'bg-bg-component hover:bg-bg-input text-text-primary'
                                                         }`}
                                                 >
-                                                    {updateStatus === 'checking' && <RefreshCw size={14} className="animate-spin" />}
-                                                    {updateStatus === 'idle' && 'Check for updates'}
-                                                    {updateStatus === 'checking' && 'Checking...'}
-                                                    {updateStatus === 'available' && 'Update Available!'}
-                                                    {updateStatus === 'uptodate' && 'Up to date'}
-                                                    {updateStatus === 'error' && 'Error checking'}
+                                                    {updateStatus === 'checking' ? (
+                                                        <>
+                                                            <RefreshCw size={14} className="animate-spin" />
+                                                            Checking...
+                                                        </>
+                                                    ) : updateStatus === 'available' ? (
+                                                        <>
+                                                            <ArrowDown size={14} />
+                                                            Update Available
+                                                        </>
+                                                    ) : updateStatus === 'uptodate' ? (
+                                                        <>
+                                                            <Check size={14} />
+                                                            Up to date
+                                                        </>
+                                                    ) : updateStatus === 'error' ? (
+                                                        <>
+                                                            <X size={14} />
+                                                            Error
+                                                        </>
+                                                    ) : (
+                                                        'Check for updates'
+                                                    )}
                                                 </button>
                                             </div>
 
@@ -826,8 +863,8 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                                         onClick={handleSaveGeminiKey}
                                                         disabled={apiKeySaving || !apiKey.trim()}
                                                         className={`px-5 py-2.5 rounded-lg text-xs font-medium transition-colors ${apiKeySaved
-                                                                ? 'bg-green-500/20 text-green-400'
-                                                                : 'bg-bg-input hover:bg-bg-secondary border border-border-subtle text-text-primary disabled:opacity-50'
+                                                            ? 'bg-green-500/20 text-green-400'
+                                                            : 'bg-bg-input hover:bg-bg-secondary border border-border-subtle text-text-primary disabled:opacity-50'
                                                             }`}
                                                     >
                                                         {apiKeySaving ? 'Saving...' : apiKeySaved ? 'Saved!' : 'Save'}
@@ -852,8 +889,8 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                                         onClick={handleSaveGroqKey}
                                                         disabled={groqKeySaving || !groqApiKey.trim()}
                                                         className={`px-5 py-2.5 rounded-lg text-xs font-medium transition-colors ${groqKeySaved
-                                                                ? 'bg-green-500/20 text-green-400'
-                                                                : 'bg-bg-input hover:bg-bg-secondary border border-border-subtle text-text-primary disabled:opacity-50'
+                                                            ? 'bg-green-500/20 text-green-400'
+                                                            : 'bg-bg-input hover:bg-bg-secondary border border-border-subtle text-text-primary disabled:opacity-50'
                                                             }`}
                                                     >
                                                         {groqKeySaving ? 'Saving...' : groqKeySaved ? 'Saved!' : 'Save'}

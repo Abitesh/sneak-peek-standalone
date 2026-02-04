@@ -169,7 +169,7 @@ export class AppState {
   }
 
   private setupAutoUpdater(): void {
-    autoUpdater.autoDownload = true
+    autoUpdater.autoDownload = false
     autoUpdater.autoInstallOnAppQuit = true
 
     autoUpdater.on("checking-for-update", () => {
@@ -199,6 +199,7 @@ export class AppState {
       log_message = log_message + " - Downloaded " + progressObj.percent + "%"
       log_message = log_message + " (" + progressObj.transferred + "/" + progressObj.total + ")"
       console.log("[AutoUpdater] " + log_message)
+      this.getMainWindow()?.webContents.send("download-progress", progressObj)
     })
 
     autoUpdater.on("update-downloaded", (info) => {
@@ -226,6 +227,10 @@ export class AppState {
 
   public async checkForUpdates(): Promise<void> {
     await autoUpdater.checkForUpdatesAndNotify()
+  }
+
+  public downloadUpdate(): void {
+    autoUpdater.downloadUpdate()
   }
 
   // New Property for System Audio & Microphone
@@ -1012,29 +1017,49 @@ export class AppState {
     if (process.platform === 'darwin') {
       const activeWindow = this.windowHelper.getMainWindow();
 
+      // Determine the truly active window to restore focus to
+      // Priority: Advanced Settings > Settings > Main Window
+      const settingsWin = this.settingsWindowHelper.getSettingsWindow();
+      const advancedWin = this.settingsWindowHelper.getAdvancedWindow();
+      let targetFocusWindow = activeWindow;
+
+      if (advancedWin && !advancedWin.isDestroyed() && advancedWin.isVisible()) {
+        targetFocusWindow = advancedWin;
+      } else if (settingsWin && !settingsWin.isDestroyed() && settingsWin.isVisible()) {
+        targetFocusWindow = settingsWin;
+      }
+
+      // Temporarily ignore blur to prevent settings from closing during dock hide/show
+      if (targetFocusWindow && (targetFocusWindow === settingsWin || targetFocusWindow === advancedWin)) {
+        this.settingsWindowHelper.setIgnoreBlur(true);
+      }
+
       if (state) {
         app.dock.hide();
         this.hideTray(); // User said: "Tray Hidden in 'stealth'"
 
         // Critical Fix: Force focus back to the active window to prevent it from being backgrounded
         // When Dock icon is hidden, macOS treats app as "accessory", potentially losing focus
-        if (activeWindow && !activeWindow.isDestroyed() && activeWindow.isVisible()) {
-          // Use a small timeout to allow the dock hide animation/state change to register
-          setTimeout(() => {
-            activeWindow.show();
-            activeWindow.focus();
-          }, 0);
+        if (targetFocusWindow && !targetFocusWindow.isDestroyed() && targetFocusWindow.isVisible()) {
+          // Attempt immediate focus to prevent background flash
+          targetFocusWindow.show();
+          targetFocusWindow.focus();
         }
       } else {
         app.dock.show();
         this.showTray();
 
         // Restore focus when coming back to foreground/dock mode
-        if (activeWindow && !activeWindow.isDestroyed() && activeWindow.isVisible()) {
-          setTimeout(() => {
-            activeWindow.focus();
-          }, 0);
+        if (targetFocusWindow && !targetFocusWindow.isDestroyed() && targetFocusWindow.isVisible()) {
+          targetFocusWindow.focus();
         }
+      }
+
+      // Re-enable blur handling after the transition logic has settled
+      if (targetFocusWindow && (targetFocusWindow === settingsWin || targetFocusWindow === advancedWin)) {
+        setTimeout(() => {
+          this.settingsWindowHelper.setIgnoreBlur(false);
+        }, 500);
       }
     }
   }
