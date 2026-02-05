@@ -192,8 +192,8 @@ If you see other errors:
 4. Try running with `npm start`
 
 ### Platform-Specific Notes
-- **Windows**: Coming soon
-- **Ubuntu/Linux**: Tested on Ubuntu 20.04+ and most Linux distros  
+- **Windows**: Looking for maintainers
+- **Ubuntu/Linux**: Looking for maintainers
 - **macOS**: Native support with proper window management
 
 ## Key Features
