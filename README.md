@@ -1,4 +1,4 @@
-# Natively ·   Trusted by 1000+ users
+# Natively  -  Trusted by 1000+ users
 
 
 
