@@ -273,16 +273,44 @@ Control your interactions instantly with 5 powerful tools:
 ✓ Algorithm and architecture guidance
 ```
 
-## Why Choose Natively?
+## 🏆 Why Choose Natively?
 
-| Feature | Natively | Commercial Alternatives |
-|---------|-------------|------------------------|
-| **Cost** | 100% Free | $29-99/month |
-| **Privacy** | Local AI Option | Cloud-only |
-| **Open Source** | Full transparency | Closed source |
-| **Customization** | Fully customizable | Limited options |
-| **Data Control** | You own your data | Third-party servers |
-| **Offline Mode** | Yes (with Ollama) | No |
+Natively is a **privacy-first, open-source desktop AI assistant** built for **real-time meetings, interviews, presentations, and live conversations**.
+
+Unlike commercial AI assistants or fragmented open-source tools, Natively combines **local AI, live audio intelligence, screenshot analysis, and rolling context memory** into a single, invisible desktop experience.
+
+### Feature Comparison
+
+| Feature / Capability | Natively | Commercial AI Assistants | Other Open-Source Tools |
+|----------------------|----------|--------------------------|-------------------------|
+| Price | ✅ 100% Free | ❌ $29–99/month | ✅ Free |
+| Open Source | ✅ Fully open source (AGPL-3.0) | ❌ Closed source | ⚠️ Partial / fragmented |
+| Local AI (Offline Mode) | ✅ Yes (Ollama) | ❌ No | ⚠️ Experimental |
+| Privacy-First Design | ✅ Local processing, BYOK | ❌ Cloud-only | ⚠️ Depends on setup |
+| Bring Your Own Keys (BYOK) | ✅ Full control | ❌ Shared / opaque | ⚠️ Inconsistent |
+| Real-Time Meeting Assistance | ✅ Built for live conversations | ✅ Yes | ❌ Rare |
+| Rolling Context Memory | ✅ Smart sliding window | ⚠️ Limited | ❌ Missing |
+| Live Speech-to-Text | ✅ Native, real-time | ✅ Yes | ⚠️ Batch / delayed |
+| System Audio Capture | ✅ Native Rust module | ⚠️ Virtual drivers | ❌ Not supported |
+| Screenshot / Screen Analysis | ✅ Instant, hotkey-based | ⚠️ Limited | ❌ Rare |
+| Invisible Always-On-Top UI | ✅ Designed for stealth use | ❌ Obtrusive UI | ❌ Not available |
+| Keyboard-First Workflow | ✅ Global shortcuts | ⚠️ Partial | ❌ Minimal |
+| Context-Aware Follow-ups | ✅ Built-in actions | ⚠️ Manual | ❌ Missing |
+| Data Storage Location | ✅ Local SQLite | ❌ Vendor servers | ⚠️ Varies |
+| Customization & Extensibility | ✅ Fully customizable | ❌ Locked down | ⚠️ Heavy hacking |
+| Cross-Platform Desktop App | ✅ macOS & Windows | ✅ Yes | ❌ Mostly web / CLI |
+| Offline Usage | ✅ Yes (Ollama) | ❌ No | ⚠️ Partial |
+| Transparency & Audibility | ✅ Full code access | ❌ None | ⚠️ Limited |
+| Purpose-Built for Meetings | ✅ Yes | ⚠️ General purpose | ❌ Not designed |
+
+### Why Natively
+
+- Commercial tools are powerful but **expensive, cloud-locked, and opaque**
+- Most open-source tools are free but **incomplete or not designed for live conversations**
+- **Natively delivers real-time intelligence, full privacy, and open-source transparency**
+
+Built for moments where you need answers **now**, not after the meeting ends.
+
 
 ## Technical Details
 
