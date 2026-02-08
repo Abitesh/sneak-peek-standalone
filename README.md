@@ -1,13 +1,42 @@
-# Natively  -  Trusted by 1000+ users
+# Natively — Open-Source AI Assistant for Meetings, Interviews & Live Conversations  
+### Trusted by 1000+ users
 
+**Natively** is a **privacy-first, open-source desktop AI assistant** that works **in real time during meetings, interviews, presentations, exams, and professional conversations**.
 
+It stays **invisible and always on top**, listens when you want it to, sees what’s on your screen, and gives you **instant, context-aware answers** — without recording, tracking, or sending your data anywhere unless you explicitly choose a cloud AI provider.
 
-Natively - The invisible desktop assistant that provides real-time insights, answers, and support during meetings, interviews, presentations, and professional conversations.
+Built for people who need help **while the conversation is happening**, not after it’s over.
+
+---
+
+## ✨ What Natively Helps You Do (In Real Time)
+
+- 🎙️ Get **live answers during meetings and interviews**
+- 🧠 Understand questions instantly with **rolling context memory**
+- 🖼️ Analyze screenshots, slides, documents, and problems on the fly
+- ✍️ Generate **what to say next**, follow-ups, summaries, or concise replies
+- 🔒 Stay private with **local AI (offline mode via Ollama)**
+- ⚡ Work faster using **global keyboard shortcuts** across all apps
+
+---
+
+## 🔐 Privacy-First by Design
+
+- ✅ **100% open source**
+- ✅ **Bring Your Own Keys (BYOK)** — no shared API keys
+- ✅ **Local AI option (Ollama)** — works offline
+- ✅ All data stored **locally on your machine**
+- ❌ No telemetry
+- ❌ No tracking
+- ❌ No hidden uploads
+
+You control **what runs locally** and **what runs in the cloud**.
+
+---
 
 ## 🎬 Demo
 
 ![Natively Demo](demo.gif)
-
 ## 🚀 Quick Start Guide
 **For Personal Use:**
 Download the latest version from [Releases](https://github.com/evinjohnn/natively-cluely-ai-assistant/releases)
