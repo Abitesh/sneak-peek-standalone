@@ -11,6 +11,11 @@ Natively - The invisible desktop assistant that provides real-time insights, ans
 ## 🚀 Quick Start Guide
 **For Personal Use:**
 Download the latest version from [Releases](https://github.com/evinjohnn/natively-cluely-ai-assistant/releases)
+**🪟 Windows users:**  
+👉 Grab the latest Windows build here → https://github.com/evinjohnn/natively-cluely-ai-assistant/releases/tag/v1.1.2
+
+**🍎 macOS users:**  
+👉 Download the optimized Mac version here → https://github.com/evinjohnn/natively-cluely-ai-assistant/releases/tag/v1.1.1
 
 ### Prerequisites (For Development)
 - **Node.js**: Installed on your computer (v20+ recommended)
@@ -194,7 +199,7 @@ If you see other errors:
 4. Try running with `npm start`
 
 ### Platform-Specific Notes
-- **Windows**: Looking for maintainers
+- **Windows**:Native support with proper window management
 - **Ubuntu/Linux**: Looking for maintainers
 - **macOS**: Native support with proper window management
 
