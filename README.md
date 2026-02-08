@@ -11,6 +11,7 @@ Natively - The invisible desktop assistant that provides real-time insights, ans
 ## 🚀 Quick Start Guide
 **For Personal Use:**
 Download the latest version from [Releases](https://github.com/evinjohnn/natively-cluely-ai-assistant/releases)
+
 **🪟 Windows users:**  
 👉 Grab the latest Windows build here → https://github.com/evinjohnn/natively-cluely-ai-assistant/releases/tag/v1.1.2
 
