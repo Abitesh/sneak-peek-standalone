@@ -5,7 +5,9 @@
 
   ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
   ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey)
-  ![GitHub all releases](https://img.shields.io/github/downloads/evinjohnn/natively-cluely-ai-assistant/total)
+  [![GitHub Downloads](https://img.shields.io/github/downloads/evinjohnn/natively-cluely-ai-assistant/total)](https://github.com/evinjohnn/natively-cluely-ai-assistant/releases)
+![Users](https://img.shields.io/badge/users-2000%2B-blue)
+
   ![Status](https://img.shields.io/badge/status-active-success)
 
  </div>
