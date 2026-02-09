@@ -301,7 +301,7 @@ No raw audio, screenshots, or transcripts are stored or transmitted unless expli
 - **SQLite** (local storage)
 
 ### Supported Models
-- **Gemini 1.5** (Flash / Pro)
+- **Gemini 3.0** (Flash / Pro)
 - **Ollama** (Llama, Mistral, CodeLlama)
 - **Groq** (Llama, Mixtral)
 
