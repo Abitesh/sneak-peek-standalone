@@ -217,6 +217,7 @@ npm run dist
 - Recommended for privacy
 
 ### Google Gemini
+- **Gemini 3.0** supported
 - Multimodal (text + vision)
 - Fast and accurate
 - Requires internet and API key
@@ -226,12 +227,12 @@ npm run dist
 - Text-only in this implementation
 
 ### OpenAI
-- **GPT-5.2** supported
+- **GPT-4o** supported
 - Excellent reasoning and multimodal capabilities
 - Requires API key
 
 ### Anthropic Claude
-- **Sonnet 4.5** supported
+- **Sonnet 3.5** supported
 - Top-tier coding and reasoning
 - Requires API key
 
@@ -323,9 +324,9 @@ No raw audio, screenshots, or transcripts are stored or transmitted unless expli
 - **SQLite** (local storage)
 
 ### Supported Models
-- **Gemini 2.0** (Flash / Pro)
-- **OpenAI** (GPT-5.2)
-- **Claude** (Sonnet 4.5)
+- **Gemini 1.5** (Flash / Pro)
+- **OpenAI** (GPT-4o)
+- **Claude** (Sonnet 3.5)
 - **Ollama** (Llama, Mistral, CodeLlama)
 - **Groq** (Llama, Mixtral)
 
