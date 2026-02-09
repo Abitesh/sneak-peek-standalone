@@ -1,4 +1,4 @@
-# Natively – Open-Source Cluely Alternative
+# Natively – Open Source Cluely Alternative
 
 Natively is a free, open-source AI interview and meeting assistant.
 It runs as an invisible desktop overlay and helps you in real time,
@@ -341,6 +341,12 @@ Unlike commercial AI assistants or fragmented open-source tools, Natively combin
 - Commercial tools are powerful but **expensive, cloud-locked, and opaque**
 - Most open-source tools are free but **incomplete or not designed for live conversations**
 - **Natively delivers real-time intelligence, full privacy, and open-source transparency**
+- Open-source Cluely alternative
+- No subscription
+- Privacy-first
+- Local or API-based LLM support
+- Built with Electron
+
 
 Built for moments where you need answers **now**, not after the meeting ends.
 
