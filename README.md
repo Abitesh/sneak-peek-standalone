@@ -1,13 +1,12 @@
 <div align="center">
   <img src="assets/icon.png" width="150" alt="Natively Logo">
+
+  # Natively – Open-Source Cluely Alternative
+
+  ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
+  ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey)
+  ![Status](https://img.shields.io/badge/status-active-success)
 </div>
-
-# Natively – Open-Source Cluely Alternative
-
-![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
-![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey)
-![Status](https://img.shields.io/badge/status-active-success)
-
 > A privacy-first, open-source desktop AI assistant that helps you in real time during live meetings and conversations.
 
 Natively is a **free, open-source, privacy-first AI assistant** designed to help you **in real time during live meetings, interviews, presentations, and conversations**.
@@ -18,24 +17,37 @@ Natively is fully transparent, customizable, and gives you complete control over
 
 ---
 
+## Demo
+
+![Natively Demo](demo.gif)
+
+This demo shows **a complete live meeting scenario**:
+- Real-time transcription as the meeting happens  
+- Rolling context awareness across multiple speakers  
+- Screenshot analysis of shared slides  
+- Instant generation of what to say next  
+- Follow-up questions and concise responses  
+- All happening live, without recording or post-processing  
+
+---
+
 ## Table of Contents
 
-- What Is Natively?
-- Key Capabilities
-- Privacy & Security
-- Demo
-- Quick Start (End Users)
-- Installation (Developers)
-- AI Providers
-- Key Features
-- Use Cases
-- Comparison
-- Architecture Overview
-- Technical Details
-- Known Limitations
-- Responsible Use
-- Contributing
-- License
+- [What Is Natively?](#what-is-natively)
+- [Key Capabilities](#key-capabilities)
+- [Privacy & Security](#privacy--security-core-design-principle)
+- [Quick Start (End Users)](#quick-start-end-users)
+- [Installation (Developers)](#installation-developers--contributors)
+- [AI Providers](#ai-providers)
+- [Key Features](#key-features)
+- [Use Cases](#use-cases)
+- [Comparison](#comparison)
+- [Architecture Overview](#architecture-overview)
+- [Technical Details](#technical-details)
+- [Known Limitations](#known-limitations)
+- [Responsible Use](#responsible-use)
+- [Contributing](#contributing)
+- [License](#license)
 
 ---
 
@@ -90,19 +102,7 @@ You explicitly control:
 
 ---
 
-## Demo
 
-![Natively Demo](demo.gif)
-
-This demo shows **a complete live meeting scenario**:
-- Real-time transcription as the meeting happens  
-- Rolling context awareness across multiple speakers  
-- Screenshot analysis of shared slides  
-- Instant generation of what to say next  
-- Follow-up questions and concise responses  
-- All happening live, without recording or post-processing  
-
----
 
 ## Quick Start (End Users)
 
@@ -353,3 +353,5 @@ Quality pull requests will be reviewed and merged.
 Licensed under the GNU Affero General Public License v3.0 (AGPL-3.0).
 
 If you run or modify this software over a network, you must provide the full source code under the same license.
+
+> **Note:** This project is available for sponsorships, ads, or partnerships – perfect for companies in the AI, productivity, or developer tools space.
