@@ -1,7 +1,9 @@
 import { GoogleGenAI } from "@google/genai"
 import Groq from "groq-sdk"
+import OpenAI from "openai"
+import Anthropic from "@anthropic-ai/sdk"
 import fs from "fs"
-import { HARD_SYSTEM_PROMPT, GROQ_SYSTEM_PROMPT } from "./llm/prompts"
+import { HARD_SYSTEM_PROMPT, GROQ_SYSTEM_PROMPT, OPENAI_SYSTEM_PROMPT, CLAUDE_SYSTEM_PROMPT } from "./llm/prompts"
 
 interface OllamaResponse {
   response: string
@@ -12,6 +14,8 @@ interface OllamaResponse {
 const GEMINI_FLASH_MODEL = "gemini-3-flash-preview"
 const GEMINI_PRO_MODEL = "gemini-3-pro-preview"
 const GROQ_MODEL = "llama-3.3-70b-versatile"
+const OPENAI_MODEL = "gpt-5.2-chat-latest"
+const CLAUDE_MODEL = "claude-sonnet-4-5"
 const MAX_OUTPUT_TOKENS = 65536
 
 // Simple prompt for image analysis (not interview copilot - kept separate)
@@ -20,14 +24,18 @@ const IMAGE_ANALYSIS_PROMPT = `Analyze concisely. Be direct. No markdown formatt
 export class LLMHelper {
   private client: GoogleGenAI | null = null
   private groqClient: Groq | null = null
+  private openaiClient: OpenAI | null = null
+  private claudeClient: Anthropic | null = null
   private apiKey: string | null = null
   private groqApiKey: string | null = null
+  private openaiApiKey: string | null = null
+  private claudeApiKey: string | null = null
   private useOllama: boolean = false
   private ollamaModel: string = "llama3.2"
   private ollamaUrl: string = "http://localhost:11434"
   private geminiModel: string = GEMINI_FLASH_MODEL
 
-  constructor(apiKey?: string, useOllama: boolean = false, ollamaModel?: string, ollamaUrl?: string, groqApiKey?: string) {
+  constructor(apiKey?: string, useOllama: boolean = false, ollamaModel?: string, ollamaUrl?: string, groqApiKey?: string, openaiApiKey?: string, claudeApiKey?: string) {
     this.useOllama = useOllama
 
     // Initialize Groq client if API key provided
@@ -35,6 +43,20 @@ export class LLMHelper {
       this.groqApiKey = groqApiKey
       this.groqClient = new Groq({ apiKey: groqApiKey })
       console.log(`[LLMHelper] Groq client initialized with model: ${GROQ_MODEL}`)
+    }
+
+    // Initialize OpenAI client if API key provided
+    if (openaiApiKey) {
+      this.openaiApiKey = openaiApiKey
+      this.openaiClient = new OpenAI({ apiKey: openaiApiKey, dangerouslyAllowBrowser: true })
+      console.log(`[LLMHelper] OpenAI client initialized with model: ${OPENAI_MODEL}`)
+    }
+
+    // Initialize Claude client if API key provided
+    if (claudeApiKey) {
+      this.claudeApiKey = claudeApiKey
+      this.claudeClient = new Anthropic({ apiKey: claudeApiKey })
+      console.log(`[LLMHelper] Claude client initialized with model: ${CLAUDE_MODEL}`)
     }
 
     if (useOllama) {
@@ -69,6 +91,18 @@ export class LLMHelper {
   public setGroqApiKey(apiKey: string) {
     this.groqClient = new Groq({ apiKey, dangerouslyAllowBrowser: true });
     console.log("[LLMHelper] Groq API Key updated.");
+  }
+
+  public setOpenaiApiKey(apiKey: string) {
+    this.openaiApiKey = apiKey;
+    this.openaiClient = new OpenAI({ apiKey, dangerouslyAllowBrowser: true });
+    console.log("[LLMHelper] OpenAI API Key updated.");
+  }
+
+  public setClaudeApiKey(apiKey: string) {
+    this.claudeApiKey = apiKey;
+    this.claudeClient = new Anthropic({ apiKey });
+    console.log("[LLMHelper] Claude API Key updated.");
   }
 
   private cleanJsonResponse(text: string): string {
@@ -485,75 +519,145 @@ ANSWER DIRECTLY:`;
     try {
       console.log(`[LLMHelper] chatWithGemini called with message:`, message.substring(0, 50))
 
-      // Helper to build prompts for different providers
+      const isMultimodal = !!imagePath;
+
+      // Helper to build combined prompts for Groq/Gemini
       const buildMessage = (systemPrompt: string) => {
-        let msg = skipSystemPrompt ? message : `${systemPrompt}\n\n${message}`;
-        if (context) {
-          msg = skipSystemPrompt
+        if (skipSystemPrompt) {
+          return context
             ? `CONTEXT:\n${context}\n\nUSER QUESTION:\n${message}`
-            : `${systemPrompt}\n\nCONTEXT:\n${context}\n\nUSER QUESTION:\n${message}`;
+            : message;
         }
-        return msg;
+        return context
+          ? `${systemPrompt}\n\nCONTEXT:\n${context}\n\nUSER QUESTION:\n${message}`
+          : `${systemPrompt}\n\n${message}`;
       };
 
-      const geminiMessage = buildMessage(HARD_SYSTEM_PROMPT);
+      // For OpenAI/Claude: separate system prompt + user message
+      const userContent = context
+        ? `CONTEXT:\n${context}\n\nUSER QUESTION:\n${message}`
+        : message;
 
-      // ATTEMPT 1: Default Model (Likely Flash)
-      try {
-        const rawResponse = await this.tryGenerateResponse(geminiMessage, imagePath);
-        if (rawResponse && rawResponse.trim().length > 0) {
-          return this.processResponse(rawResponse);
-        }
-        console.warn("[LLMHelper] Empty response from primary model, initiating fallback...");
-      } catch (error: any) {
-        console.warn(`[LLMHelper] Primary model failed: ${error.message} - Initiating fallback...`);
+      const combinedMessages = {
+        gemini: buildMessage(HARD_SYSTEM_PROMPT),
+        groq: alternateGroqMessage || buildMessage(GROQ_SYSTEM_PROMPT),
+      };
+
+      // System prompts for OpenAI/Claude (skipped if skipSystemPrompt)
+      const openaiSystemPrompt = skipSystemPrompt ? undefined : OPENAI_SYSTEM_PROMPT;
+      const claudeSystemPrompt = skipSystemPrompt ? undefined : CLAUDE_SYSTEM_PROMPT;
+
+      if (this.useOllama) {
+        return await this.callOllama(combinedMessages.gemini);
       }
 
-      // ATTEMPT 2: Gemini 3 Pro
-      console.log("[LLMHelper] ⚠️ Switching to Gemini 3 Pro (Fallback)...");
-      const originalModel = this.geminiModel;
-      this.geminiModel = GEMINI_PRO_MODEL;
-      try {
-        const rawResponse = await this.tryGenerateResponse(geminiMessage, imagePath);
-        // Reset model immediately after call to ensure cleaner state even if processing fails
-        this.geminiModel = originalModel;
+      // ============================================================
+      // SMART DYNAMIC FALLBACK (Non-Streaming)
+      // Multimodal: Gemini Flash → OpenAI → Claude → Gemini Pro (Groq excluded)
+      // Text-only:  Gemini Flash → Gemini Pro → Groq → OpenAI → Claude
+      // OpenAI/Claude use proper system+user message separation
+      // ============================================================
+      type ProviderAttempt = { name: string; execute: () => Promise<string> };
+      const providers: ProviderAttempt[] = [];
 
-        if (rawResponse && rawResponse.trim().length > 0) {
-          return this.processResponse(rawResponse);
+      if (isMultimodal) {
+        // MULTIMODAL: Only vision-capable providers (NO Groq)
+        if (this.client) {
+          providers.push({ name: `Gemini Flash`, execute: () => this.tryGenerateResponse(combinedMessages.gemini, imagePath) });
         }
-        console.warn("[LLMHelper] Empty response from Pro model, initiating Groq fallback...");
-      } catch (error: any) {
-        this.geminiModel = originalModel; // Ensure model is reset
-        console.warn(`[LLMHelper] Pro model failed: ${error.message}`);
+        if (this.openaiClient) {
+          providers.push({ name: `OpenAI (${OPENAI_MODEL})`, execute: () => this.generateWithOpenai(userContent, openaiSystemPrompt, imagePath) });
+        }
+        if (this.claudeClient) {
+          providers.push({ name: `Claude (${CLAUDE_MODEL})`, execute: () => this.generateWithClaude(userContent, claudeSystemPrompt, imagePath) });
+        }
+        if (this.client) {
+          providers.push({
+            name: `Gemini Pro`,
+            execute: async () => {
+              const orig = this.geminiModel;
+              this.geminiModel = GEMINI_PRO_MODEL;
+              try {
+                const r = await this.tryGenerateResponse(combinedMessages.gemini, imagePath);
+                this.geminiModel = orig;
+                return r;
+              } catch (e) {
+                this.geminiModel = orig;
+                throw e;
+              }
+            }
+          });
+        }
+      } else {
+        // TEXT-ONLY: All providers including Groq
+        if (this.client) {
+          providers.push({ name: `Gemini Flash`, execute: () => this.tryGenerateResponse(combinedMessages.gemini) });
+          providers.push({
+            name: `Gemini Pro`,
+            execute: async () => {
+              const orig = this.geminiModel;
+              this.geminiModel = GEMINI_PRO_MODEL;
+              try {
+                const r = await this.tryGenerateResponse(combinedMessages.gemini);
+                this.geminiModel = orig;
+                return r;
+              } catch (e) {
+                this.geminiModel = orig;
+                throw e;
+              }
+            }
+          });
+        }
+        if (this.groqClient) {
+          providers.push({ name: `Groq (${GROQ_MODEL})`, execute: () => this.generateWithGroq(combinedMessages.groq) });
+        }
+        if (this.openaiClient) {
+          providers.push({ name: `OpenAI (${OPENAI_MODEL})`, execute: () => this.generateWithOpenai(userContent, openaiSystemPrompt) });
+        }
+        if (this.claudeClient) {
+          providers.push({ name: `Claude (${CLAUDE_MODEL})`, execute: () => this.generateWithClaude(userContent, claudeSystemPrompt) });
+        }
       }
 
-      // ATTEMPT 3: Groq (Text Only)
-      if (!imagePath && this.groqClient) {
-        console.log("[LLMHelper] ⚠️ Switching to Groq (Fallback)...");
-        try {
-          // Use alternate message if provided, otherwise default logic
-          let groqMessage = alternateGroqMessage;
-          if (!groqMessage) {
-            groqMessage = buildMessage(GROQ_SYSTEM_PROMPT);
+      if (providers.length === 0) {
+        return "No AI providers configured. Please add at least one API key in Settings.";
+      }
+
+      // ============================================================
+      // RELENTLESS RETRY: Try all providers, then retry entire chain
+      // with exponential backoff. Max 2 full rotations.
+      // ============================================================
+      const MAX_FULL_ROTATIONS = 3;
+
+      for (let rotation = 0; rotation < MAX_FULL_ROTATIONS; rotation++) {
+        if (rotation > 0) {
+          const backoffMs = 1000 * rotation;
+          console.log(`[LLMHelper] 🔄 Non-streaming rotation ${rotation + 1}/${MAX_FULL_ROTATIONS} after ${backoffMs}ms backoff...`);
+          await this.delay(backoffMs);
+        }
+
+        for (const provider of providers) {
+          try {
+            console.log(`[LLMHelper] ${rotation === 0 ? '🚀' : '🔁'} Attempting ${provider.name}...`);
+            const rawResponse = await provider.execute();
+            if (rawResponse && rawResponse.trim().length > 0) {
+              console.log(`[LLMHelper] ✅ ${provider.name} succeeded`);
+              return this.processResponse(rawResponse);
+            }
+            console.warn(`[LLMHelper] ⚠️ ${provider.name} returned empty response`);
+          } catch (error: any) {
+            console.warn(`[LLMHelper] ⚠️ ${provider.name} failed: ${error.message}`);
           }
-
-          const rawResponse = await this.generateWithGroq(groqMessage);
-          if (rawResponse && rawResponse.trim().length > 0) {
-            return this.processResponse(rawResponse);
-          }
-        } catch (error: any) {
-          console.warn(`[LLMHelper] Groq failed: ${error.message}`);
         }
       }
 
-      // Fallback exhausted
-      console.error("[LLMHelper] All retry attempts and fallbacks failed.");
+      // All exhausted
+      console.error("[LLMHelper] ❌ All non-streaming providers exhausted");
       return "I apologize, but I couldn't generate a response. Please try again.";
 
     } catch (error: any) {
       console.error("[LLMHelper] Critical Error in chatWithGemini:", error);
 
-      // Return specific English error messages for the UI
       if (error.message.includes("503") || error.message.includes("overloaded")) {
         return "The AI service is currently overloaded. Please try again in a moment.";
       }
@@ -578,6 +682,74 @@ ANSWER DIRECTLY:`;
 
     return response.choices[0]?.message?.content || "";
   }
+
+  /**
+   * Non-streaming OpenAI generation with proper system/user separation
+   */
+  private async generateWithOpenai(userMessage: string, systemPrompt?: string, imagePath?: string): Promise<string> {
+    if (!this.openaiClient) throw new Error("OpenAI client not initialized");
+
+    const messages: any[] = [];
+    if (systemPrompt) {
+      messages.push({ role: "system", content: systemPrompt });
+    }
+
+    if (imagePath) {
+      const imageData = await fs.promises.readFile(imagePath);
+      const base64Image = imageData.toString("base64");
+      messages.push({
+        role: "user",
+        content: [
+          { type: "text", text: userMessage },
+          { type: "image_url", image_url: { url: `data:image/png;base64,${base64Image}` } }
+        ]
+      });
+    } else {
+      messages.push({ role: "user", content: userMessage });
+    }
+
+    const response = await this.openaiClient.chat.completions.create({
+      model: OPENAI_MODEL,
+      messages,
+      temperature: 0.4,
+      max_tokens: 8192,
+    });
+
+    return response.choices[0]?.message?.content || "";
+  }
+
+  /**
+   * Non-streaming Claude generation with proper system/user separation
+   */
+  private async generateWithClaude(userMessage: string, systemPrompt?: string, imagePath?: string): Promise<string> {
+    if (!this.claudeClient) throw new Error("Claude client not initialized");
+
+    const content: any[] = [];
+    if (imagePath) {
+      const imageData = await fs.promises.readFile(imagePath);
+      const base64Image = imageData.toString("base64");
+      content.push({
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: "image/png",
+          data: base64Image
+        }
+      });
+    }
+    content.push({ type: "text", text: userMessage });
+
+    const response = await this.claudeClient.messages.create({
+      model: CLAUDE_MODEL,
+      max_tokens: 8192,
+      ...(systemPrompt ? { system: systemPrompt } : {}),
+      messages: [{ role: "user", content }],
+    });
+
+    const textBlock = response.content.find((block: any) => block.type === 'text') as any;
+    return textBlock?.text || "";
+  }
+
 
   private async tryGenerateResponse(fullMessage: string, imagePath?: string): Promise<string> {
     let rawResponse: string;
@@ -630,206 +802,125 @@ ANSWER DIRECTLY:`;
    * 
    * MULTIMODAL: Gemini-only (existing logic)
    */
-  public async *streamChatWithGemini(message: string, imagePath?: string, context?: string, skipSystemPrompt: boolean = false): AsyncGenerator<string, void, unknown> {
+  public async * streamChatWithGemini(message: string, imagePath?: string, context?: string, skipSystemPrompt: boolean = false): AsyncGenerator<string, void, unknown> {
     console.log(`[LLMHelper] streamChatWithGemini called with message:`, message.substring(0, 50));
 
-    // Build context-aware prompt
-    let fullMessage = skipSystemPrompt ? message : `${HARD_SYSTEM_PROMPT}\n\n${message}`;
-    if (context) {
-      fullMessage = skipSystemPrompt
-        ? `CONTEXT:\n${context}\n\nUSER QUESTION:\n${message}`
-        : `${HARD_SYSTEM_PROMPT}\n\nCONTEXT:\n${context}\n\nUSER QUESTION:\n${message}`;
-    }
+    const isMultimodal = !!imagePath;
+
+    // Build single-string messages for Groq/Gemini (which use combined prompts)
+    const buildCombinedMessage = (systemPrompt: string) => {
+      if (skipSystemPrompt) {
+        return context
+          ? `CONTEXT:\n${context}\n\nUSER QUESTION:\n${message}`
+          : message;
+      }
+      return context
+        ? `${systemPrompt}\n\nCONTEXT:\n${context}\n\nUSER QUESTION:\n${message}`
+        : `${systemPrompt}\n\n${message}`;
+    };
+
+    // For OpenAI/Claude: separate system prompt + user message (proper API pattern)
+    const userContent = context
+      ? `CONTEXT:\n${context}\n\nUSER QUESTION:\n${message}`
+      : message;
+
+    const combinedMessages = {
+      gemini: buildCombinedMessage(HARD_SYSTEM_PROMPT),
+      groq: buildCombinedMessage(GROQ_SYSTEM_PROMPT),
+    };
 
     if (this.useOllama) {
-      const response = await this.callOllama(fullMessage);
+      const response = await this.callOllama(combinedMessages.gemini);
       yield response;
       return;
     }
 
-    // TEXT-ONLY: Use Groq-first fallback chain with Groq-specific prompt
-    if (!imagePath && this.groqClient) {
-      console.log(`[LLMHelper] Text-only request detected. Using Groq-first fallback chain...`);
-      // Build Groq-specific message (separate from Gemini prompt)
-      let groqMessage = skipSystemPrompt ? message : `${GROQ_SYSTEM_PROMPT}\n\n${message}`;
-      if (context) {
-        groqMessage = skipSystemPrompt
-          ? `CONTEXT:\n${context}\n\nUSER QUESTION:\n${message}`
-          : `${GROQ_SYSTEM_PROMPT}\n\nCONTEXT:\n${context}\n\nUSER QUESTION:\n${message}`;
+    // ============================================================
+    // SMART DYNAMIC FALLBACK: Build provider list based on what's configured
+    // Multimodal requests EXCLUDE Groq (no vision support)
+    // Text-only requests can use ALL providers
+    // OpenAI/Claude use proper system+user message separation for quality
+    // ============================================================
+    type ProviderAttempt = { name: string; execute: () => AsyncGenerator<string, void, unknown> };
+    const providers: ProviderAttempt[] = [];
+
+    // System prompts for OpenAI/Claude (skipped if skipSystemPrompt)
+    const openaiSystemPrompt = skipSystemPrompt ? undefined : OPENAI_SYSTEM_PROMPT;
+    const claudeSystemPrompt = skipSystemPrompt ? undefined : CLAUDE_SYSTEM_PROMPT;
+
+    if (isMultimodal) {
+      // MULTIMODAL PROVIDER ORDER: Gemini Flash → OpenAI → Claude → Gemini Pro
+      // Groq does NOT support vision
+      if (this.client) {
+        providers.push({ name: `Gemini Flash (${GEMINI_FLASH_MODEL})`, execute: () => this.streamWithGeminiModel(combinedMessages.gemini, GEMINI_FLASH_MODEL) });
       }
-      yield* this.streamWithGroqFallbackChain(groqMessage, fullMessage);
+      if (this.openaiClient) {
+        providers.push({ name: `OpenAI (${OPENAI_MODEL})`, execute: () => this.streamWithOpenaiMultimodal(userContent, imagePath!, openaiSystemPrompt) });
+      }
+      if (this.claudeClient) {
+        providers.push({ name: `Claude (${CLAUDE_MODEL})`, execute: () => this.streamWithClaudeMultimodal(userContent, imagePath!, claudeSystemPrompt) });
+      }
+      if (this.client) {
+        providers.push({ name: `Gemini Pro (${GEMINI_PRO_MODEL})`, execute: () => this.streamWithGeminiModel(combinedMessages.gemini, GEMINI_PRO_MODEL) });
+      }
+    } else {
+      // TEXT-ONLY PROVIDER ORDER: Groq → OpenAI → Claude → Gemini Flash → Gemini Pro
+      if (this.groqClient) {
+        providers.push({ name: `Groq (${GROQ_MODEL})`, execute: () => this.streamWithGroq(combinedMessages.groq) });
+      }
+      if (this.openaiClient) {
+        providers.push({ name: `OpenAI (${OPENAI_MODEL})`, execute: () => this.streamWithOpenai(userContent, openaiSystemPrompt) });
+      }
+      if (this.claudeClient) {
+        providers.push({ name: `Claude (${CLAUDE_MODEL})`, execute: () => this.streamWithClaude(userContent, claudeSystemPrompt) });
+      }
+      if (this.client) {
+        providers.push({ name: `Gemini Flash (${GEMINI_FLASH_MODEL})`, execute: () => this.streamWithGeminiModel(combinedMessages.gemini, GEMINI_FLASH_MODEL) });
+        providers.push({ name: `Gemini Pro (${GEMINI_PRO_MODEL})`, execute: () => this.streamWithGeminiModel(combinedMessages.gemini, GEMINI_PRO_MODEL) });
+      }
+    }
+
+    if (providers.length === 0) {
+      yield "No AI providers configured. Please add at least one API key in Settings.";
       return;
     }
 
-    // MULTIMODAL or no Groq: Use existing Gemini-only path
-    if (!this.client) throw new Error("No LLM provider configured");
+    // ============================================================
+    // RELENTLESS RETRY: Try all providers, then retry entire chain
+    // with exponential backoff. Max 2 full rotations.
+    // ============================================================
+    const MAX_FULL_ROTATIONS = 3;
 
-    const buildContents = async () => {
-      if (imagePath) {
-        const imageData = await fs.promises.readFile(imagePath);
-        return [
-          { text: fullMessage },
-          {
-            inlineData: {
-              mimeType: "image/png",
-              data: imageData.toString("base64")
-            }
-          }
-        ];
+    for (let rotation = 0; rotation < MAX_FULL_ROTATIONS; rotation++) {
+      if (rotation > 0) {
+        const backoffMs = 1000 * rotation;
+        console.log(`[LLMHelper] 🔄 Starting rotation ${rotation + 1}/${MAX_FULL_ROTATIONS} after ${backoffMs}ms backoff...`);
+        await this.delay(backoffMs);
       }
-      return [{ text: fullMessage }];
-    };
 
-    const contents = await buildContents();
-
-    try {
-      console.log(`[LLMHelper] [STREAM-V2] Starting stream with model: ${this.geminiModel}`);
-
-      const startStream = async (model: string) => {
-        return await this.client!.models.generateContentStream({
-          model: model,
-          contents: contents,
-          config: {
-            maxOutputTokens: MAX_OUTPUT_TOKENS,
-            temperature: 0.4,
-          }
-        });
-      };
-
-      let streamResult;
-
-      try {
-        const timeoutMs = imagePath ? 10000 : 8000;
-        console.log(`[LLMHelper] Attempting Flash stream (${this.geminiModel}) with ${timeoutMs}ms timeout...`);
-        streamResult = await Promise.race([
-          startStream(this.geminiModel),
-          new Promise<'TIMEOUT'>((_, reject) =>
-            setTimeout(() => reject(new Error("TIMEOUT")), timeoutMs)
-          )
-        ]);
-      } catch (err: any) {
-        console.warn(`[LLMHelper] Flash Stream FAILED. Reason: ${err.message}`);
-        console.warn(`[LLMHelper] Switching to Backup (gemini-3-pro-preview)...`);
+      for (let i = 0; i < providers.length; i++) {
+        const provider = providers[i];
         try {
-          streamResult = await startStream(GEMINI_PRO_MODEL);
-          console.log(`[LLMHelper] Backup stream (Pro) started successfully.`);
-        } catch (backupErr: any) {
-          console.error(`[LLMHelper] Backup stream also failed:`, backupErr);
-          throw err;
-        }
-      }
-
-      // @ts-ignore
-      const stream = streamResult.stream || streamResult;
-
-      const streamStartTime = Date.now();
-      let isFirstChunk = true;
-
-      for await (const chunk of stream) {
-        if (isFirstChunk) {
-          const ttfb = Date.now() - streamStartTime;
-          console.log(`[LLMHelper] Stream TTFB: ${ttfb}ms`);
-          isFirstChunk = false;
-        }
-
-        let chunkText = "";
-
-        try {
-          if (typeof chunk.text === 'function') {
-            chunkText = chunk.text();
-          } else if (typeof chunk.text === 'string') {
-            chunkText = chunk.text;
-          } else if (chunk.candidates?.[0]?.content?.parts?.[0]?.text) {
-            chunkText = chunk.candidates[0].content.parts[0].text;
-          }
-        } catch (err) {
-          console.error("[STREAM-DEBUG] Error extracting text from chunk:", err);
-        }
-
-        if (chunkText) {
-          yield chunkText;
-        }
-      }
-
-    } catch (error: any) {
-      console.error("[LLMHelper] Streaming error:", error);
-
-      if (error.message.includes("503") || error.message.includes("overloaded")) {
-        yield "The AI service is currently overloaded. Please try again in a moment.";
-        return;
-      }
-
-      throw error;
-    }
-  }
-
-  /**
-   * Stream with Groq-first fallback chain for text-only requests
-   * Chain: Groq → Flash → Flash+Pro parallel → Flash retries (max 3)
-   * @param groqMessage - Message with GROQ_SYSTEM_PROMPT for Groq calls
-   * @param geminiMessage - Message with HARD_SYSTEM_PROMPT for Gemini fallback calls
-   */
-  private async *streamWithGroqFallbackChain(groqMessage: string, geminiMessage: string): AsyncGenerator<string, void, unknown> {
-    let lastError: Error | null = null;
-
-    // ATTEMPT 1: Groq (Primary) - uses Groq-specific prompt
-    try {
-      console.log(`[LLMHelper] 🚀 Attempting Groq (${GROQ_MODEL})...`);
-      yield* this.streamWithGroq(groqMessage);
-      console.log(`[LLMHelper] ✅ Groq stream completed successfully`);
-      return; // Success - exit
-    } catch (err: any) {
-      lastError = err;
-      console.warn(`[LLMHelper] ⚠️ Groq failed: ${err.message}`);
-    }
-
-    // ATTEMPT 2: Gemini Flash (1st fallback) - uses Gemini prompt
-    if (this.client) {
-      try {
-        console.log(`[LLMHelper] 🔄 Falling back to Gemini Flash...`);
-        yield* this.streamWithGeminiModel(geminiMessage, GEMINI_FLASH_MODEL);
-        console.log(`[LLMHelper] ✅ Gemini Flash stream completed successfully`);
-        return; // Success - exit
-      } catch (err: any) {
-        lastError = err;
-        console.warn(`[LLMHelper] ⚠️ Gemini Flash failed: ${err.message}`);
-      }
-
-      // ATTEMPT 3: Flash + Pro parallel (2nd fallback)
-      try {
-        console.log(`[LLMHelper] 🚀 Attempting Flash + Pro parallel race...`);
-        yield* this.streamWithGeminiParallelRace(geminiMessage);
-        console.log(`[LLMHelper] ✅ Parallel race stream completed successfully`);
-        return; // Success - exit
-      } catch (err: any) {
-        lastError = err;
-        console.warn(`[LLMHelper] ⚠️ Parallel race failed: ${err.message}`);
-      }
-
-      // ATTEMPT 4-6: Flash retries (max 3 total retries)
-      for (let retry = 1; retry <= 3; retry++) {
-        try {
-          console.log(`[LLMHelper] 🔁 Flash retry ${retry}/3...`);
-          await this.delay(500 * retry); // Exponential backoff
-          yield* this.streamWithGeminiModel(geminiMessage, GEMINI_FLASH_MODEL);
-          console.log(`[LLMHelper] ✅ Flash retry ${retry} succeeded`);
-          return; // Success - exit
+          console.log(`[LLMHelper] ${rotation === 0 ? '🚀' : '🔁'} Attempting ${provider.name}...`);
+          yield* provider.execute();
+          console.log(`[LLMHelper] ✅ ${provider.name} stream completed successfully`);
+          return; // SUCCESS — exit immediately
         } catch (err: any) {
-          lastError = err;
-          console.warn(`[LLMHelper] ⚠️ Flash retry ${retry} failed: ${err.message}`);
+          console.warn(`[LLMHelper] ⚠️ ${provider.name} failed: ${err.message}`);
+          // Continue to next provider
         }
       }
     }
 
-    // All attempts failed
-    console.error(`[LLMHelper] ❌ All fallback attempts exhausted`);
-    yield "I apologize, but all AI services are currently unavailable. Please try again in a moment.";
+    // Truly exhausted after all rotations
+    console.error(`[LLMHelper] ❌ All providers exhausted after ${MAX_FULL_ROTATIONS} rotations`);
+    yield "All AI services are currently unavailable. Please check your API keys and try again.";
   }
 
   /**
    * Stream response from Groq
    */
-  private async *streamWithGroq(fullMessage: string): AsyncGenerator<string, void, unknown> {
+  private async * streamWithGroq(fullMessage: string): AsyncGenerator<string, void, unknown> {
     if (!this.groqClient) throw new Error("Groq client not initialized");
 
     const stream = await this.groqClient.chat.completions.create({
@@ -849,9 +940,130 @@ ANSWER DIRECTLY:`;
   }
 
   /**
+   * Stream response from OpenAI with proper system/user message separation
+   */
+  private async * streamWithOpenai(userMessage: string, systemPrompt?: string): AsyncGenerator<string, void, unknown> {
+    if (!this.openaiClient) throw new Error("OpenAI client not initialized");
+
+    const messages: any[] = [];
+    if (systemPrompt) {
+      messages.push({ role: "system", content: systemPrompt });
+    }
+    messages.push({ role: "user", content: userMessage });
+
+    const stream = await this.openaiClient.chat.completions.create({
+      model: OPENAI_MODEL,
+      messages,
+      stream: true,
+      temperature: 0.4,
+      max_tokens: 8192,
+    });
+
+    for await (const chunk of stream) {
+      const content = chunk.choices[0]?.delta?.content;
+      if (content) {
+        yield content;
+      }
+    }
+  }
+
+  /**
+   * Stream response from Claude with proper system/user message separation
+   */
+  private async * streamWithClaude(userMessage: string, systemPrompt?: string): AsyncGenerator<string, void, unknown> {
+    if (!this.claudeClient) throw new Error("Claude client not initialized");
+
+    const stream = await this.claudeClient.messages.stream({
+      model: CLAUDE_MODEL,
+      max_tokens: 8192,
+      ...(systemPrompt ? { system: systemPrompt } : {}),
+      messages: [{ role: "user", content: userMessage }],
+    });
+
+    for await (const event of stream) {
+      if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+        yield event.delta.text;
+      }
+    }
+  }
+
+  /**
+   * Stream multimodal (image + text) response from OpenAI with system/user separation
+   */
+  private async * streamWithOpenaiMultimodal(userMessage: string, imagePath: string, systemPrompt?: string): AsyncGenerator<string, void, unknown> {
+    if (!this.openaiClient) throw new Error("OpenAI client not initialized");
+
+    const imageData = await fs.promises.readFile(imagePath);
+    const base64Image = imageData.toString("base64");
+
+    const messages: any[] = [];
+    if (systemPrompt) {
+      messages.push({ role: "system", content: systemPrompt });
+    }
+    messages.push({
+      role: "user",
+      content: [
+        { type: "text", text: userMessage },
+        { type: "image_url", image_url: { url: `data:image/png;base64,${base64Image}` } }
+      ]
+    });
+
+    const stream = await this.openaiClient.chat.completions.create({
+      model: OPENAI_MODEL,
+      messages,
+      stream: true,
+      temperature: 0.4,
+      max_tokens: 8192,
+    });
+
+    for await (const chunk of stream) {
+      const content = chunk.choices[0]?.delta?.content;
+      if (content) {
+        yield content;
+      }
+    }
+  }
+
+  /**
+   * Stream multimodal (image + text) response from Claude with system/user separation
+   */
+  private async * streamWithClaudeMultimodal(userMessage: string, imagePath: string, systemPrompt?: string): AsyncGenerator<string, void, unknown> {
+    if (!this.claudeClient) throw new Error("Claude client not initialized");
+
+    const imageData = await fs.promises.readFile(imagePath);
+    const base64Image = imageData.toString("base64");
+
+    const stream = await this.claudeClient.messages.stream({
+      model: CLAUDE_MODEL,
+      max_tokens: 8192,
+      ...(systemPrompt ? { system: systemPrompt } : {}),
+      messages: [{
+        role: "user",
+        content: [
+          {
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: "image/png",
+              data: base64Image
+            }
+          },
+          { type: "text", text: userMessage }
+        ]
+      }],
+    });
+
+    for await (const event of stream) {
+      if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+        yield event.delta.text;
+      }
+    }
+  }
+
+  /**
    * Stream response from a specific Gemini model
    */
-  private async *streamWithGeminiModel(fullMessage: string, model: string): AsyncGenerator<string, void, unknown> {
+  private async * streamWithGeminiModel(fullMessage: string, model: string): AsyncGenerator<string, void, unknown> {
     if (!this.client) throw new Error("Gemini client not initialized");
 
     const streamResult = await this.client.models.generateContentStream({
@@ -884,7 +1096,7 @@ ANSWER DIRECTLY:`;
   /**
    * Race Flash and Pro streams, return whichever succeeds first
    */
-  private async *streamWithGeminiParallelRace(fullMessage: string): AsyncGenerator<string, void, unknown> {
+  private async * streamWithGeminiParallelRace(fullMessage: string): AsyncGenerator<string, void, unknown> {
     if (!this.client) throw new Error("Gemini client not initialized");
 
     // Start both streams
@@ -977,13 +1189,41 @@ ANSWER DIRECTLY:`;
   }
 
   /**
+   * Get the OpenAI client for mode-specific LLMs
+   */
+  public getOpenaiClient(): OpenAI | null {
+    return this.openaiClient;
+  }
+
+  /**
+   * Get the Claude client for mode-specific LLMs
+   */
+  public getClaudeClient(): Anthropic | null {
+    return this.claudeClient;
+  }
+
+  /**
+   * Check if OpenAI is available
+   */
+  public hasOpenai(): boolean {
+    return this.openaiClient !== null;
+  }
+
+  /**
+   * Check if Claude is available
+   */
+  public hasClaude(): boolean {
+    return this.claudeClient !== null;
+  }
+
+  /**
    * Stream with Groq using a specific prompt, with Gemini fallback
    * Used by mode-specific LLMs (RecapLLM, FollowUpLLM, WhatToAnswerLLM)
    * @param groqMessage - Message with Groq-optimized prompt
    * @param geminiMessage - Message with Gemini prompt (for fallback)
    * @param config - Optional temperature and max tokens
    */
-  public async *streamWithGroqOrGemini(
+  public async * streamWithGroqOrGemini(
     groqMessage: string,
     geminiMessage: string,
     config?: { temperature?: number; maxTokens?: number }

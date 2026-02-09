@@ -49,7 +49,9 @@ interface ElectronAPI {
   // API Key Management
   setGeminiApiKey: (apiKey: string) => Promise<{ success: boolean; error?: string }>
   setGroqApiKey: (apiKey: string) => Promise<{ success: boolean; error?: string }>
-  getStoredCredentials: () => Promise<{ hasGeminiKey: boolean; hasGroqKey: boolean; googleServiceAccountPath: string | null }>
+  setOpenaiApiKey: (apiKey: string) => Promise<{ success: boolean; error?: string }>
+  setClaudeApiKey: (apiKey: string) => Promise<{ success: boolean; error?: string }>
+  getStoredCredentials: () => Promise<{ hasGeminiKey: boolean; hasGroqKey: boolean; hasOpenaiKey: boolean; hasClaudeKey: boolean; googleServiceAccountPath: string | null }>
 
   // Native Audio Service Events
   onNativeAudioTranscript: (callback: (transcript: { speaker: string; text: string; final: boolean }) => void) => () => void
@@ -321,6 +323,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // API Key Management
   setGeminiApiKey: (apiKey: string) => ipcRenderer.invoke("set-gemini-api-key", apiKey),
   setGroqApiKey: (apiKey: string) => ipcRenderer.invoke("set-groq-api-key", apiKey),
+  setOpenaiApiKey: (apiKey: string) => ipcRenderer.invoke("set-openai-api-key", apiKey),
+  setClaudeApiKey: (apiKey: string) => ipcRenderer.invoke("set-claude-api-key", apiKey),
   getStoredCredentials: () => ipcRenderer.invoke("get-stored-credentials"),
 
   // Native Audio Service Events

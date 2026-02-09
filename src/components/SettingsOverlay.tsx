@@ -253,12 +253,20 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
 
     const [apiKey, setApiKey] = useState('');
     const [groqApiKey, setGroqApiKey] = useState('');
+    const [openaiApiKey, setOpenaiApiKey] = useState('');
+    const [claudeApiKey, setClaudeApiKey] = useState('');
     const [apiKeySaving, setApiKeySaving] = useState(false);
     const [groqKeySaving, setGroqKeySaving] = useState(false);
+    const [openaiKeySaving, setOpenaiKeySaving] = useState(false);
+    const [claudeKeySaving, setClaudeKeySaving] = useState(false);
     const [apiKeySaved, setApiKeySaved] = useState(false);
     const [groqKeySaved, setGroqKeySaved] = useState(false);
+    const [openaiKeySaved, setOpenaiKeySaved] = useState(false);
+    const [claudeKeySaved, setClaudeKeySaved] = useState(false);
     const [hasStoredGeminiKey, setHasStoredGeminiKey] = useState(false);
     const [hasStoredGroqKey, setHasStoredGroqKey] = useState(false);
+    const [hasStoredOpenaiKey, setHasStoredOpenaiKey] = useState(false);
+    const [hasStoredClaudeKey, setHasStoredClaudeKey] = useState(false);
 
     const [serviceAccountPath, setServiceAccountPath] = useState('');
     const [calendarStatus, setCalendarStatus] = useState<{ connected: boolean; email?: string }>({ connected: false });
@@ -279,6 +287,8 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                 if (creds) {
                     setHasStoredGeminiKey(creds.hasGeminiKey);
                     setHasStoredGroqKey(creds.hasGroqKey);
+                    setHasStoredOpenaiKey(creds.hasOpenaiKey);
+                    setHasStoredClaudeKey(creds.hasClaudeKey);
                     if (creds.googleServiceAccountPath) {
                         setServiceAccountPath(creds.googleServiceAccountPath);
                     }
@@ -325,6 +335,44 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
             console.error("Failed to save Groq API key:", e);
         } finally {
             setGroqKeySaving(false);
+        }
+    };
+
+    const handleSaveOpenaiKey = async () => {
+        if (!openaiApiKey.trim()) return;
+        setOpenaiKeySaving(true);
+        try {
+            // @ts-ignore
+            const result = await window.electronAPI.setOpenaiApiKey(openaiApiKey);
+            if (result.success) {
+                setOpenaiKeySaved(true);
+                setHasStoredOpenaiKey(true);
+                setOpenaiApiKey(''); // Clear the input after saving
+                setTimeout(() => setOpenaiKeySaved(false), 2000);
+            }
+        } catch (e) {
+            console.error("Failed to save OpenAI API key:", e);
+        } finally {
+            setOpenaiKeySaving(false);
+        }
+    };
+
+    const handleSaveClaudeKey = async () => {
+        if (!claudeApiKey.trim()) return;
+        setClaudeKeySaving(true);
+        try {
+            // @ts-ignore
+            const result = await window.electronAPI.setClaudeApiKey(claudeApiKey);
+            if (result.success) {
+                setClaudeKeySaved(true);
+                setHasStoredClaudeKey(true);
+                setClaudeApiKey(''); // Clear the input after saving
+                setTimeout(() => setClaudeKeySaved(false), 2000);
+            }
+        } catch (e) {
+            console.error("Failed to save Claude API key:", e);
+        } finally {
+            setClaudeKeySaving(false);
         }
     };
 
@@ -896,6 +944,59 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                                 <p className="text-xs text-text-tertiary mt-2">Used for fast text-only responses (optional)</p>
                                             </div>
 
+                                            <div className="bg-bg-item-surface rounded-xl p-5 border border-border-subtle">
+                                                <label className="block text-xs font-medium text-text-secondary uppercase tracking-wide mb-2">
+                                                    OpenAI API Key
+                                                    {hasStoredOpenaiKey && <span className="ml-2 text-green-500 normal-case">✓ Saved</span>}
+                                                </label>
+                                                <div className="flex gap-3">
+                                                    <input
+                                                        type="password"
+                                                        value={openaiApiKey}
+                                                        onChange={(e) => setOpenaiApiKey(e.target.value)}
+                                                        placeholder={hasStoredOpenaiKey ? "••••••••••••" : "sk-..."}
+                                                        className="flex-1 bg-bg-input border border-border-subtle rounded-lg px-4 py-2.5 text-xs text-text-primary focus:outline-none focus:border-accent-primary transition-colors"
+                                                    />
+                                                    <button
+                                                        onClick={handleSaveOpenaiKey}
+                                                        disabled={openaiKeySaving || !openaiApiKey.trim()}
+                                                        className={`px-5 py-2.5 rounded-lg text-xs font-medium transition-colors ${openaiKeySaved
+                                                            ? 'bg-green-500/20 text-green-400'
+                                                            : 'bg-bg-input hover:bg-bg-secondary border border-border-subtle text-text-primary disabled:opacity-50'
+                                                            }`}
+                                                    >
+                                                        {openaiKeySaving ? 'Saving...' : openaiKeySaved ? 'Saved!' : 'Save'}
+                                                    </button>
+                                                </div>
+                                                <p className="text-xs text-text-tertiary mt-2">Used for GPT-4o text and vision responses (optional)</p>
+                                            </div>
+
+                                            <div className="bg-bg-item-surface rounded-xl p-5 border border-border-subtle">
+                                                <label className="block text-xs font-medium text-text-secondary uppercase tracking-wide mb-2">
+                                                    Claude API Key
+                                                    {hasStoredClaudeKey && <span className="ml-2 text-green-500 normal-case">✓ Saved</span>}
+                                                </label>
+                                                <div className="flex gap-3">
+                                                    <input
+                                                        type="password"
+                                                        value={claudeApiKey}
+                                                        onChange={(e) => setClaudeApiKey(e.target.value)}
+                                                        placeholder={hasStoredClaudeKey ? "••••••••••••" : "sk-ant-..."}
+                                                        className="flex-1 bg-bg-input border border-border-subtle rounded-lg px-4 py-2.5 text-xs text-text-primary focus:outline-none focus:border-accent-primary transition-colors"
+                                                    />
+                                                    <button
+                                                        onClick={handleSaveClaudeKey}
+                                                        disabled={claudeKeySaving || !claudeApiKey.trim()}
+                                                        className={`px-5 py-2.5 rounded-lg text-xs font-medium transition-colors ${claudeKeySaved
+                                                            ? 'bg-green-500/20 text-green-400'
+                                                            : 'bg-bg-input hover:bg-bg-secondary border border-border-subtle text-text-primary disabled:opacity-50'
+                                                            }`}
+                                                    >
+                                                        {claudeKeySaving ? 'Saving...' : claudeKeySaved ? 'Saved!' : 'Save'}
+                                                    </button>
+                                                </div>
+                                                <p className="text-xs text-text-tertiary mt-2">Used for Claude text and vision responses (optional)</p>
+                                            </div>
                                             <div className="bg-bg-item-surface rounded-xl p-5 border border-border-subtle">
                                                 <label className="block text-xs font-medium text-text-secondary uppercase tracking-wide mb-2">Google Cloud Service Account JSON</label>
                                                 <div className="flex gap-3">

@@ -12,6 +12,8 @@ const CREDENTIALS_PATH = path.join(app.getPath('userData'), 'credentials.enc');
 export interface StoredCredentials {
     geminiApiKey?: string;
     groqApiKey?: string;
+    openaiApiKey?: string;
+    claudeApiKey?: string;
     googleServiceAccountPath?: string;
 }
 
@@ -51,6 +53,14 @@ export class CredentialsManager {
         return this.credentials.groqApiKey;
     }
 
+    public getOpenaiApiKey(): string | undefined {
+        return this.credentials.openaiApiKey;
+    }
+
+    public getClaudeApiKey(): string | undefined {
+        return this.credentials.claudeApiKey;
+    }
+
     public getGoogleServiceAccountPath(): string | undefined {
         return this.credentials.googleServiceAccountPath;
     }
@@ -73,6 +83,18 @@ export class CredentialsManager {
         this.credentials.groqApiKey = key;
         this.saveCredentials();
         console.log('[CredentialsManager] Groq API Key updated');
+    }
+
+    public setOpenaiApiKey(key: string): void {
+        this.credentials.openaiApiKey = key;
+        this.saveCredentials();
+        console.log('[CredentialsManager] OpenAI API Key updated');
+    }
+
+    public setClaudeApiKey(key: string): void {
+        this.credentials.claudeApiKey = key;
+        this.saveCredentials();
+        console.log('[CredentialsManager] Claude API Key updated');
     }
 
     public setGoogleServiceAccountPath(filePath: string): void {

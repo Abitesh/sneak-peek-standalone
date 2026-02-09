@@ -411,6 +411,44 @@ export function initializeIpcHandlers(appState: AppState): void {
     }
   });
 
+  ipcMain.handle("set-openai-api-key", async (_, apiKey: string) => {
+    try {
+      const { CredentialsManager } = require('./services/CredentialsManager');
+      CredentialsManager.getInstance().setOpenaiApiKey(apiKey);
+
+      // Also update the LLMHelper immediately
+      const llmHelper = appState.processingHelper.getLLMHelper();
+      llmHelper.setOpenaiApiKey(apiKey);
+
+      // Re-init IntelligenceManager
+      appState.getIntelligenceManager().initializeLLMs();
+
+      return { success: true };
+    } catch (error: any) {
+      console.error("Error saving OpenAI API key:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle("set-claude-api-key", async (_, apiKey: string) => {
+    try {
+      const { CredentialsManager } = require('./services/CredentialsManager');
+      CredentialsManager.getInstance().setClaudeApiKey(apiKey);
+
+      // Also update the LLMHelper immediately
+      const llmHelper = appState.processingHelper.getLLMHelper();
+      llmHelper.setClaudeApiKey(apiKey);
+
+      // Re-init IntelligenceManager
+      appState.getIntelligenceManager().initializeLLMs();
+
+      return { success: true };
+    } catch (error: any) {
+      console.error("Error saving Claude API key:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
   // Get stored API keys (masked for UI display)
   ipcMain.handle("get-stored-credentials", async () => {
     try {
@@ -421,10 +459,12 @@ export function initializeIpcHandlers(appState: AppState): void {
       return {
         hasGeminiKey: !!creds.geminiApiKey,
         hasGroqKey: !!creds.groqApiKey,
+        hasOpenaiKey: !!creds.openaiApiKey,
+        hasClaudeKey: !!creds.claudeApiKey,
         googleServiceAccountPath: creds.googleServiceAccountPath || null
       };
     } catch (error: any) {
-      return { hasGeminiKey: false, hasGroqKey: false, googleServiceAccountPath: null };
+      return { hasGeminiKey: false, hasGroqKey: false, hasOpenaiKey: false, hasClaudeKey: false, googleServiceAccountPath: null };
     }
   });
 
