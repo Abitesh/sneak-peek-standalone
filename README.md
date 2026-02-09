@@ -7,7 +7,9 @@
   ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey)
   ![Status](https://img.shields.io/badge/status-active-success)
 
-  <div/>
+ </div>
+
+---
 **Natively** is a **privacy-first, open-source desktop AI assistant** that works **in real time during meetings, interviews, presentations, exams, and professional conversations**.
 
 Natively is a **free, open-source, privacy-first AI assistant** designed to help you **in real time during live meetings, interviews, presentations, and conversations**.
