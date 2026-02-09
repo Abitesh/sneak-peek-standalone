@@ -1,7 +1,7 @@
 <div align="center">
   <img src="assets/icon.png" width="150" alt="Natively Logo">
 
-  # Natively – Open-Source Cluely Alternative
+  # Natively – Open Source Cluely Alternative
 
   ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
   ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey)
