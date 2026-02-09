@@ -42,7 +42,7 @@ This demo shows **a complete live meeting scenario**:
 
 Download the latest prebuilt version from **[Releases](https://github.com/evinjohnn/natively-cluely-ai-assistant/releases)**.
 
-### [Windows (v1.1.3)](https://github.com/evinjohnn/natively-cluely-ai-assistant/releases/tag/v1.1.2)
+### [Windows (v1.1.2)](https://github.com/evinjohnn/natively-cluely-ai-assistant/releases/tag/v1.1.2)
 ### [macOS (v1.1.3)](https://github.com/evinjohnn/natively-cluely-ai-assistant/releases/tag/v1.1.3)
 
 No build steps required.
@@ -225,6 +225,16 @@ npm run dist
 - Extremely fast inference
 - Text-only in this implementation
 
+### OpenAI
+- **GPT-4o** supported
+- Excellent reasoning and multimodal capabilities
+- Requires API key
+
+### Anthropic Claude
+- **Sonnet 3.5** supported
+- Top-tier coding and reasoning
+- Requires API key
+
 ---
 
 ## Key Features
@@ -313,7 +323,9 @@ No raw audio, screenshots, or transcripts are stored or transmitted unless expli
 - **SQLite** (local storage)
 
 ### Supported Models
-- **Gemini 3.0** (Flash / Pro)
+- **Gemini 2.0** (Flash / Pro)
+- **OpenAI** (GPT-4o)
+- **Claude** (Sonnet 3.5)
 - **Ollama** (Llama, Mistral, CodeLlama)
 - **Groq** (Llama, Mixtral)
 
