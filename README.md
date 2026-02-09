@@ -226,12 +226,12 @@ npm run dist
 - Text-only in this implementation
 
 ### OpenAI
-- **GPT-4o** supported
+- **GPT-5.2** supported
 - Excellent reasoning and multimodal capabilities
 - Requires API key
 
 ### Anthropic Claude
-- **Sonnet 3.5** supported
+- **Sonnet 4.5** supported
 - Top-tier coding and reasoning
 - Requires API key
 
@@ -310,7 +310,7 @@ npm run dist
 
 Natively processes audio, screen context, and user input locally, maintains a rolling context window, and sends only the required prompt data to the selected AI provider (local or cloud).
 
-No raw audio, screenshots, or transcripts are stored or transmitted unless explicitly enabled by the user.
+No raw audio, screenshots, or transcripts are stored or transmitted unless explicitly enabled by the user. 
 
 ---
 
@@ -324,8 +324,8 @@ No raw audio, screenshots, or transcripts are stored or transmitted unless expli
 
 ### Supported Models
 - **Gemini 2.0** (Flash / Pro)
-- **OpenAI** (GPT-4o)
-- **Claude** (Sonnet 3.5)
+- **OpenAI** (GPT-5.2)
+- **Claude** (Sonnet 4.5)
 - **Ollama** (Llama, Mistral, CodeLlama)
 - **Groq** (Llama, Mixtral)
 
