@@ -1,5 +1,9 @@
-# Natively — Open-Source AI Assistant for Meetings, Interviews & Live Conversations  
-### Trusted by 1000+ users
+# Natively – Open-Source Cluely Alternative
+
+Natively is a free, open-source AI interview and meeting assistant.
+It runs as an invisible desktop overlay and helps you in real time,
+similar to Cluely, but fully transparent and customizable.
+
 
 **Natively** is a **privacy-first, open-source desktop AI assistant** that works **in real time during meetings, interviews, presentations, exams, and professional conversations**.
 
