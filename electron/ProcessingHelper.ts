@@ -94,6 +94,9 @@ export class ProcessingHelper {
 
       // CRITICAL: Ensure demo meeting has chunks
       ragManager.ensureDemoMeetingProcessed().catch(console.error);
+
+      // CRITICAL: Cleanup stale queue items to prevent "Chunk not found" errors
+      ragManager.cleanupStaleQueueItems();
     }
   }
 

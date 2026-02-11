@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
-    Github, Twitter, Info, Shield, Cpu, Zap, Database,
-    RefreshCw, ExternalLink, Heart, Server, Globe, Key, Linkedin, Instagram, Mail, MicOff, Star, Bug
+    Github, Twitter, Shield, Cpu, Database,
+    Heart, Linkedin, Instagram, Mail, MicOff, Star, Bug
 } from 'lucide-react';
 import evinProfile from '../assets/evin.png';
 

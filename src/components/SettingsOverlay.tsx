@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import {
     X, Mic, Speaker, Monitor, Keyboard, User, LifeBuoy, LogOut,
-    Command, ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
-    AppWindow, Camera, RotateCcw, Eye, Layout, MessageSquare, Crop,
+    ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
+    Camera, RotateCcw, Eye, Layout, MessageSquare, Crop,
     ChevronDown, Check, BadgeCheck, Power, Palette, Calendar, Ghost, Sun, Moon, RefreshCw, Info, Globe, FlaskConical
 } from 'lucide-react';
+import { analytics } from '../lib/analytics/analytics.service';
 import { AboutSection } from './AboutSection';
 import { AIProvidersSettings } from './settings/AIProvidersSettings';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -592,12 +593,8 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                                 const newState = !isUndetectable;
                                                 setIsUndetectable(newState);
                                                 window.electronAPI?.setUndetectable(newState);
-                                                // Import analytics dynamically or use window object if exposed?
-                                                // Better to import it.
-                                                // I will need to add the import at the top of the file first.
-                                                import('../lib/analytics/analytics.service').then(({ analytics }) => {
-                                                    analytics.trackModeSelected(newState ? 'undetectable' : 'overlay'); // Assuming default is overlay
-                                                });
+                                                // Analytics: Undetectable Mode Toggle
+                                                analytics.trackModeSelected(newState ? 'undetectable' : 'overlay');
                                             }}
                                             className={`w-11 h-6 rounded-full relative cursor-pointer transition-colors ${isUndetectable ? 'bg-accent-primary' : 'bg-bg-toggle-switch border border-border-muted'}`}
                                         >

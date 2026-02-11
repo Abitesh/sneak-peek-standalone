@@ -10,7 +10,7 @@ import {
     HelpCircle,
     ChevronUp,
     ChevronDown,
-    Command,
+
     CornerDownLeft,
     Mic,
     MicOff,
@@ -26,7 +26,7 @@ import {
     Code,
     Copy,
     Check
-} from 'lucide-react'; // Added Copy and Check icons
+} from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { dracula } from 'react-syntax-highlighter/dist/esm/styles/prism';
@@ -38,7 +38,7 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
-import { analytics } from '../lib/analytics/analytics.service'; // Added analytics import
+import { analytics } from '../lib/analytics/analytics.service';
 
 interface Message {
     id: string;
@@ -805,7 +805,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) =
         }));
 
         return () => cleanups.forEach(fn => fn());
-    }, [currentModel]); // Added dependency on currentModel to ensure tracking captures correct model
+    }, [currentModel]); // Ensure tracking captures correct model
 
     // MODE 5: Manual Answer - Toggle recording for voice-to-answer
     const handleAnswerNow = async () => {

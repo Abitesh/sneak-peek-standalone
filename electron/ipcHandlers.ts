@@ -638,7 +638,7 @@ export function initializeIpcHandlers(appState: AppState): void {
     // Trigger RAG processing for the new demo meeting
     const ragManager = appState.getRAGManager();
     if (ragManager && ragManager.isReady()) {
-      ragManager.reprocessMeeting('demo-meeting-004').catch(console.error);
+      ragManager.reprocessMeeting('demo-meeting').catch(console.error);
     }
 
     return { success: true };

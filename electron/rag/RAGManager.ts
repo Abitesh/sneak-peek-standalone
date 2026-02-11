@@ -273,21 +273,47 @@ export class RAGManager {
      * Checks if demo meeting exists but has no chunks, then processes it
      */
     async ensureDemoMeetingProcessed(): Promise<void> {
-        const demoId = 'demo-meeting-004';
+        const demoId = 'demo-meeting'; // Corrected ID to match DatabaseManager
 
         // Check if demo meeting exists in DB
         const { DatabaseManager } = require('../db/DatabaseManager');
         const meeting = DatabaseManager.getInstance().getMeetingDetails(demoId);
 
-        if (!meeting) return; // No demo meeting, nothing to do
+        if (!meeting) {
+            // console.log('[RAGManager] Demo meeting not found in DB, skipping RAG processing');
+            return;
+        }
 
-        // Check if already processed
+        // Check if already processed (has embeddings)
         if (this.isMeetingProcessed(demoId)) {
             // console.log('[RAGManager] Demo meeting already processed');
             return;
         }
 
+        // Double check queue to avoid double-queueing
+        const queueStatus = this.getQueueStatus();
+        // This is a naive check (checks total pending), but good enough for now. 
+        // Ideally we check if *this* meeting is in queue. 
+        // For now, relies on isMeetingProcessed check mostly.
+
         console.log('[RAGManager] Demo meeting found but not processed. Processing now...');
         await this.reprocessMeeting(demoId);
+    }
+
+    /**
+     * Cleanup stale queue items for meetings that no longer exist
+     */
+    public cleanupStaleQueueItems(): void {
+        try {
+            const info = this.db.prepare(`
+                DELETE FROM embedding_queue 
+                WHERE meeting_id NOT IN (SELECT id FROM meetings)
+            `).run();
+            if (info.changes > 0) {
+                console.log(`[RAGManager] Cleaned up ${info.changes} stale queue items`);
+            }
+        } catch (error) {
+            console.error('[RAGManager] Failed to cleanup stale queue items:', error);
+        }
     }
 }

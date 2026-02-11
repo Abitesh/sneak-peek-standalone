@@ -6,7 +6,7 @@ import { GoogleGenAI } from '@google/genai';
 import Database from 'better-sqlite3';
 import { VectorStore, StoredChunk } from './VectorStore';
 
-const EMBEDDING_MODEL = 'text-embedding-004';
+const EMBEDDING_MODEL = 'models/gemini-embedding-001';
 const MAX_RETRIES = 3;
 const RETRY_DELAY_BASE_MS = 2000;
 
@@ -42,7 +42,17 @@ export class EmbeddingPipeline {
             return;
         }
         this.client = new GoogleGenAI({ apiKey });
-        console.log('[EmbeddingPipeline] Initialized with Gemini embedding model');
+        console.log('[EmbeddingPipeline] Initialized with Gemini embedding model: ' + EMBEDDING_MODEL);
+
+        // Debug: List models to find valid embedding model
+        // We use the REST API because the SDK list method is elusive or failing
+        fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`)
+            .then(res => res.json())
+            .then((data: any) => {
+                const models = data.models?.filter((m: any) => m.supportedGenerationMethods?.includes('embedContent'));
+                console.log('[EmbeddingPipeline] Available embedding models:', models?.map((m: any) => m.name));
+            })
+            .catch(err => console.error('[EmbeddingPipeline] Failed to list models:', err));
     }
 
     /**
