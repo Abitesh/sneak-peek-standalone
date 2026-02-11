@@ -37,13 +37,11 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({ currentModel, onSe
         const loadData = async () => {
             try {
                 // Load Custom
-                // @ts-ignore
-                const custom = await window.electronAPI?.invoke('get-custom-providers');
+                const custom = await window.electronAPI?.invoke('get-custom-providers') as CustomProvider[];
                 if (custom) setCustomProviders(custom);
 
                 // Load Ollama
-                // @ts-ignore
-                const local = await window.electronAPI?.invoke('get-available-ollama-models');
+                const local = await window.electronAPI?.invoke('get-available-ollama-models') as string[];
                 if (local) setOllamaModels(local);
             } catch (e) {
                 console.error("Failed to load models:", e);
