@@ -28,7 +28,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { dracula } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import ModelSelector from './ui/ModelSelector';
+import { ModelSelector } from './ui/ModelSelector';
 import TopPill from './ui/TopPill';
 import RollingTranscript from './ui/RollingTranscript';
 import ReactMarkdown from 'react-markdown';
@@ -97,6 +97,28 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) =
         const stored = localStorage.getItem('natively_hideChatHidesWidget');
         return stored ? stored === 'true' : true;
     });
+
+    // Model Selection State
+    const [currentModel, setCurrentModel] = useState<string>('gemini-3-flash-preview');
+
+    useEffect(() => {
+        // Fetch initial model
+        if (window.electronAPI?.invoke) {
+            window.electronAPI.invoke('get-current-llm-config')
+                .then((config: any) => {
+                    if (config && config.model) {
+                        setCurrentModel(config.model);
+                    }
+                })
+                .catch((err: any) => console.error("Failed to fetch model config:", err));
+        }
+    }, []);
+
+    const handleModelSelect = (modelId: string) => {
+        setCurrentModel(modelId);
+        window.electronAPI.invoke('set-model', modelId)
+            .catch((err: any) => console.error("Failed to set model:", err));
+    };
 
     // Global State Sync
     useEffect(() => {
@@ -1400,20 +1422,10 @@ Provide only the answer, nothing else.`;
                                 {/* Bottom Row */}
                                 <div className="flex items-center justify-between mt-3 px-0.5">
                                     <div className="flex items-center gap-1.5">
-                                        <button className="
-                                    flex items-center gap-1.5 
-                                    text-[#FFD60A] 
-                                    bg-[#FFD60A]/10 
-                                    hover:bg-[#FFD60A]/15
-                                    px-2.5 py-1 
-                                    rounded-md 
-                                    text-[10px] font-semibold tracking-wide uppercase
-                                    transition-colors
-                                    interaction-base interaction-press
-                                ">
-                                            <Sparkles className="w-2.5 h-2.5" />
-                                            Smart
-                                        </button>
+                                        <ModelSelector
+                                            currentModel={currentModel}
+                                            onSelectModel={handleModelSelect}
+                                        />
 
                                         <div className="w-px h-3 bg-white/10 mx-1" />
 

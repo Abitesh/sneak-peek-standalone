@@ -143,6 +143,9 @@ export class AppState {
 
     this.setupIntelligenceEvents()
 
+    // Setup Ollama IPC
+    this.setupOllamaIpcHandlers()
+
     // --- NEW SYSTEM AUDIO PIPELINE (SOX + NODE GOOGLE STT) ---
     // LAZY INIT: Do not setup pipeline here to prevent launch volume surge.
     // this.setupSystemAudioPipeline()
@@ -798,6 +801,30 @@ export class AppState {
   }
 
   // Window management methods
+  public setupOllamaIpcHandlers(): void {
+    ipcMain.handle('get-ollama-models', async () => {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2000); // 2s timeout for detection
+
+        const response = await fetch('http://localhost:11434/api/tags', {
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+
+        if (response.ok) {
+          const data = await response.json();
+          // data.models is an array of objects: { name: "llama3:latest", ... }
+          return data.models.map((m: any) => m.name);
+        }
+        return [];
+      } catch (error) {
+        // console.warn("Ollama detection failed:", error);
+        return [];
+      }
+    });
+  }
+
   public createWindow(): void {
     this.windowHelper.createWindow()
   }
@@ -1037,12 +1064,6 @@ export class AppState {
       settingsWin.webContents.send('undetectable-changed', state);
     }
 
-    const advancedWin = this.settingsWindowHelper.getAdvancedWindow(); // SettingsPopup
-    if (advancedWin && !advancedWin.isDestroyed()) {
-      advancedWin.webContents.send('undetectable-changed', state);
-    }
-
-
     // --- STEALTH MODE LOGIC ---
     // If True (Stealth Mode): Hide Dock, Hide Tray (or standard 'stealth' behavior)
     // If False (Visible Mode): Show Dock, Show Tray
@@ -1051,19 +1072,16 @@ export class AppState {
       const activeWindow = this.windowHelper.getMainWindow();
 
       // Determine the truly active window to restore focus to
-      // Priority: Advanced Settings > Settings > Main Window
+      // Priority: Settings > Main Window
       const settingsWin = this.settingsWindowHelper.getSettingsWindow();
-      const advancedWin = this.settingsWindowHelper.getAdvancedWindow();
       let targetFocusWindow = activeWindow;
 
-      if (advancedWin && !advancedWin.isDestroyed() && advancedWin.isVisible()) {
-        targetFocusWindow = advancedWin;
-      } else if (settingsWin && !settingsWin.isDestroyed() && settingsWin.isVisible()) {
+      if (settingsWin && !settingsWin.isDestroyed() && settingsWin.isVisible()) {
         targetFocusWindow = settingsWin;
       }
 
       // Temporarily ignore blur to prevent settings from closing during dock hide/show
-      if (targetFocusWindow && (targetFocusWindow === settingsWin || targetFocusWindow === advancedWin)) {
+      if (targetFocusWindow && (targetFocusWindow === settingsWin)) {
         this.settingsWindowHelper.setIgnoreBlur(true);
       }
 
@@ -1089,7 +1107,7 @@ export class AppState {
       }
 
       // Re-enable blur handling after the transition logic has settled
-      if (targetFocusWindow && (targetFocusWindow === settingsWin || targetFocusWindow === advancedWin)) {
+      if (targetFocusWindow && (targetFocusWindow === settingsWin)) {
         setTimeout(() => {
           this.settingsWindowHelper.setIgnoreBlur(false);
         }, 500);

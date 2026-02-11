@@ -9,12 +9,19 @@ import path from 'path';
 
 const CREDENTIALS_PATH = path.join(app.getPath('userData'), 'credentials.enc');
 
+export interface CustomProvider {
+    id: string;
+    name: string;
+    curlCommand: string;
+}
+
 export interface StoredCredentials {
     geminiApiKey?: string;
     groqApiKey?: string;
     openaiApiKey?: string;
     claudeApiKey?: string;
     googleServiceAccountPath?: string;
+    customProviders?: CustomProvider[];
 }
 
 export class CredentialsManager {
@@ -65,6 +72,10 @@ export class CredentialsManager {
         return this.credentials.googleServiceAccountPath;
     }
 
+    public getCustomProviders(): CustomProvider[] {
+        return this.credentials.customProviders || [];
+    }
+
     public getAllCredentials(): StoredCredentials {
         return { ...this.credentials };
     }
@@ -101,6 +112,28 @@ export class CredentialsManager {
         this.credentials.googleServiceAccountPath = filePath;
         this.saveCredentials();
         console.log('[CredentialsManager] Google Service Account path updated');
+    }
+
+    public saveCustomProvider(provider: CustomProvider): void {
+        if (!this.credentials.customProviders) {
+            this.credentials.customProviders = [];
+        }
+        // Check if exists, update if so
+        const index = this.credentials.customProviders.findIndex(p => p.id === provider.id);
+        if (index !== -1) {
+            this.credentials.customProviders[index] = provider;
+        } else {
+            this.credentials.customProviders.push(provider);
+        }
+        this.saveCredentials();
+        console.log(`[CredentialsManager] Custom Provider '${provider.name}' saved`);
+    }
+
+    public deleteCustomProvider(id: string): void {
+        if (!this.credentials.customProviders) return;
+        this.credentials.customProviders = this.credentials.customProviders.filter(p => p.id !== id);
+        this.saveCredentials();
+        console.log(`[CredentialsManager] Custom Provider '${id}' deleted`);
     }
 
     public clearAll(): void {

@@ -98,6 +98,7 @@ interface ElectronAPI {
   showWindow: () => Promise<void>
   hideWindow: () => Promise<void>
   onToggleExpand: (callback: () => void) => () => void
+  toggleAdvancedSettings: () => Promise<void>
 
   // Streaming listeners
   streamGeminiChat: (message: string, imagePath?: string, context?: string, options?: { skipSystemPrompt?: boolean }) => Promise<void>
@@ -290,6 +291,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   toggleWindow: () => ipcRenderer.invoke("toggle-window"),
   showWindow: () => ipcRenderer.invoke("show-window"),
   hideWindow: () => ipcRenderer.invoke("hide-window"),
+  toggleAdvancedSettings: () => ipcRenderer.invoke("toggle-advanced-settings"),
   openExternal: (url: string) => ipcRenderer.invoke("open-external", url),
   setUndetectable: (state: boolean) => ipcRenderer.invoke("set-undetectable", state),
   getUndetectable: () => ipcRenderer.invoke("get-undetectable"),

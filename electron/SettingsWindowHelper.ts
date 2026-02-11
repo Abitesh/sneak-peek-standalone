@@ -9,14 +9,9 @@ const startUrl = isDev
 
 export class SettingsWindowHelper {
     private settingsWindow: BrowserWindow | null = null
-    private advancedWindow: BrowserWindow | null = null
 
     public getSettingsWindow(): BrowserWindow | null {
         return this.settingsWindow
-    }
-
-    public getAdvancedWindow(): BrowserWindow | null {
-        return this.advancedWindow
     }
 
     public setWindowDimensions(win: BrowserWindow, width: number, height: number): void {
@@ -53,7 +48,7 @@ export class SettingsWindowHelper {
     }
 
     public toggleWindow(x?: number, y?: number): void {
-        const mainWindow = BrowserWindow.getAllWindows().find(w => !w.isDestroyed() && w !== this.settingsWindow && w !== this.advancedWindow);
+        const mainWindow = BrowserWindow.getAllWindows().find(w => !w.isDestroyed() && w !== this.settingsWindow);
         if (mainWindow && x !== undefined && y !== undefined) {
             const bounds = mainWindow.getBounds();
             this.offsetX = x - bounds.x;
@@ -100,12 +95,6 @@ export class SettingsWindowHelper {
         const newY = mainBounds.y + mainBounds.height + this.offsetY;
 
         this.settingsWindow.setPosition(Math.round(newX), Math.round(newY));
-
-        // Also update advanced window if visible
-        if (this.advancedWindow && this.advancedWindow.isVisible()) {
-            const { width } = this.settingsWindow.getBounds();
-            this.advancedWindow.setPosition(Math.round(newX + width + 10), Math.round(newY));
-        }
     }
 
     public closeWindow(): void {
@@ -113,43 +102,10 @@ export class SettingsWindowHelper {
             this.settingsWindow.hide()
             this.emitVisibilityChange(false);
         }
-        this.closeAdvancedWindow();
-    }
-
-    public toggleAdvancedWindow(): void {
-        if (this.advancedWindow && !this.advancedWindow.isDestroyed()) {
-            if (this.advancedWindow.isVisible()) {
-                this.advancedWindow.hide();
-            } else {
-                this.showAdvancedWindow();
-            }
-        } else {
-            this.createAdvancedWindow();
-        }
-    }
-
-    public showAdvancedWindow(): void {
-        if (!this.settingsWindow || !this.settingsWindow.isVisible()) return;
-
-        if (!this.advancedWindow || this.advancedWindow.isDestroyed()) {
-            this.createAdvancedWindow();
-            return;
-        }
-
-        const { x, y, width } = this.settingsWindow.getBounds();
-        this.advancedWindow.setPosition(x + width + 10, y);
-        this.advancedWindow.show();
-        this.advancedWindow.focus();
-    }
-
-    public closeAdvancedWindow(): void {
-        if (this.advancedWindow && !this.advancedWindow.isDestroyed()) {
-            this.advancedWindow.hide();
-        }
     }
 
     private emitVisibilityChange(isVisible: boolean): void {
-        const mainWindow = BrowserWindow.getAllWindows().find(w => !w.isDestroyed() && w !== this.settingsWindow && w !== this.advancedWindow);
+        const mainWindow = BrowserWindow.getAllWindows().find(w => !w.isDestroyed() && w !== this.settingsWindow);
         if (mainWindow) {
             mainWindow.webContents.send('settings-visibility-changed', isVisible);
         }
@@ -212,8 +168,6 @@ export class SettingsWindowHelper {
         // For now, let it stay open until toggled or ESC.
         this.settingsWindow.on('blur', () => {
             if (this.ignoreBlur) return;
-            // Check if focus moved to advanced window
-            if (this.advancedWindow && this.advancedWindow.isFocused()) return;
             this.lastBlurTime = Date.now();
             this.closeWindow();
         })
@@ -221,49 +175,7 @@ export class SettingsWindowHelper {
 
     }
 
-    private createAdvancedWindow(): void {
-        if (!this.settingsWindow) return; // Must have main settings first relative positioning
 
-        const { x, y, width } = this.settingsWindow.getBounds();
-
-        this.advancedWindow = new BrowserWindow({
-            width: 320, // Slightly wider for inputs
-            height: 400,
-            x: x + width + 10,
-            y: y,
-            frame: false,
-            transparent: true,
-            resizable: false,
-            fullscreenable: false,
-            hasShadow: false,
-            alwaysOnTop: true,
-            backgroundColor: "#00000000",
-            show: false,
-            skipTaskbar: true,
-            parent: this.settingsWindow, // Make it a child of settings? Or independent? Independent is safer for now.
-            webPreferences: {
-                nodeIntegration: false,
-                contextIsolation: true,
-                preload: path.join(__dirname, "preload.js")
-            }
-        });
-
-        if (process.platform === "darwin") {
-            this.advancedWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
-            this.advancedWindow.setHiddenInMissionControl(true)
-            this.advancedWindow.setAlwaysOnTop(true, "floating")
-        }
-
-        const advancedUrl = isDev
-            ? `${startUrl}?window=advanced`
-            : `${startUrl}?window=advanced`
-
-        this.advancedWindow.loadURL(advancedUrl);
-
-        this.advancedWindow.once('ready-to-show', () => {
-            this.advancedWindow?.show();
-        });
-    }
 
     private ensureVisibleOnScreen() {
         if (!this.settingsWindow) return;
@@ -291,10 +203,6 @@ export class SettingsWindowHelper {
 
         if (this.settingsWindow && !this.settingsWindow.isDestroyed()) {
             this.settingsWindow.setContentProtection(enable);
-        }
-
-        if (this.advancedWindow && !this.advancedWindow.isDestroyed()) {
-            this.advancedWindow.setContentProtection(enable);
         }
     }
 }

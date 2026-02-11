@@ -3,7 +3,6 @@ import { QueryClient, QueryClientProvider } from "react-query"
 import { ToastProvider, ToastViewport } from "./components/ui/toast"
 import NativelyInterface from "./components/NativelyInterface"
 import SettingsPopup from "./components/SettingsPopup" // Keeping for legacy/specific window support if needed
-import AdvancedSettings from "./components/AdvancedSettings"
 import Launcher from "./components/Launcher"
 import SettingsOverlay from "./components/SettingsOverlay"
 import StartupSequence from "./components/StartupSequence"
@@ -14,12 +13,11 @@ const queryClient = new QueryClient()
 
 const App: React.FC = () => {
   const isSettingsWindow = new URLSearchParams(window.location.search).get('window') === 'settings';
-  const isAdvancedWindow = new URLSearchParams(window.location.search).get('window') === 'advanced';
   const isLauncherWindow = new URLSearchParams(window.location.search).get('window') === 'launcher';
   const isOverlayWindow = new URLSearchParams(window.location.search).get('window') === 'overlay';
 
   // Default to launcher if not specified (dev mode safety)
-  const isDefault = !isSettingsWindow && !isAdvancedWindow && !isOverlayWindow;
+  const isDefault = !isSettingsWindow && !isOverlayWindow;
 
   // State
   const [showStartup, setShowStartup] = useState(true);
@@ -79,19 +77,6 @@ const App: React.FC = () => {
         <QueryClientProvider client={queryClient}>
           <ToastProvider>
             <SettingsPopup />
-            <ToastViewport />
-          </ToastProvider>
-        </QueryClientProvider>
-      </div>
-    );
-  }
-
-  if (isAdvancedWindow) {
-    return (
-      <div className="h-full min-h-0 w-full">
-        <QueryClientProvider client={queryClient}>
-          <ToastProvider>
-            <AdvancedSettings />
             <ToastViewport />
           </ToastProvider>
         </QueryClientProvider>

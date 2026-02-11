@@ -21,14 +21,11 @@ export function initializeIpcHandlers(appState: AppState): void {
 
       const senderWebContents = event.sender
       const settingsWin = appState.settingsWindowHelper.getSettingsWindow()
-      const advancedWin = appState.settingsWindowHelper.getAdvancedWindow()
       const overlayWin = appState.getWindowHelper().getOverlayWindow()
       const launcherWin = appState.getWindowHelper().getLauncherWindow()
 
       if (settingsWin && !settingsWin.isDestroyed() && settingsWin.webContents.id === senderWebContents.id) {
         appState.settingsWindowHelper.setWindowDimensions(settingsWin, width, height)
-      } else if (advancedWin && !advancedWin.isDestroyed() && advancedWin.webContents.id === senderWebContents.id) {
-        appState.settingsWindowHelper.setWindowDimensions(advancedWin, width, height)
       } else if (
         overlayWin && !overlayWin.isDestroyed() && overlayWin.webContents.id === senderWebContents.id
       ) {
@@ -176,7 +173,7 @@ export function initializeIpcHandlers(appState: AppState): void {
   // Streaming IPC Handler
   ipcMain.handle("gemini-chat-stream", async (event, message: string, imagePath?: string, context?: string, options?: { skipSystemPrompt?: boolean }) => {
     try {
-      console.log("[IPC] gemini-chat-stream started");
+      console.log("[IPC] gemini-chat-stream started using LLMHelper.streamChat");
       const llmHelper = appState.processingHelper.getLLMHelper();
 
       // Update IntelligenceManager with USER message immediately
@@ -206,7 +203,8 @@ export function initializeIpcHandlers(appState: AppState): void {
       }
 
       try {
-        const stream = llmHelper.streamChatWithGemini(message, imagePath, context, options?.skipSystemPrompt);
+        // USE streamChat which handles routing
+        const stream = llmHelper.streamChat(message, imagePath, context, options?.skipSystemPrompt);
 
         for await (const token of stream) {
           event.sender.send("gemini-stream-token", token);
@@ -286,13 +284,7 @@ export function initializeIpcHandlers(appState: AppState): void {
     appState.settingsWindowHelper.closeWindow()
   })
 
-  ipcMain.handle("toggle-advanced-settings", () => {
-    appState.settingsWindowHelper.toggleAdvancedWindow()
-  })
 
-  ipcMain.handle("close-advanced-settings", () => {
-    appState.settingsWindowHelper.closeAdvancedWindow()
-  })
 
   ipcMain.handle("set-undetectable", async (_, state: boolean) => {
     appState.setUndetectable(state)
@@ -449,6 +441,61 @@ export function initializeIpcHandlers(appState: AppState): void {
     }
   });
 
+  // Custom Provider Handlers
+  ipcMain.handle("get-custom-providers", async () => {
+    try {
+      const { CredentialsManager } = require('./services/CredentialsManager');
+      return CredentialsManager.getInstance().getCustomProviders();
+    } catch (error: any) {
+      console.error("Error getting custom providers:", error);
+      return [];
+    }
+  });
+
+  ipcMain.handle("save-custom-provider", async (_, provider: any) => {
+    try {
+      const { CredentialsManager } = require('./services/CredentialsManager');
+      CredentialsManager.getInstance().saveCustomProvider(provider);
+      return { success: true };
+    } catch (error: any) {
+      console.error("Error saving custom provider:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle("delete-custom-provider", async (_, id: string) => {
+    try {
+      const { CredentialsManager } = require('./services/CredentialsManager');
+      CredentialsManager.getInstance().deleteCustomProvider(id);
+      return { success: true };
+    } catch (error: any) {
+      console.error("Error deleting custom provider:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle("switch-to-custom-provider", async (_, providerId: string) => {
+    try {
+      const { CredentialsManager } = require('./services/CredentialsManager');
+      const provider = CredentialsManager.getInstance().getCustomProviders().find((p: any) => p.id === providerId);
+
+      if (!provider) {
+        throw new Error("Provider not found");
+      }
+
+      const llmHelper = appState.processingHelper.getLLMHelper();
+      await llmHelper.switchToCustom(provider);
+
+      // Re-init IntelligenceManager (optional, but good for consistency)
+      appState.getIntelligenceManager().initializeLLMs();
+
+      return { success: true };
+    } catch (error: any) {
+      console.error("Error switching to custom provider:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
   // Get stored API keys (masked for UI display)
   ipcMain.handle("get-stored-credentials", async () => {
     try {
@@ -475,6 +522,19 @@ export function initializeIpcHandlers(appState: AppState): void {
       im.setModel(model);
       return { success: true };
     } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle("set-model", async (_, modelId: string) => {
+    try {
+      const llmHelper = appState.processingHelper.getLLMHelper();
+      const { CredentialsManager } = require('./services/CredentialsManager');
+      const customProviders = CredentialsManager.getInstance().getCustomProviders();
+      llmHelper.setModel(modelId, customProviders);
+      return { success: true };
+    } catch (error: any) {
+      console.error("Error setting model:", error);
       return { success: false, error: error.message };
     }
   });

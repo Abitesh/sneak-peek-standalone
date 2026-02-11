@@ -9,7 +9,7 @@ import {
   ToastMessage
 } from "../components/ui/toast"
 import QueueCommands from "../components/Queue/QueueCommands"
-import ModelSelector from "../components/ui/ModelSelector"
+import { ModelSelector } from "../components/ui/ModelSelector"
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -39,7 +39,7 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
   const chatInputRef = useRef<HTMLInputElement>(null)
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
-  const [currentModel, setCurrentModel] = useState<{ provider: string; model: string }>({ provider: "gemini", model: "gemini-3-flash-preview" })
+  const [currentModel, setCurrentModel] = useState<string>('gemini-3-flash-preview')
 
   const barRef = useRef<HTMLDivElement>(null)
 
@@ -163,7 +163,7 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
     const loadCurrentModel = async () => {
       try {
         const config = await window.electronAPI.getCurrentLlmConfig();
-        setCurrentModel({ provider: config.provider, model: config.model });
+        if (config && config.model) setCurrentModel(config.model);
       } catch (error) {
         console.error('Error loading current model config:', error);
       }
@@ -261,13 +261,12 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
     setIsSettingsOpen(!isSettingsOpen)
   }
 
-  const handleModelChange = (provider: "ollama" | "gemini", model: string) => {
-    setCurrentModel({ provider, model })
-    // Update chat messages to reflect the model change
-    const modelName = provider === "ollama" ? model : "Gemini 3 Flash"
+  const handleModelChange = (modelId: string) => {
+    setCurrentModel(modelId)
+    window.electronAPI.invoke('set-model', modelId).catch(console.error);
     setChatMessages((msgs) => [...msgs, {
       role: "gemini",
-      text: `🔄 Switched to ${provider === "ollama" ? "🏠" : "☁️"} ${modelName}. Ready for your questions!`
+      text: `🔄 Switched to ${modelId}. Ready for your questions!`
     }])
   }
 
@@ -304,7 +303,7 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
           {/* Conditional Settings Interface */}
           {isSettingsOpen && (
             <div className="mt-4 w-full mx-auto">
-              <ModelSelector onModelChange={handleModelChange} onChatOpen={() => setIsChatOpen(true)} />
+              <ModelSelector currentModel={currentModel} onSelectModel={handleModelChange} />
             </div>
           )}
 
@@ -314,7 +313,7 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
               <div className="flex-1 overflow-y-auto mb-3 p-3 rounded-lg bg-white/10 backdrop-blur-md max-h-64 min-h-[120px] glass-content border border-white/20 shadow-lg">
                 {chatMessages.length === 0 ? (
                   <div className="text-sm text-gray-600 text-center mt-8">
-                    💬 Chat with {currentModel.provider === "ollama" ? "🏠" : "☁️"} {currentModel.model}
+                    💬 Chat with {currentModel}
                     <br />
                     <span className="text-xs text-gray-500">Take a screenshot (Cmd+H) for automatic analysis</span>
                     <br />
@@ -355,7 +354,7 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
                         <span className="animate-pulse text-gray-400">●</span>
                         <span className="animate-pulse animation-delay-200 text-gray-400">●</span>
                         <span className="animate-pulse animation-delay-400 text-gray-400">●</span>
-                        <span className="ml-2">{currentModel.model} is replying...</span>
+                        <span className="ml-2">{currentModel} is replying...</span>
                       </span>
                     </div>
                   </div>

@@ -4,6 +4,9 @@ import OpenAI from "openai"
 import Anthropic from "@anthropic-ai/sdk"
 import fs from "fs"
 import { HARD_SYSTEM_PROMPT, GROQ_SYSTEM_PROMPT, OPENAI_SYSTEM_PROMPT, CLAUDE_SYSTEM_PROMPT } from "./llm/prompts"
+import { deepVariableReplacer } from './utils/curlUtils';
+import curl2Json from "@bany/curl-to-json";
+import { CustomProvider } from './services/CredentialsManager';
 
 interface OllamaResponse {
   response: string
@@ -34,6 +37,7 @@ export class LLMHelper {
   private ollamaModel: string = "llama3.2"
   private ollamaUrl: string = "http://localhost:11434"
   private geminiModel: string = GEMINI_FLASH_MODEL
+  private customProvider: CustomProvider | null = null;
 
   constructor(apiKey?: string, useOllama: boolean = false, ollamaModel?: string, ollamaUrl?: string, groqApiKey?: string, openaiApiKey?: string, claudeApiKey?: string) {
     this.useOllama = useOllama
@@ -103,6 +107,45 @@ export class LLMHelper {
     this.claudeApiKey = apiKey;
     this.claudeClient = new Anthropic({ apiKey });
     console.log("[LLMHelper] Claude API Key updated.");
+  }
+
+  private currentModelId: string = GEMINI_FLASH_MODEL;
+
+  public setModel(modelId: string, customProviders: CustomProvider[] = []) {
+    // Map UI short codes to internal Model IDs
+    let targetModelId = modelId;
+    if (modelId === 'gemini') targetModelId = GEMINI_FLASH_MODEL;
+    if (modelId === 'gemini-pro') targetModelId = GEMINI_PRO_MODEL;
+    if (modelId === 'gpt-4o') targetModelId = OPENAI_MODEL;
+    if (modelId === 'claude') targetModelId = CLAUDE_MODEL;
+    if (modelId === 'llama') targetModelId = GROQ_MODEL;
+
+    if (targetModelId.startsWith('ollama-')) {
+      this.useOllama = true;
+      this.ollamaModel = targetModelId.replace('ollama-', '');
+      this.customProvider = null;
+      console.log(`[LLMHelper] Switched to Ollama: ${this.ollamaModel}`);
+      return;
+    }
+
+    const custom = customProviders.find(p => p.id === targetModelId);
+    if (custom) {
+      this.useOllama = false;
+      this.customProvider = custom;
+      console.log(`[LLMHelper] Switched to Custom Provider: ${custom.name}`);
+      return;
+    }
+
+    // Standard Cloud Models
+    this.useOllama = false;
+    this.customProvider = null;
+    this.currentModelId = targetModelId;
+
+    // Update specific model props if needed
+    if (targetModelId === GEMINI_PRO_MODEL) this.geminiModel = GEMINI_PRO_MODEL;
+    if (targetModelId === GEMINI_FLASH_MODEL) this.geminiModel = GEMINI_FLASH_MODEL;
+
+    console.log(`[LLMHelper] Switched to Cloud Model: ${targetModelId}`);
   }
 
   private cleanJsonResponse(text: string): string {
@@ -551,6 +594,32 @@ ANSWER DIRECTLY:`;
         return await this.callOllama(combinedMessages.gemini);
       }
 
+      if (this.customProvider) {
+        console.log(`[LLMHelper] Using Custom Provider: ${this.customProvider.name}`);
+        const response = await this.executeCustomProvider(
+          this.customProvider.curlCommand,
+          combinedMessages.gemini,
+          skipSystemPrompt ? "" : HARD_SYSTEM_PROMPT,
+          message,
+          context || "",
+          imagePath
+        );
+        return this.processResponse(response);
+      }
+
+      // --- Direct Routing based on Selected Model ---
+      if (this.currentModelId === OPENAI_MODEL && this.openaiClient) {
+        return await this.generateWithOpenai(userContent, openaiSystemPrompt, imagePath);
+      }
+      if (this.currentModelId === CLAUDE_MODEL && this.claudeClient) {
+        return await this.generateWithClaude(userContent, claudeSystemPrompt, imagePath);
+      }
+      if (this.currentModelId === GROQ_MODEL && this.groqClient && !isMultimodal) {
+        return await this.generateWithGroq(combinedMessages.groq);
+      }
+
+      // Fallback (Gemini) - logic handled below by SMART DYNAMIC FALLBACK list
+
       // ============================================================
       // SMART DYNAMIC FALLBACK (Non-Streaming)
       // Multimodal: Gemini Flash → OpenAI → Claude → Gemini Pro (Groq excluded)
@@ -750,6 +819,68 @@ ANSWER DIRECTLY:`;
     return textBlock?.text || "";
   }
 
+  /**
+   * Executes a custom cURL provider defined by the user
+   */
+  public async executeCustomProvider(
+    curlCommand: string,
+    combinedMessage: string,
+    systemPrompt: string,
+    rawUserMessage: string,
+    context: string,
+    imagePath?: string
+  ): Promise<string> {
+
+    // 1. Parse cURL to JSON object
+    const requestConfig = curl2Json(curlCommand);
+
+    // 2. Prepare Image (if any)
+    let base64Image = "";
+    if (imagePath) {
+      try {
+        const imageData = await fs.promises.readFile(imagePath);
+        base64Image = imageData.toString("base64");
+      } catch (e) {
+        console.warn("Failed to read image for Custom Provider:", e);
+      }
+    }
+
+    // 3. Prepare Variables
+    const variables = {
+      TEXT: combinedMessage,             // Deprecated but kept for compat: System + Context + User
+      PROMPT: combinedMessage,           // Alias for TEXT
+      SYSTEM_PROMPT: systemPrompt,       // Raw System Prompt
+      USER_MESSAGE: rawUserMessage,      // Raw User Message
+      CONTEXT: context,                  // Raw Context
+      IMAGE_BASE64: base64Image,         // Base64 encoded image string
+    };
+
+    // 4. Inject Variables into URL, Headers, and Body
+    const url = deepVariableReplacer(requestConfig.url, variables);
+    const headers = deepVariableReplacer(requestConfig.header || {}, variables);
+    const body = deepVariableReplacer(requestConfig.data || {}, variables);
+
+    // 5. Execute Fetch
+    try {
+      const response = await fetch(url, {
+        method: requestConfig.method || 'POST',
+        headers: headers,
+        body: JSON.stringify(body)
+      });
+
+      const data = await response.json();
+
+      // 6. Extract Answer
+      return this.extractContentFromPath(data, "choices[0].message.content");
+    } catch (error) {
+      console.error("Custom Provider Error:", error);
+      throw error;
+    }
+  }
+
+  private extractContentFromPath(obj: any, path: string) {
+    return path.split('.').reduce((o, k) => (o || {})[k], obj) || JSON.stringify(obj);
+  }
 
   private async tryGenerateResponse(fullMessage: string, imagePath?: string): Promise<string> {
     let rawResponse: string;
@@ -915,6 +1046,109 @@ ANSWER DIRECTLY:`;
     // Truly exhausted after all rotations
     console.error(`[LLMHelper] ❌ All providers exhausted after ${MAX_FULL_ROTATIONS} rotations`);
     yield "All AI services are currently unavailable. Please check your API keys and try again.";
+  }
+
+  /**
+   * Universal Stream Chat - Routes to correct provider based on currentModelId
+   */
+  public async * streamChat(
+    message: string,
+    imagePath?: string,
+    context?: string,
+    skipSystemPrompt: boolean = false
+  ): AsyncGenerator<string, void, unknown> {
+
+    // Preparation
+    const isMultimodal = !!imagePath;
+
+    // Helper to build combined prompts for Groq/Gemini
+    const buildMessage = (systemPrompt: string) => {
+      if (skipSystemPrompt) {
+        return context
+          ? `CONTEXT:\n${context}\n\nUSER QUESTION:\n${message}`
+          : message;
+      }
+      return context
+        ? `${systemPrompt}\n\nCONTEXT:\n${context}\n\nUSER QUESTION:\n${message}`
+        : `${systemPrompt}\n\n${message}`;
+    };
+
+    const userContent = context
+      ? `CONTEXT:\n${context}\n\nUSER QUESTION:\n${message}`
+      : message;
+
+    const combinedMessages = {
+      gemini: buildMessage(HARD_SYSTEM_PROMPT),
+      groq: buildMessage(GROQ_SYSTEM_PROMPT)
+    };
+
+    const openaiSystemPrompt = skipSystemPrompt ? undefined : OPENAI_SYSTEM_PROMPT;
+    const claudeSystemPrompt = skipSystemPrompt ? undefined : CLAUDE_SYSTEM_PROMPT;
+
+
+    // 1. Ollama (Non-streaming fallback for now or TODO implement streaming)
+    if (this.useOllama) {
+      const response = await this.callOllama(combinedMessages.gemini);
+      yield response;
+      return;
+    }
+
+    // 2. Custom (Non-streaming fallback)
+    if (this.customProvider) {
+      const response = await this.executeCustomProvider(
+        this.customProvider.curlCommand,
+        combinedMessages.gemini,
+        skipSystemPrompt ? "" : HARD_SYSTEM_PROMPT,
+        message,
+        context || "",
+        imagePath
+      );
+      yield this.processResponse(response);
+      return;
+    }
+
+    // 3. Direct Routing
+    if (this.currentModelId === OPENAI_MODEL && this.openaiClient) {
+      if (isMultimodal && imagePath) {
+        yield* this.streamWithOpenaiMultimodal(userContent, imagePath, openaiSystemPrompt);
+      } else {
+        yield* this.streamWithOpenai(userContent, openaiSystemPrompt);
+      }
+      return;
+    }
+
+    if (this.currentModelId === CLAUDE_MODEL && this.claudeClient) {
+      if (isMultimodal && imagePath) {
+        yield* this.streamWithClaudeMultimodal(userContent, imagePath, claudeSystemPrompt);
+      } else {
+        yield* this.streamWithClaude(userContent, claudeSystemPrompt);
+      }
+      return;
+    }
+
+    if (this.currentModelId === GROQ_MODEL && this.groqClient && !isMultimodal) {
+      yield* this.streamWithGroq(combinedMessages.groq);
+      return;
+    }
+
+    // 4. Gemini Routing
+    if (this.client) {
+      if (this.currentModelId === GEMINI_PRO_MODEL) {
+        yield* this.streamWithGeminiModel(combinedMessages.gemini, GEMINI_PRO_MODEL);
+        return;
+      }
+      if (this.currentModelId === GEMINI_FLASH_MODEL) {
+        yield* this.streamWithGeminiModel(combinedMessages.gemini, GEMINI_FLASH_MODEL);
+        return;
+      }
+    }
+
+    // 5. Fallback (Race)
+    if (this.client) {
+      yield* this.streamWithGeminiParallelRace(combinedMessages.gemini);
+    } else {
+      throw new Error("No LLM provider available");
+    }
   }
 
   /**
@@ -1156,11 +1390,13 @@ ANSWER DIRECTLY:`;
     }
   }
 
-  public getCurrentProvider(): "ollama" | "gemini" {
+  public getCurrentProvider(): "ollama" | "gemini" | "custom" {
+    if (this.customProvider) return "custom";
     return this.useOllama ? "ollama" : "gemini";
   }
 
   public getCurrentModel(): string {
+    if (this.customProvider) return this.customProvider.name;
     return this.useOllama ? this.ollamaModel : this.geminiModel;
   }
 
@@ -1542,7 +1778,18 @@ ANSWER DIRECTLY:`;
     }
 
     this.useOllama = false;
+    this.customProvider = null;
     // console.log(`[LLMHelper] Switched to Gemini: ${this.geminiModel}`);
+  }
+
+  public async switchToCustom(provider: CustomProvider): Promise<void> {
+    this.customProvider = provider;
+    this.useOllama = false;
+    this.client = null;
+    this.groqClient = null;
+    this.openaiClient = null;
+    this.claudeClient = null;
+    console.log(`[LLMHelper] Switched to Custom Provider: ${provider.name}`);
   }
 
   public async testConnection(): Promise<{ success: boolean; error?: string }> {
