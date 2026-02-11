@@ -10,6 +10,7 @@ import TopSearchPill from './TopSearchPill';
 import GlobalChatOverlay from './GlobalChatOverlay';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FeatureSpotlight } from './FeatureSpotlight';
+import { analytics } from '../lib/analytics/analytics.service'; // Added analytics import
 
 interface Meeting {
     id: string;
@@ -96,6 +97,7 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
 
     const handleRefresh = async () => {
         setIsRefreshing(true);
+        analytics.trackCommandExecuted('refresh_calendar');
         try {
             if (window.electronAPI && window.electronAPI.calendarRefresh) {
                 setShowNotification(true);
@@ -170,6 +172,7 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
 
     const handleStartPreparedMeeting = async () => {
         if (!preparedEvent) return;
+        analytics.trackCommandExecuted('start_prepared_meeting');
         try {
             const inputDeviceId = localStorage.getItem('preferredInputDeviceId');
             const outputDeviceId = localStorage.getItem('preferredOutputDeviceId');
@@ -193,7 +196,8 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
     const toggleDetectable = () => {
         const newState = !isDetectable;
         setIsDetectable(newState);
-        window.electronAPI?.setUndetectable(!newState);
+        window.electronAPI?.setUndetectable(!newState); // Note: setUndetectable takes the *undetectable* state, which is inverse of *detectable*
+        analytics.trackModeSelected(newState ? 'launcher' : 'undetectable'); // If visible (detectable), mode is normal/launcher. If not detectable, mode is undetectable.
     };
 
     // Group meetings
@@ -235,6 +239,8 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
     const handleOpenMeeting = async (meeting: Meeting) => {
         setForwardMeeting(null); // Clear forward history on new navigation
         console.log("[Launcher] Opening meeting:", meeting.id);
+        analytics.trackCommandExecuted('open_meeting_details');
+
         // Fetch full meeting details including transcript and usage
         if (window.electronAPI && window.electronAPI.getMeetingDetails) {
             try {
@@ -319,12 +325,14 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
                 <TopSearchPill
                     meetings={meetings}
                     onAIQuery={(query) => {
+                        analytics.trackCommandExecuted('ai_query_search');
                         setSubmittedGlobalQuery(query);
                         setIsGlobalChatOpen(true);
                     }}
                     onLiteralSearch={(query) => {
                         // For now, also use AI query for literal search
                         // Could be enhanced to do fuzzy filtering in the UI
+                        analytics.trackCommandExecuted('literal_search');
                         setSubmittedGlobalQuery(query);
                         setIsGlobalChatOpen(true);
                     }}
@@ -332,6 +340,7 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
                         const meeting = meetings.find(m => m.id === meetingId);
                         if (meeting) {
                             handleOpenMeeting(meeting);
+                            analytics.trackCommandExecuted('open_meeting_from_search');
                         }
                     }}
                 />
@@ -339,7 +348,10 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
                 {/* Right: Actions */}
                 <div className="flex items-center gap-3 no-drag">
                     <button
-                        onClick={onOpenSettings}
+                        onClick={() => {
+                            onOpenSettings();
+                            // analytics.trackCommandExecuted('open_settings'); // Optional, high volume
+                        }}
                         className="p-2 text-text-secondary hover:text-text-primary transition-all duration-300 hover:drop-shadow-[0_0_8px_rgba(255,255,255,0.5)]"
                         title="Settings"
                     >
@@ -438,7 +450,10 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
 
                                         {/* Start Natively CTA Pill */}
                                         <button
-                                            onClick={onStartMeeting}
+                                            onClick={() => {
+                                                onStartMeeting();
+                                                analytics.trackCommandExecuted('start_natively_cta');
+                                            }}
                                             className="
                                     group relative overflow-hidden
                                     bg-gradient-to-b from-sky-400 via-sky-500 to-blue-600
