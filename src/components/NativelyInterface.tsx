@@ -23,8 +23,10 @@ import {
     SlidersHorizontal,
     Ghost,
     Link,
-    Code
-} from 'lucide-react';
+    Code,
+    Copy,
+    Check
+} from 'lucide-react'; // Added Copy and Check icons
 import { motion, AnimatePresence } from 'framer-motion';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { dracula } from 'react-syntax-highlighter/dist/esm/styles/prism';
@@ -36,6 +38,7 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
+import { analytics } from '../lib/analytics/analytics.service'; // Added analytics import
 
 interface Message {
     id: string;
@@ -67,6 +70,9 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) =
         const stored = localStorage.getItem('natively_interviewer_transcript');
         return stored !== 'false';
     });
+
+    // Analytics State
+    const requestStartTimeRef = useRef<number | null>(null);
 
     // Sync transcript setting
     useEffect(() => {
@@ -237,6 +243,11 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) =
             setVoiceInput('');
             setIsProcessing(false);
             // Optionally reset connection status if needed, but connection persists
+
+            // Track new conversation/session if applicable?
+            // Actually 'app_opened' is global, 'assistant_started' is overlay.
+            // Maybe 'conversation_started' event?
+            analytics.trackConversationStarted();
         });
         return () => unsubscribe();
     }, []);
@@ -565,6 +576,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) =
         cleanups.push(window.electronAPI.onScreenshotTaken(async (data) => {
             setIsExpanded(true);
             setIsProcessing(true);
+            analytics.trackCommandExecuted('screenshot_analysis');
 
             setMessages(prev => [...prev, {
                 id: Date.now().toString(),
@@ -614,10 +626,16 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) =
 
     // Quick Actions - Updated to use new Intelligence APIs
 
+    const handleCopy = (text: string) => {
+        navigator.clipboard.writeText(text);
+        analytics.trackCopyAnswer();
+        // Optional: Trigger a small toast or state change for visual feedback
+    };
 
     const handleWhatToSay = async () => {
         setIsExpanded(true);
         setIsProcessing(true);
+        analytics.trackCommandExecuted('what_to_say');
 
         // Capture and clear attached image context
         const currentAttachment = attachedContext;
@@ -650,6 +668,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) =
     const handleFollowUp = async (intent: string = 'rephrase') => {
         setIsExpanded(true);
         setIsProcessing(true);
+        analytics.trackCommandExecuted('follow_up_' + intent);
 
         try {
             await window.electronAPI.generateFollowUp(intent);
@@ -667,6 +686,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) =
     const handleRecap = async () => {
         setIsExpanded(true);
         setIsProcessing(true);
+        analytics.trackCommandExecuted('recap');
 
         try {
             await window.electronAPI.generateRecap();
@@ -684,6 +704,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) =
     const handleFollowUpQuestions = async () => {
         setIsExpanded(true);
         setIsProcessing(true);
+        analytics.trackCommandExecuted('suggest_questions');
 
         try {
             await window.electronAPI.generateFollowUpQuestions();
@@ -726,6 +747,22 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) =
         // Stream Done
         cleanups.push(window.electronAPI.onGeminiStreamDone(() => {
             setIsProcessing(false);
+
+            // Calculate latency if we have a start time
+            let latency = 0;
+            if (requestStartTimeRef.current) {
+                latency = Date.now() - requestStartTimeRef.current;
+                requestStartTimeRef.current = null;
+            }
+
+            // Track Usage
+            // We don't have token usage from this event, so we'll just track latency
+            analytics.trackModelUsed({
+                model_name: currentModel,
+                provider_type: 'cloud', // Assuming generic is cloud for now, unless we check model name
+                latency_ms: latency
+            });
+
             setMessages(prev => {
                 const lastMsg = prev[prev.length - 1];
                 if (lastMsg && lastMsg.isStreaming) {
@@ -743,6 +780,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) =
         // Stream Error
         cleanups.push(window.electronAPI.onGeminiStreamError((error) => {
             setIsProcessing(false);
+            requestStartTimeRef.current = null; // Clear timer on error
             setMessages(prev => {
                 // Append error to the current message or add new one?
                 // Let's add a new error block if the previous one confusing,
@@ -767,7 +805,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) =
         }));
 
         return () => cleanups.forEach(fn => fn());
-    }, []);
+    }, [currentModel]); // Added dependency on currentModel to ensure tracking captures correct model
 
     // MODE 5: Manual Answer - Toggle recording for voice-to-answer
     const handleAnswerNow = async () => {
@@ -840,6 +878,7 @@ Provide only the answer, nothing else.`;
                 }
 
                 // Call Streaming API: message = question, context = instructions
+                requestStartTimeRef.current = Date.now();
                 await window.electronAPI.streamGeminiChat(question, currentAttachment?.path, prompt, { skipSystemPrompt: true });
 
             } catch (err) {
@@ -912,6 +951,7 @@ Provide only the answer, nothing else.`;
 
         try {
             // Pass imagePath if attached, AND conversation context
+            requestStartTimeRef.current = Date.now();
             await window.electronAPI.streamGeminiChat(
                 userText || 'Analyze this screenshot',
                 currentAttachment?.path,
@@ -1274,6 +1314,15 @@ Provide only the answer, nothing else.`;
                                                         <Image className="w-2.5 h-2.5" />
                                                         <span>Screenshot attached</span>
                                                     </div>
+                                                )}
+                                                {msg.role === 'system' && !msg.isStreaming && (
+                                                    <button
+                                                        onClick={() => handleCopy(msg.text)}
+                                                        className="absolute top-2 right-2 p-1.5 bg-black/40 hover:bg-black/60 text-slate-400 hover:text-white rounded-md opacity-0 group-hover:opacity-100 transition-opacity"
+                                                        title="Copy to clipboard"
+                                                    >
+                                                        <Copy className="w-3.5 h-3.5" />
+                                                    </button>
                                                 )}
                                                 {renderMessageText(msg)}
                                             </div>

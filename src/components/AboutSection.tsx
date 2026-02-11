@@ -22,13 +22,13 @@ export const AboutSection: React.FC<AboutSectionProps> = () => {
         <div className="space-y-6 animated fadeIn pb-10">
             {/* Header */}
             <div>
-                <h3 className="text-xl font-bold text-text-primary mb-1">About Natively</h3>
+                <h3 className="text-lg font-bold text-text-primary mb-1">About Natively</h3>
                 <p className="text-sm text-text-secondary">Designed to be invisible, intelligent, and trusted.</p>
             </div>
 
             {/* Architecture Section */}
             <div>
-                <h4 className="text-xs font-bold text-text-tertiary uppercase tracking-wider mb-4 px-1">How Natively Works</h4>
+                <h4 className="text-xs font-bold text-text-tertiary uppercase tracking-wider mb-2 px-1">How Natively Works</h4>
                 <div className="bg-bg-item-surface rounded-xl border border-border-subtle overflow-hidden">
                     <div className="p-5 border-b border-border-subtle bg-bg-card/50">
                         <div className="flex items-start gap-4">
@@ -62,7 +62,7 @@ export const AboutSection: React.FC<AboutSectionProps> = () => {
 
             {/* Privacy Section */}
             <div>
-                <h4 className="text-xs font-bold text-text-tertiary uppercase tracking-wider mb-4 px-1">Privacy & Data</h4>
+                <h4 className="text-xs font-bold text-text-tertiary uppercase tracking-wider mb-2 px-1">Privacy & Data</h4>
                 <div className="bg-bg-item-surface rounded-xl border border-border-subtle p-5 space-y-4">
                     <div className="flex items-start gap-3">
                         <Shield size={16} className="text-green-400 mt-0.5" />
@@ -91,7 +91,7 @@ export const AboutSection: React.FC<AboutSectionProps> = () => {
 
             {/* Community Section */}
             <div>
-                <h4 className="text-xs font-bold text-text-tertiary uppercase tracking-wider mb-4 px-1">Community</h4>
+                <h4 className="text-xs font-bold text-text-tertiary uppercase tracking-wider mb-2 px-1">Community</h4>
                 <div className="space-y-4">
                     {/* 1. Founder Profile */}
                     <div className="bg-bg-item-surface rounded-xl p-5">

@@ -3,10 +3,13 @@ import Groq from "groq-sdk"
 import OpenAI from "openai"
 import Anthropic from "@anthropic-ai/sdk"
 import fs from "fs"
-import { HARD_SYSTEM_PROMPT, GROQ_SYSTEM_PROMPT, OPENAI_SYSTEM_PROMPT, CLAUDE_SYSTEM_PROMPT } from "./llm/prompts"
+import { HARD_SYSTEM_PROMPT, GROQ_SYSTEM_PROMPT, OPENAI_SYSTEM_PROMPT, CLAUDE_SYSTEM_PROMPT, UNIVERSAL_SYSTEM_PROMPT } from "./llm/prompts"
 import { deepVariableReplacer } from './utils/curlUtils';
 import curl2Json from "@bany/curl-to-json";
 import { CustomProvider } from './services/CredentialsManager';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+const execAsync = promisify(exec);
 
 interface OllamaResponse {
   response: string
@@ -591,11 +594,13 @@ ANSWER DIRECTLY:`;
       const claudeSystemPrompt = skipSystemPrompt ? undefined : CLAUDE_SYSTEM_PROMPT;
 
       if (this.useOllama) {
+        // Use streaming if available via streamChat, but for non-streaming call:
         return await this.callOllama(combinedMessages.gemini);
       }
 
       if (this.customProvider) {
         console.log(`[LLMHelper] Using Custom Provider: ${this.customProvider.name}`);
+        // For non-streaming call
         const response = await this.executeCustomProvider(
           this.customProvider.curlCommand,
           combinedMessages.gemini,
@@ -917,9 +922,7 @@ ANSWER DIRECTLY:`;
     return rawResponse || "";
   }
 
-  public async chat(message: string): Promise<string> {
-    return this.chatWithGemini(message);
-  }
+
 
   /**
    * Stream chat response with Groq-first fallback chain for text-only,
@@ -1055,97 +1058,83 @@ ANSWER DIRECTLY:`;
     message: string,
     imagePath?: string,
     context?: string,
-    skipSystemPrompt: boolean = false
+    systemPromptOverride?: string // Optional override (defaults to HARD_SYSTEM_PROMPT)
   ): AsyncGenerator<string, void, unknown> {
 
     // Preparation
     const isMultimodal = !!imagePath;
 
-    // Helper to build combined prompts for Groq/Gemini
-    const buildMessage = (systemPrompt: string) => {
-      if (skipSystemPrompt) {
-        return context
-          ? `CONTEXT:\n${context}\n\nUSER QUESTION:\n${message}`
-          : message;
-      }
-      return context
-        ? `${systemPrompt}\n\nCONTEXT:\n${context}\n\nUSER QUESTION:\n${message}`
-        : `${systemPrompt}\n\n${message}`;
-    };
+    // Determine the system prompt to use
+    // logic: if override provided, use it. otherwise use HARD_SYSTEM_PROMPT (which is the universal base)
+    const finalSystemPrompt = systemPromptOverride || HARD_SYSTEM_PROMPT;
 
+    // Helper to build combined user message
     const userContent = context
       ? `CONTEXT:\n${context}\n\nUSER QUESTION:\n${message}`
       : message;
 
-    const combinedMessages = {
-      gemini: buildMessage(HARD_SYSTEM_PROMPT),
-      groq: buildMessage(GROQ_SYSTEM_PROMPT)
-    };
-
-    const openaiSystemPrompt = skipSystemPrompt ? undefined : OPENAI_SYSTEM_PROMPT;
-    const claudeSystemPrompt = skipSystemPrompt ? undefined : CLAUDE_SYSTEM_PROMPT;
-
-
-    // 1. Ollama (Non-streaming fallback for now or TODO implement streaming)
+    // 1. Ollama Streaming
     if (this.useOllama) {
-      const response = await this.callOllama(combinedMessages.gemini);
-      yield response;
+      yield* this.streamWithOllama(message, context, finalSystemPrompt);
       return;
     }
 
-    // 2. Custom (Non-streaming fallback)
+    // 2. Custom Provider Streaming
     if (this.customProvider) {
-      const response = await this.executeCustomProvider(
-        this.customProvider.curlCommand,
-        combinedMessages.gemini,
-        skipSystemPrompt ? "" : HARD_SYSTEM_PROMPT,
-        message,
-        context || "",
-        imagePath
-      );
-      yield this.processResponse(response);
+      yield* this.streamWithCustom(message, context, imagePath, finalSystemPrompt);
       return;
     }
 
-    // 3. Direct Routing
+    // 3. Cloud Provider Routing
+
+    // OpenAI
     if (this.currentModelId === OPENAI_MODEL && this.openaiClient) {
+      const openAiSystem = systemPromptOverride || OPENAI_SYSTEM_PROMPT;
       if (isMultimodal && imagePath) {
-        yield* this.streamWithOpenaiMultimodal(userContent, imagePath, openaiSystemPrompt);
+        yield* this.streamWithOpenaiMultimodal(userContent, imagePath, openAiSystem);
       } else {
-        yield* this.streamWithOpenai(userContent, openaiSystemPrompt);
+        yield* this.streamWithOpenai(userContent, openAiSystem);
       }
       return;
     }
 
+    // Claude
     if (this.currentModelId === CLAUDE_MODEL && this.claudeClient) {
+      const claudeSystem = systemPromptOverride || CLAUDE_SYSTEM_PROMPT;
       if (isMultimodal && imagePath) {
-        yield* this.streamWithClaudeMultimodal(userContent, imagePath, claudeSystemPrompt);
+        yield* this.streamWithClaudeMultimodal(userContent, imagePath, claudeSystem);
       } else {
-        yield* this.streamWithClaude(userContent, claudeSystemPrompt);
+        yield* this.streamWithClaude(userContent, claudeSystem);
       }
       return;
     }
 
+    // Groq (Text Only)
     if (this.currentModelId === GROQ_MODEL && this.groqClient && !isMultimodal) {
-      yield* this.streamWithGroq(combinedMessages.groq);
+      // Build Groq message
+      const groqSystem = systemPromptOverride ? finalSystemPrompt : GROQ_SYSTEM_PROMPT;
+      const groqFullMessage = `${groqSystem}\n\n${userContent}`;
+      yield* this.streamWithGroq(groqFullMessage);
       return;
     }
 
-    // 4. Gemini Routing
+    // 4. Gemini Routing & Fallback
     if (this.client) {
+      // Direct model use if specified
       if (this.currentModelId === GEMINI_PRO_MODEL) {
-        yield* this.streamWithGeminiModel(combinedMessages.gemini, GEMINI_PRO_MODEL);
+        const fullMsg = `${finalSystemPrompt}\n\n${userContent}`;
+        yield* this.streamWithGeminiModel(fullMsg, GEMINI_PRO_MODEL);
         return;
       }
       if (this.currentModelId === GEMINI_FLASH_MODEL) {
-        yield* this.streamWithGeminiModel(combinedMessages.gemini, GEMINI_FLASH_MODEL);
+        const fullMsg = `${finalSystemPrompt}\n\n${userContent}`;
+        yield* this.streamWithGeminiModel(fullMsg, GEMINI_FLASH_MODEL);
         return;
       }
-    }
 
-    // 5. Fallback (Race)
-    if (this.client) {
-      yield* this.streamWithGeminiParallelRace(combinedMessages.gemini);
+      // Race strategy (default)
+      const raceMsg = `${finalSystemPrompt}\n\n${userContent}`;
+      yield* this.streamWithGeminiParallelRace(raceMsg);
     } else {
       throw new Error("No LLM provider available");
     }
@@ -1366,6 +1355,140 @@ ANSWER DIRECTLY:`;
     return response.text || "";
   }
 
+  // --- OLLAMA STREAMING ---
+  private async * streamWithOllama(message: string, context?: string, systemPrompt: string = UNIVERSAL_SYSTEM_PROMPT): AsyncGenerator<string, void, unknown> {
+    const fullPrompt = context
+      ? `SYSTEM: ${systemPrompt}\nCONTEXT: ${context}\nUSER: ${message}`
+      : `SYSTEM: ${systemPrompt}\nUSER: ${message}`;
+
+    try {
+      const response = await fetch(`${this.ollamaUrl}/api/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: this.ollamaModel,
+          prompt: fullPrompt,
+          stream: true,
+          options: { temperature: 0.7 }
+        })
+      });
+
+      if (!response.body) throw new Error("No response body from Ollama");
+
+      // iterate over the readable stream
+      // @ts-ignore
+      for await (const chunk of response.body) {
+        const text = new TextDecoder().decode(chunk);
+        // Ollama sends JSON objects per line
+        const lines = text.split('\n').filter(l => l.trim());
+        for (const line of lines) {
+          try {
+            const json = JSON.parse(line);
+            if (json.response) yield json.response;
+            if (json.done) return;
+          } catch (e) {
+            // ignore partial json
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Ollama streaming failed", e);
+      yield "Error: Failed to stream from Ollama.";
+    }
+  }
+
+  // --- CUSTOM PROVIDER STREAMING ---
+  private async * streamWithCustom(message: string, context?: string, imagePath?: string, systemPrompt: string = UNIVERSAL_SYSTEM_PROMPT): AsyncGenerator<string, void, unknown> {
+    if (!this.customProvider) return;
+    // We reuse the executeCustomProvider logic but we need it to stream.
+    // If the user provided a curl command, it might support streaming (SSE) or not.
+    // If we execute it via Child Process, we can read stdout stream.
+
+    // 1. Prepare command with variables
+    // Re-use logic from executeCustomProvider to replace variables
+    // But we can't easily reuse the function since it awaits the whole fetch.
+    // So we'll implement a simplified streaming version using our existing variable replacer and node-fetch.
+
+    const curlCommand = this.customProvider.curlCommand;
+    const requestConfig = curl2Json(curlCommand);
+
+    let base64Image = "";
+    if (imagePath) {
+      try {
+        const data = await fs.promises.readFile(imagePath);
+        base64Image = data.toString("base64");
+      } catch (e) { }
+    }
+
+    const combinedMessage = context ? `${context}\n\n${message}` : message;
+
+    const variables = {
+      TEXT: combinedMessage,
+      PROMPT: combinedMessage,
+      SYSTEM_PROMPT: systemPrompt,
+      USER_MESSAGE: message,
+      CONTEXT: context || "",
+      IMAGE_BASE64: base64Image,
+    };
+
+    const url = deepVariableReplacer(requestConfig.url, variables);
+    const headers = deepVariableReplacer(requestConfig.header || {}, variables);
+    const body = deepVariableReplacer(requestConfig.data || {}, variables);
+
+    try {
+      const response = await fetch(url, {
+        method: requestConfig.method || 'POST',
+        headers: headers,
+        body: JSON.stringify(body)
+      });
+
+      if (!response.body) return;
+
+      // @ts-ignore
+      for await (const chunk of response.body) {
+        const text = new TextDecoder().decode(chunk);
+        // Optimistic SSE parsing: look for "content": "..." or delta content
+        // This is tricky for generic custom providers.
+        // IF it is SSE (data: ...), we parse it.
+        // IF it is raw text, we yield it.
+        // For now, let's assume standard OpenAI-like SSE or raw text.
+
+        const lines = text.split('\n');
+        for (const line of lines) {
+          const items = this.parseStreamLine(line);
+          if (items) yield items;
+          else if (!line.startsWith('data:') && line.trim().length > 0) {
+            // Maybe raw text? yield it if it looks like content
+            // But often raw text is just the whole body chunk
+            // yield line; // Too risky?
+          }
+        }
+      }
+
+    } catch (e) {
+      console.error("Custom streaming failed", e);
+      yield "Error streaming from custom provider.";
+    }
+  }
+
+  private parseStreamLine(line: string): string | null {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("data: ") || trimmed === "data: [DONE]") return null;
+    try {
+      const json = JSON.parse(trimmed.substring(6));
+      // OpenAI format: choices[0].delta.content
+      if (json.choices?.[0]?.delta?.content) return json.choices[0].delta.content;
+      // Anthropic format: type: content_block_delta ... delta.text
+      if (json.type === 'content_block_delta' && json.delta?.text) return json.delta.text;
+      // Ollama format: response
+      if (json.response) return json.response;
+      // Fallback: look for 'content' or 'text'
+      return json.content || json.text || null;
+    } catch {
+      return null;
+    }
+  }
+
   private delay(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
@@ -1376,8 +1499,7 @@ ANSWER DIRECTLY:`;
   }
 
   public async getOllamaModels(): Promise<string[]> {
-    if (!this.useOllama) return [];
-
+    // Note: We checking if URL is accessible, ignoring useOllama flag for the check itself to be useful in settings
     try {
       const response = await fetch(`${this.ollamaUrl}/api/tags`);
       if (!response.ok) throw new Error('Failed to fetch models');
@@ -1385,8 +1507,41 @@ ANSWER DIRECTLY:`;
       const data = await response.json();
       return data.models?.map((model: any) => model.name) || [];
     } catch (error) {
-      // console.error("[LLMHelper] Error fetching Ollama models:", error);
+      console.warn("[LLMHelper] Error fetching Ollama models:", error);
       return [];
+    }
+  }
+
+  public async forceRestartOllama(): Promise<boolean> {
+    try {
+      console.log("[LLMHelper] Attempting to force restart Ollama...");
+
+      // 1. Check for process on port 11434
+      try {
+        const { stdout } = await execAsync(`lsof -t -i:11434`);
+        const pid = stdout.trim();
+        if (pid) {
+          console.log(`[LLMHelper] Found blocking PID: ${pid}. Killing...`);
+          await execAsync(`kill -9 ${pid}`);
+        }
+      } catch (e: any) {
+        // lsof returns 1 if no process found, which throws error in execAsync
+        // Ignore unless it's a real error
+      }
+
+      // 2. Start Ollama serve
+      console.log("[LLMHelper] Starting ollama serve...");
+      // We use exec but don't await the result endlessly as it's a server
+      const child = exec('ollama serve');
+      child.unref(); // Detach
+
+      // 3. Wait a bit for it to come up
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      return true;
+    } catch (error) {
+      console.error("[LLMHelper] Failed to restart Ollama:", error);
+      return false;
     }
   }
 
@@ -1818,4 +1973,15 @@ ANSWER DIRECTLY:`;
       return { success: false, error: error.message };
     }
   }
+  /**
+   * Universal Chat (Non-streaming)
+   */
+  public async chat(message: string, imagePath?: string, context?: string, systemPromptOverride?: string): Promise<string> {
+    let fullResponse = "";
+    for await (const chunk of this.streamChat(message, imagePath, context, systemPromptOverride)) {
+      fullResponse += chunk;
+    }
+    return fullResponse;
+  }
+
 }

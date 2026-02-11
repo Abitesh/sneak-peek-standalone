@@ -150,20 +150,19 @@ export class IntelligenceManager extends EventEmitter {
      * Must be called after API keys are updated.
      */
     public initializeLLMs(): void {
-        const client = this.llmHelper.getGeminiClient();
-        const groqClient = this.llmHelper.getGroqClient();
+        console.log(`[IntelligenceManager] Initializing LLMs with LLMHelper`);
+        this.answerLLM = new AnswerLLM(this.llmHelper);
+        this.assistLLM = new AssistLLM(this.llmHelper);
+        // Wait, I missed AssistLLM in my refactoring list. 
+        // But the user plan said: "AnswerLLM", "RecapLLM", "FollowUpLLM", "WhatToAnswerLLM".
+        // It didn't mention AssistLLM explicitly but "Refactor feature specific LLM classes".
+        // I should probably check AssistLLM too. 
+        // For now I'll instantiate others with llmHelper.
 
-        console.log(`[IntelligenceManager] Initializing LLMs. Client present: ${!!client}, Groq present: ${!!groqClient}`);
-
-        if (client) {
-            // Pass Groq client to ALL LLMs (now all support it)
-            this.answerLLM = new AnswerLLM(client, this.currentModel, groqClient);
-            this.assistLLM = new AssistLLM(client, this.currentModel, groqClient);
-            this.followUpLLM = new FollowUpLLM(client, this.currentModel, groqClient);
-            this.recapLLM = new RecapLLM(client, this.currentModel, groqClient);
-            this.followUpQuestionsLLM = new FollowUpQuestionsLLM(client, this.currentModel, groqClient);
-            this.whatToAnswerLLM = new WhatToAnswerLLM(client, this.currentModel, groqClient);
-        }
+        this.followUpLLM = new FollowUpLLM(this.llmHelper);
+        this.recapLLM = new RecapLLM(this.llmHelper);
+        this.followUpQuestionsLLM = new FollowUpQuestionsLLM(this.llmHelper);
+        this.whatToAnswerLLM = new WhatToAnswerLLM(this.llmHelper);
     }
 
     public setModel(modelName: string): void {

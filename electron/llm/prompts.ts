@@ -905,3 +905,14 @@ REFINED ANSWER:
         }
     ];
 }
+
+// ==========================================
+// UNIVERSAL PROMPTS (For Ollama / Custom / Fallback)
+// ==========================================
+export const UNIVERSAL_SYSTEM_PROMPT = HARD_SYSTEM_PROMPT;
+export const UNIVERSAL_ANSWER_PROMPT = ANSWER_MODE_PROMPT;
+export const UNIVERSAL_WHAT_TO_ANSWER_PROMPT = WHAT_TO_ANSWER_PROMPT;
+export const UNIVERSAL_RECAP_PROMPT = RECAP_MODE_PROMPT;
+export const UNIVERSAL_FOLLOWUP_PROMPT = FOLLOWUP_MODE_PROMPT;
+export const UNIVERSAL_FOLLOW_UP_QUESTIONS_PROMPT = FOLLOW_UP_QUESTIONS_MODE_PROMPT;
+export const UNIVERSAL_ASSIST_PROMPT = ASSIST_MODE_PROMPT;

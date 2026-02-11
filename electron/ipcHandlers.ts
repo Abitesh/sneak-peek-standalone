@@ -204,7 +204,7 @@ export function initializeIpcHandlers(appState: AppState): void {
 
       try {
         // USE streamChat which handles routing
-        const stream = llmHelper.streamChat(message, imagePath, context, options?.skipSystemPrompt);
+        const stream = llmHelper.streamChat(message, imagePath, context, options?.skipSystemPrompt ? "" : undefined);
 
         for await (const token of stream) {
           event.sender.send("gemini-stream-token", token);
@@ -342,6 +342,16 @@ export function initializeIpcHandlers(appState: AppState): void {
       return { success: true };
     } catch (error: any) {
       // console.error("Error switching to Ollama:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle("force-restart-ollama", async () => {
+    try {
+      const llmHelper = appState.processingHelper.getLLMHelper();
+      const success = await llmHelper.forceRestartOllama();
+      return { success };
+    } catch (error: any) {
       return { success: false, error: error.message };
     }
   });

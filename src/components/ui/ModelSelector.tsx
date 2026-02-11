@@ -83,14 +83,14 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({ currentModel, onSe
         <div className="relative" ref={dropdownRef}>
             <button
                 onClick={() => setIsOpen(!isOpen)}
-                className="flex items-center gap-2 px-3 py-1.5 bg-bg-input hover:bg-bg-elevated border border-border-subtle rounded-lg transition-colors text-xs font-medium text-text-primary"
+                className="flex items-center gap-2 px-3 py-1.5 bg-bg-input hover:bg-bg-elevated border border-border-subtle rounded-lg transition-colors text-xs font-medium text-text-primary max-w-[150px]"
             >
-                {getModelDisplayName(currentModel)}
-                <ChevronDown size={14} className={`text-text-secondary transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                <span className="truncate">{getModelDisplayName(currentModel)}</span>
+                <ChevronDown size={14} className={`shrink-0 text-text-secondary transition-transform ${isOpen ? 'rotate-180' : ''}`} />
             </button>
 
             {isOpen && (
-                <div className="absolute top-full left-0 mt-2 w-64 bg-bg-item-surface border border-border-subtle rounded-xl shadow-xl z-50 overflow-hidden animated fadeIn">
+                <div className="absolute bottom-full left-0 mb-2 w-64 bg-bg-item-surface border border-border-subtle rounded-xl shadow-xl z-50 overflow-hidden animated fadeIn">
                     {/* Tabs */}
                     <div className="flex border-b border-border-subtle bg-bg-input/50">
                         <button
@@ -236,7 +236,7 @@ const ModelOption: React.FC<ModelOptionProps> = ({ name, desc, icon, selected, o
                 {icon}
             </div>
             <div className="text-left">
-                <div className={`text-xs font-medium ${selected ? 'text-accent-primary' : 'text-text-primary'}`}>{name}</div>
+                <div className={`text-xs font-medium truncate max-w-[140px] ${selected ? 'text-accent-primary' : 'text-text-primary'}`}>{name}</div>
                 <div className="text-[10px] text-text-tertiary">{desc}</div>
             </div>
         </div>

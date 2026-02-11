@@ -1,4 +1,4 @@
-import React, { useState } from "react" // forcing refresh
+import React, { useState, useEffect } from "react" // forcing refresh
 import { QueryClient, QueryClientProvider } from "react-query"
 import { ToastProvider, ToastViewport } from "./components/ui/toast"
 import NativelyInterface from "./components/NativelyInterface"
@@ -8,6 +8,7 @@ import SettingsOverlay from "./components/SettingsOverlay"
 import StartupSequence from "./components/StartupSequence"
 import { AnimatePresence, motion } from "framer-motion"
 import UpdateBanner from "./components/UpdateBanner"
+import { analytics } from "./lib/analytics/analytics.service"
 
 const queryClient = new QueryClient()
 
@@ -18,6 +19,40 @@ const App: React.FC = () => {
 
   // Default to launcher if not specified (dev mode safety)
   const isDefault = !isSettingsWindow && !isOverlayWindow;
+
+  // Initialize Analytics
+  useEffect(() => {
+    // Only init if we are in a main window context to avoid duplicate events from helper windows
+    // Actually, we probably want to track app open from the main entry point.
+    // Let's protect initialization to ensure single run per window.
+    // The service handles single-init, but let's be thoughtful about WHICH window tracks "App Open".
+    // Launcher is the main entry. Overlay is the "Assistant".
+
+    analytics.initAnalytics();
+
+    if (isLauncherWindow || isDefault) {
+      analytics.trackAppOpen();
+    }
+
+    if (isOverlayWindow) {
+      analytics.trackAssistantStart();
+    }
+
+    // Cleanup / Session End
+    const handleUnload = () => {
+      if (isOverlayWindow) {
+        analytics.trackAssistantStop();
+      }
+      if (isLauncherWindow || isDefault) {
+        analytics.trackAppClose();
+      }
+    };
+
+    window.addEventListener('beforeunload', handleUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleUnload);
+    };
+  }, [isLauncherWindow, isOverlayWindow, isDefault]);
 
   // State
   const [showStartup, setShowStartup] = useState(true);

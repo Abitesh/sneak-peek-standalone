@@ -39,7 +39,7 @@ const CustomSelect: React.FC<CustomSelectProps> = ({ label, icon, value, options
             {label && (
                 <div className="flex items-center gap-2 mb-3">
                     <span className="text-text-secondary">{icon}</span>
-                    <label className="text-xs font-medium text-text-secondary uppercase tracking-wide">{label}</label>
+                    <label className="text-xs font-medium text-text-primary uppercase tracking-wide">{label}</label>
                 </div>
             )}
 
@@ -500,7 +500,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                         {/* Sidebar */}
                         <div className="w-64 bg-bg-sidebar flex flex-col border-r border-border-subtle">
                             <div className="p-6">
-                                <h2 className="font-semibold text-gray-400 text-xs uppercase tracking-wider mb-4">Settings</h2>
+                                <h2 className="font-semibold text-gray-400 text-xs uppercase tracking-wider mb-2">Settings</h2>
                                 <nav className="space-y-1">
                                     <button
                                         onClick={() => setActiveTab('general')}
@@ -581,7 +581,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                                 ) : (
                                                     <Ghost size={18} className="text-text-primary" />
                                                 )}
-                                                <h3 className="text-base font-bold text-text-primary">{isUndetectable ? 'Undetectable' : 'Detectable'}</h3>
+                                                <h3 className="text-lg font-bold text-text-primary">{isUndetectable ? 'Undetectable' : 'Detectable'}</h3>
                                             </div>
                                             <p className="text-xs text-text-secondary">
                                                 Natively is currently {isUndetectable ? 'undetectable' : 'detectable'} by screen-sharing. <button className="text-blue-400 hover:underline">Supported apps here</button>
@@ -592,6 +592,12 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                                 const newState = !isUndetectable;
                                                 setIsUndetectable(newState);
                                                 window.electronAPI?.setUndetectable(newState);
+                                                // Import analytics dynamically or use window object if exposed?
+                                                // Better to import it.
+                                                // I will need to add the import at the top of the file first.
+                                                import('../lib/analytics/analytics.service').then(({ analytics }) => {
+                                                    analytics.trackModeSelected(newState ? 'undetectable' : 'overlay'); // Assuming default is overlay
+                                                });
                                             }}
                                             className={`w-11 h-6 rounded-full relative cursor-pointer transition-colors ${isUndetectable ? 'bg-accent-primary' : 'bg-bg-toggle-switch border border-border-muted'}`}
                                         >
@@ -600,8 +606,8 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                     </div>
 
                                     <div className="pt-2">
-                                        <h3 className="text-sm font-bold text-text-primary mb-1">General settings</h3>
-                                        <p className="text-xs text-text-secondary mb-4">Customize how Natively works for you</p>
+                                        <h3 className="text-lg font-bold text-text-primary mb-1">General settings</h3>
+                                        <p className="text-xs text-text-secondary mb-2">Customize how Natively works for you</p>
 
                                         <div className="space-y-4">
                                             {/* Open at Login */}
@@ -780,7 +786,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                             {activeTab === 'keybinds' && (
                                 <div className="space-y-5 animated fadeIn select-text h-full flex flex-col justify-center">
                                     <div>
-                                        <h3 className="text-base font-bold text-text-primary mb-1">Keyboard shortcuts</h3>
+                                        <h3 className="text-lg font-bold text-text-primary mb-1">Keyboard shortcuts</h3>
                                         <p className="text-xs text-text-secondary">Natively works with these easy to remember commands.</p>
                                     </div>
 
@@ -816,7 +822,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
 
                                         {/* Window Category */}
                                         <div>
-                                            <h4 className="text-sm font-bold text-white mb-3">Window</h4>
+                                            <h4 className="text-sm font-bold text-text-primary mb-3">Window</h4>
                                             <div className="space-y-1">
                                                 {[
                                                     { label: 'Move Window Up', keys: ['⌘', '↑'], icon: <ArrowUp size={14} /> },
@@ -847,7 +853,8 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                             {activeTab === 'audio' && (
                                 <div className="space-y-6 animated fadeIn">
                                     <div>
-                                        <h3 className="text-lg font-medium text-text-primary mb-6">Audio Configuration</h3>
+                                        <h3 className="text-lg font-bold text-text-primary mb-2">Audio Configuration</h3>
+                                        <p className="text-xs text-text-secondary mb-6">Manage input and output devices.</p>
 
                                         <div className="space-y-6">
                                             {/* Speech Recognition Section */}
@@ -969,8 +976,8 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                             {activeTab === 'calendar' && (
                                 <div className="space-y-6 animated fadeIn h-full">
                                     <div>
-                                        <h3 className="text-base font-bold text-text-primary mb-1">Visible Calendars</h3>
-                                        <p className="text-sm text-text-secondary">Upcoming meetings are synchronized from these calendars</p>
+                                        <h3 className="text-lg font-bold text-text-primary mb-2">Visible Calendars</h3>
+                                        <p className="text-xs text-text-secondary mb-4">Upcoming meetings are synchronized from these calendars</p>
                                     </div>
 
                                     <div className="bg-bg-card rounded-xl p-6 border border-border-subtle flex flex-col items-start gap-4">
