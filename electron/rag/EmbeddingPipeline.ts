@@ -34,7 +34,7 @@ export class EmbeddingPipeline {
     }
 
     /**
-     * Initialize with API key
+     * Initialize with API key 
      */
     initialize(apiKey: string): void {
         if (!apiKey) {
