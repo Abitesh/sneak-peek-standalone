@@ -42,17 +42,18 @@ This demo shows **a complete live meeting scenario**:
 
 Download the latest prebuilt version from **[Releases](https://github.com/evinjohnn/natively-cluely-ai-assistant/releases)**.
 
-### [Windows (v1.1.2)](https://github.com/evinjohnn/natively-cluely-ai-assistant/releases/tag/v1.1.2)
-### [macOS (v1.1.3)](https://github.com/evinjohnn/natively-cluely-ai-assistant/releases/tag/v1.1.3)
+### [Windows (v1.1.4)](https://github.com/evinjohnn/natively-cluely-ai-assistant/releases/tag/v1.1.4)
+### [macOS (v1.1.4)](https://github.com/evinjohnn/natively-cluely-ai-assistant/releases/tag/v1.1.4)
 
 No build steps required.
 
-### What's New in v1.1.3
-- **Smarter AI Fallback:** The system now intelligently rotates through all configured providers (Gemini, OpenAI, Claude, Groq) to ensure you always get an answer.
-- **Improved Reliability:** Added a relentless retry mechanism with exponential backoff—if one provider fails, Natively automatically tries the next.
-- **Better Response Quality:** Optimized prompts and message formatting for OpenAI and Claude to ensure higher quality, more consistent responses.
-- **Multimodal Upgrades:** Enhanced handling for image-based queries with improved stability.
-- **Reduced Latency:** Optimized token streaming for faster real-time responses.
+### What's New in v1.1.4
+- **Custom LLM Providers:** Connect to any OpenAI-compatible API (OpenRouter, DeepSeek, commercial endpoints) simply by pasting a cURL command.
+- **Smart Local AI:** Enhanced Ollama integration that automatically detects and lists your available local models—no configuration required.
+- **Refined Human Persona:** Major updates to system prompts (`prompts.ts`) to ensure responses are concise, conversational, and indistinguishable from a real candidate.
+- **Anti-Chatbot Logic:** Specific negative constraints to prevent "AI-like" lectures, distinct "robot" preambles, and over-explanation.
+- **Global Spotlight Search:** Access AI chat instantly with `Cmd+K` / `Ctrl+K`.
+- **Masquerading (Undetectable Mode):** Stealth capability to disguise the app as common utility processes (Terminal, Activity Monitor) for discreet usage.
 
 ---
 
@@ -210,33 +211,13 @@ npm run dist
 
 ---
 
-## AI Providers
-
-### Ollama (Local / Offline)
-- Fully private
-- No API costs
-- Works offline
-- Recommended for privacy
-
-### Google Gemini
-- **Gemini 3.0** supported
-- Multimodal (text + vision)
-- Fast and accurate
-- Requires internet and API key
-
-### Groq
-- Extremely fast inference
-- Text-only in this implementation
-
-### OpenAI
-- **GPT-5.2** supported
-- Excellent reasoning and multimodal capabilities
-- Requires API key
-
-### Anthropic Claude
-- **Sonnet 4.5** supported
-- Top-tier coding and reasoning
-- Requires API key
+### AI Providers
+- **Custom (BYO Endpoint):** Paste any cURL command to use OpenRouter, DeepSeek, or private endpoints.
+- **Ollama (Local):** Zero-setup detection of local models (Llama 3, Mistral, Gemma).
+- **Google Gemini:** First-class support for Gemini 1.5 Pro/Flash.
+- **OpenAI:** GPT-4o support with optimized system prompts.
+- **Anthropic:** Claude 3.5 Sonnet support for complex reasoning.
+- **Groq:** Ultra-fast inference with Llama 3 models.
 
 ---
 
@@ -269,6 +250,16 @@ npm run dist
 - Rust-based audio capture
 - Low latency
 - System audio support
+
+### Spotlight Search & Calendar
+- Global activation shortcut
+- Instant answer overlay
+- Upcoming meeting readiness
+
+### Advanced Privacy & Stealth
+- **Undetectable Mode:** Instantly hide from dock/taskbar.
+- **Masquerading:** Disguise process names and window titles as harmless system utilities.
+- **Local-Only Processing:** All data stays on your machine.
 
 ---
 
