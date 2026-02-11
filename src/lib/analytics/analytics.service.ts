@@ -1,4 +1,6 @@
-import ReactGA from "react-ga4";
+// GA4 Analytics via manual gtag.js injection
+// Works in Electron by dynamically loading the gtag script into the renderer DOM
+// Only requires the public Measurement ID — no API secrets needed
 
 // --- Types ---
 
@@ -37,6 +39,18 @@ interface SessionDurationPayload {
     idle_seconds?: number;
 }
 
+// --- Configuration ---
+
+const GA4_MEASUREMENT_ID = "G-494RMJ2G6E";
+
+// Extend window to include gtag/dataLayer
+declare global {
+    interface Window {
+        dataLayer: any[];
+        gtag: (...args: any[]) => void;
+    }
+}
+
 // --- Service ---
 
 class AnalyticsService {
@@ -55,19 +69,38 @@ class AnalyticsService {
         return AnalyticsService.instance;
     }
 
-    public initAnalytics(measurementId: string = "G-494RMJ2G6E"): void {
+    public initAnalytics(): void {
         if (this.initialized) return;
 
-        // Initialize GA4
-        ReactGA.initialize(measurementId, {
-            gaOptions: {
-                anonymizeIp: true, // Privacy compliant
-                userId: undefined, // No user tracking
-            },
-        });
+        try {
+            // 1. Initialize dataLayer
+            window.dataLayer = window.dataLayer || [];
+            window.gtag = function () {
+                window.dataLayer.push(arguments);
+            };
+            window.gtag('js', new Date());
 
-        this.initialized = true;
-        console.log("[Analytics] Initialized with privacy mode enabled.");
+            // 2. Configure GA4 with privacy settings
+            window.gtag('config', GA4_MEASUREMENT_ID, {
+                anonymize_ip: true,
+                send_page_view: false, // Desktop app — no page views
+                cookie_flags: 'SameSite=None;Secure', // Electron cookie handling
+            });
+
+            // 3. Inject the gtag.js script
+            const script = document.createElement('script');
+            script.async = true;
+            script.src = `https://www.googletagmanager.com/gtag/js?id=${GA4_MEASUREMENT_ID}`;
+            script.onerror = () => {
+                console.warn("[Analytics] Failed to load gtag.js — analytics disabled.");
+            };
+            document.head.appendChild(script);
+
+            this.initialized = true;
+            console.log("[Analytics] Initialized via gtag.js injection.");
+        } catch (error) {
+            console.warn("[Analytics] Initialization failed:", error);
+        }
     }
 
     // --- Tracking Methods ---
@@ -77,7 +110,6 @@ class AnalyticsService {
 
         this.trackEvent('app_opened');
 
-        // Check for first launch
         const hasLaunched = localStorage.getItem('natively_has_launched');
         if (!hasLaunched) {
             this.trackEvent('first_launch');
@@ -137,11 +169,9 @@ class AnalyticsService {
         this.trackEvent('conversation_started');
     }
 
-
     private trackSessionDuration(): void {
         const totalDuration = (Date.now() - this.sessionStartTime) / 1000;
 
-        // If assistant is currently active, add current session to total
         let currentAssistantDuration = this.totalAssistantDuration;
         if (this.assistantStartTime) {
             currentAssistantDuration += (Date.now() - this.assistantStartTime) / 1000;
@@ -159,13 +189,14 @@ class AnalyticsService {
     // --- Core Event Sender ---
 
     private trackEvent(eventName: AnalyticsEventName, payload?: Record<string, any>): void {
-        try {
-            // Log to console in dev mode
-            if (import.meta.env.DEV) {
-                console.log(`[Analytics] ${eventName}`, payload);
-            }
+        if (import.meta.env.DEV) {
+            console.log(`[Analytics] ${eventName}`, payload);
+        }
 
-            ReactGA.event(eventName, payload || {});
+        try {
+            if (typeof window.gtag === 'function') {
+                window.gtag('event', eventName, payload || {});
+            }
         } catch (error) {
             console.warn("[Analytics] Failed to send event:", error);
         }
