@@ -38,7 +38,7 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
-import { analytics } from '../lib/analytics/analytics.service';
+import { analytics, detectProviderType } from '../lib/analytics/analytics.service';
 
 interface Message {
     id: string;
@@ -756,10 +756,9 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) =
             }
 
             // Track Usage
-            // We don't have token usage from this event, so we'll just track latency
             analytics.trackModelUsed({
                 model_name: currentModel,
-                provider_type: 'cloud', // Assuming generic is cloud for now, unless we check model name
+                provider_type: detectProviderType(currentModel),
                 latency_ms: latency
             });
 

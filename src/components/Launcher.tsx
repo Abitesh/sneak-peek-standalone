@@ -689,6 +689,7 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
                                                                                 className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-text-primary hover:bg-white/10 rounded-lg transition-colors text-left"
                                                                                 onClick={async () => {
                                                                                     setActiveMenuId(null);
+                                                                                    analytics.trackPdfExported();
                                                                                     // Fetch full details if needed
                                                                                     if (window.electronAPI && window.electronAPI.getMeetingDetails) {
                                                                                         try {

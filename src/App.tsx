@@ -78,6 +78,7 @@ const App: React.FC = () => {
         audio: { inputDeviceId, outputDeviceId }
       });
       if (result.success) {
+        analytics.trackMeetingStarted();
         // Switch to Overlay Mode via IPC
         // The main process handles window switching, but we can reinforce it or just trust main.
         // Actually, main process startMeeting triggers nothing UI-wise unless we tell it to switch window
@@ -94,6 +95,7 @@ const App: React.FC = () => {
 
   const handleEndMeeting = async () => {
     console.log("[App.tsx] handleEndMeeting triggered");
+    analytics.trackMeetingEnded();
     try {
       await window.electronAPI.endMeeting();
       console.log("[App.tsx] endMeeting IPC completed");

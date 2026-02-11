@@ -18,6 +18,11 @@ export type AnalyticsEventName =
     | 'assistant_stopped'
     | 'mode_selected'
     | 'copy_answer_clicked'
+    | 'calendar_connected'
+    | 'pdf_exported'
+    // Meeting Lifecycle
+    | 'meeting_started'
+    | 'meeting_ended'
     // Model Usage
     | 'model_used'
     // Session
@@ -42,6 +47,7 @@ interface SessionDurationPayload {
 // --- Configuration ---
 
 const GA4_MEASUREMENT_ID = "G-494RMJ2G6E";
+const APP_VERSION = "1.1.3";
 
 // Extend window to include gtag/dataLayer
 declare global {
@@ -49,6 +55,29 @@ declare global {
         dataLayer: any[];
         gtag: (...args: any[]) => void;
     }
+}
+
+// --- Provider Detection ---
+
+/** Detect if a model is running locally (Ollama) or in the cloud */
+export function detectProviderType(modelName: string): ModelProviderType {
+    const lower = modelName.toLowerCase();
+    // Ollama / local model patterns
+    if (
+        lower.startsWith('ollama:') ||
+        lower.includes('llama') ||
+        lower.includes('mistral') ||
+        lower.includes('codellama') ||
+        lower.includes('phi') ||
+        lower.includes('deepseek') ||
+        lower.includes('qwen') ||
+        lower.includes('vicuna') ||
+        lower.includes('orca')
+    ) {
+        return 'local';
+    }
+    // Cloud models (Gemini, GPT, Claude, Groq)
+    return 'cloud';
 }
 
 // --- Service ---
@@ -83,8 +112,9 @@ class AnalyticsService {
             // 2. Configure GA4 with privacy settings
             window.gtag('config', GA4_MEASUREMENT_ID, {
                 anonymize_ip: true,
-                send_page_view: false, // Desktop app — no page views
-                cookie_flags: 'SameSite=None;Secure', // Electron cookie handling
+                send_page_view: false,
+                cookie_flags: 'SameSite=None;Secure',
+                app_version: APP_VERSION,
             });
 
             // 3. Inject the gtag.js script
@@ -97,7 +127,7 @@ class AnalyticsService {
             document.head.appendChild(script);
 
             this.initialized = true;
-            console.log("[Analytics] Initialized via gtag.js injection.");
+            console.log(`[Analytics] Initialized (v${APP_VERSION}) via gtag.js injection.`);
         } catch (error) {
             console.warn("[Analytics] Initialization failed:", error);
         }
@@ -169,6 +199,26 @@ class AnalyticsService {
         this.trackEvent('conversation_started');
     }
 
+    public trackCalendarConnected(): void {
+        if (!this.initialized) return;
+        this.trackEvent('calendar_connected');
+    }
+
+    public trackMeetingStarted(): void {
+        if (!this.initialized) return;
+        this.trackEvent('meeting_started');
+    }
+
+    public trackMeetingEnded(): void {
+        if (!this.initialized) return;
+        this.trackEvent('meeting_ended');
+    }
+
+    public trackPdfExported(): void {
+        if (!this.initialized) return;
+        this.trackEvent('pdf_exported');
+    }
+
     private trackSessionDuration(): void {
         const totalDuration = (Date.now() - this.sessionStartTime) / 1000;
 
@@ -195,7 +245,10 @@ class AnalyticsService {
 
         try {
             if (typeof window.gtag === 'function') {
-                window.gtag('event', eventName, payload || {});
+                window.gtag('event', eventName, {
+                    app_version: APP_VERSION,
+                    ...payload
+                });
             }
         } catch (error) {
             console.warn("[Analytics] Failed to send event:", error);
