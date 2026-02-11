@@ -3,7 +3,6 @@
 ## [1.1.4] - 2026-02-12
 
 ### Added
-- **GA4 Analytics**: Integrated Google Analytics 4 for better usage tracking (commits: `9b58e43`, `2261461`).
 - **AI Providers**: Enhanced configuration for AI providers (commit: `7c04e66`).
 
 ### Updated
