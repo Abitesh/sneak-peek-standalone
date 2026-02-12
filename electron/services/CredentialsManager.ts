@@ -23,11 +23,16 @@ export interface StoredCredentials {
     googleServiceAccountPath?: string;
     customProviders?: CustomProvider[];
     // STT Provider settings
-    sttProvider?: 'google' | 'groq' | 'openai' | 'deepgram';
+    sttProvider?: 'google' | 'groq' | 'openai' | 'deepgram' | 'elevenlabs' | 'azure' | 'ibmwatson';
     groqSttApiKey?: string;
     groqSttModel?: string;
     openAiSttApiKey?: string;
     deepgramApiKey?: string;
+    elevenLabsApiKey?: string;
+    azureApiKey?: string;
+    azureRegion?: string;
+    ibmWatsonApiKey?: string;
+    ibmWatsonRegion?: string;
 }
 
 export class CredentialsManager {
@@ -82,7 +87,7 @@ export class CredentialsManager {
         return this.credentials.customProviders || [];
     }
 
-    public getSttProvider(): 'google' | 'groq' | 'openai' | 'deepgram' {
+    public getSttProvider(): 'google' | 'groq' | 'openai' | 'deepgram' | 'elevenlabs' | 'azure' | 'ibmwatson' {
         return this.credentials.sttProvider || 'google';
     }
 
@@ -100,6 +105,26 @@ export class CredentialsManager {
 
     public getOpenAiSttApiKey(): string | undefined {
         return this.credentials.openAiSttApiKey;
+    }
+
+    public getElevenLabsApiKey(): string | undefined {
+        return this.credentials.elevenLabsApiKey;
+    }
+
+    public getAzureApiKey(): string | undefined {
+        return this.credentials.azureApiKey;
+    }
+
+    public getAzureRegion(): string {
+        return this.credentials.azureRegion || 'eastus';
+    }
+
+    public getIbmWatsonApiKey(): string | undefined {
+        return this.credentials.ibmWatsonApiKey;
+    }
+
+    public getIbmWatsonRegion(): string {
+        return this.credentials.ibmWatsonRegion || 'us-south';
     }
 
     public getAllCredentials(): StoredCredentials {
@@ -140,7 +165,7 @@ export class CredentialsManager {
         console.log('[CredentialsManager] Google Service Account path updated');
     }
 
-    public setSttProvider(provider: 'google' | 'groq' | 'openai' | 'deepgram'): void {
+    public setSttProvider(provider: 'google' | 'groq' | 'openai' | 'deepgram' | 'elevenlabs' | 'azure' | 'ibmwatson'): void {
         this.credentials.sttProvider = provider;
         this.saveCredentials();
         console.log(`[CredentialsManager] STT Provider set to: ${provider}`);
@@ -168,6 +193,36 @@ export class CredentialsManager {
         this.credentials.groqSttModel = model;
         this.saveCredentials();
         console.log(`[CredentialsManager] Groq STT Model set to: ${model}`);
+    }
+
+    public setElevenLabsApiKey(key: string): void {
+        this.credentials.elevenLabsApiKey = key;
+        this.saveCredentials();
+        console.log('[CredentialsManager] ElevenLabs API Key updated');
+    }
+
+    public setAzureApiKey(key: string): void {
+        this.credentials.azureApiKey = key;
+        this.saveCredentials();
+        console.log('[CredentialsManager] Azure API Key updated');
+    }
+
+    public setAzureRegion(region: string): void {
+        this.credentials.azureRegion = region;
+        this.saveCredentials();
+        console.log(`[CredentialsManager] Azure Region set to: ${region}`);
+    }
+
+    public setIbmWatsonApiKey(key: string): void {
+        this.credentials.ibmWatsonApiKey = key;
+        this.saveCredentials();
+        console.log('[CredentialsManager] IBM Watson API Key updated');
+    }
+
+    public setIbmWatsonRegion(region: string): void {
+        this.credentials.ibmWatsonRegion = region;
+        this.saveCredentials();
+        console.log(`[CredentialsManager] IBM Watson Region set to: ${region}`);
     }
 
     public saveCustomProvider(provider: CustomProvider): void {

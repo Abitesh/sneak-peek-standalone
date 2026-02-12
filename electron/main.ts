@@ -64,6 +64,7 @@ import { SystemAudioCapture } from "./audio/SystemAudioCapture"
 import { MicrophoneCapture } from "./audio/MicrophoneCapture"
 import { GoogleSTT } from "./audio/GoogleSTT"
 import { RestSTT } from "./audio/RestSTT"
+import { DeepgramStreamingSTT } from "./audio/DeepgramStreamingSTT"
 import { ThemeManager } from "./ThemeManager"
 import { RAGManager } from "./rag/RAGManager"
 import { DatabaseManager } from "./db/DatabaseManager"
@@ -276,8 +277,8 @@ export class AppState {
   private systemAudioCapture: SystemAudioCapture | null = null;
   private microphoneCapture: MicrophoneCapture | null = null;
   private audioTestCapture: MicrophoneCapture | null = null; // For audio settings test
-  private googleSTT: GoogleSTT | RestSTT | null = null; // Interviewer
-  private googleSTT_User: GoogleSTT | RestSTT | null = null; // User
+  private googleSTT: GoogleSTT | RestSTT | DeepgramStreamingSTT | null = null; // Interviewer
+  private googleSTT_User: GoogleSTT | RestSTT | DeepgramStreamingSTT | null = null; // User
 
   private setupSystemAudioPipeline(): void {
     // REMOVED EARLY RETURN: if (this.systemAudioCapture && this.microphoneCapture) return; // Already initialized
@@ -313,17 +314,38 @@ export class AppState {
         const { CredentialsManager } = require('./services/CredentialsManager');
         const sttProvider = CredentialsManager.getInstance().getSttProvider();
 
-        if (sttProvider === 'groq' || sttProvider === 'openai' || sttProvider === 'deepgram') {
-          const apiKey = sttProvider === 'groq'
-            ? CredentialsManager.getInstance().getGroqSttApiKey()
-            : sttProvider === 'openai'
-              ? CredentialsManager.getInstance().getOpenAiSttApiKey()
-              : CredentialsManager.getInstance().getDeepgramApiKey();
+        if (sttProvider === 'deepgram') {
+          const apiKey = CredentialsManager.getInstance().getDeepgramApiKey();
+          if (apiKey) {
+            console.log(`[Main] Using DeepgramStreamingSTT for Interviewer`);
+            this.googleSTT = new DeepgramStreamingSTT(apiKey);
+          } else {
+            console.warn(`[Main] No API key for Deepgram STT, falling back to GoogleSTT`);
+            this.googleSTT = new GoogleSTT();
+          }
+        } else if (sttProvider === 'groq' || sttProvider === 'openai' || sttProvider === 'elevenlabs' || sttProvider === 'azure' || sttProvider === 'ibmwatson') {
+          let apiKey: string | undefined;
+          let region: string | undefined;
+          let modelOverride: string | undefined;
+
+          if (sttProvider === 'groq') {
+            apiKey = CredentialsManager.getInstance().getGroqSttApiKey();
+            modelOverride = CredentialsManager.getInstance().getGroqSttModel();
+          } else if (sttProvider === 'openai') {
+            apiKey = CredentialsManager.getInstance().getOpenAiSttApiKey();
+          } else if (sttProvider === 'elevenlabs') {
+            apiKey = CredentialsManager.getInstance().getElevenLabsApiKey();
+          } else if (sttProvider === 'azure') {
+            apiKey = CredentialsManager.getInstance().getAzureApiKey();
+            region = CredentialsManager.getInstance().getAzureRegion();
+          } else if (sttProvider === 'ibmwatson') {
+            apiKey = CredentialsManager.getInstance().getIbmWatsonApiKey();
+            region = CredentialsManager.getInstance().getIbmWatsonRegion();
+          }
 
           if (apiKey) {
-            const modelOverride = sttProvider === 'groq' ? CredentialsManager.getInstance().getGroqSttModel() : undefined;
             console.log(`[Main] Using RestSTT (${sttProvider}) for Interviewer`);
-            this.googleSTT = new RestSTT(sttProvider, apiKey, modelOverride);
+            this.googleSTT = new RestSTT(sttProvider, apiKey, modelOverride, region);
           } else {
             console.warn(`[Main] No API key for ${sttProvider} STT, falling back to GoogleSTT`);
             this.googleSTT = new GoogleSTT();
@@ -369,17 +391,38 @@ export class AppState {
         const { CredentialsManager } = require('./services/CredentialsManager');
         const sttProvider = CredentialsManager.getInstance().getSttProvider();
 
-        if (sttProvider === 'groq' || sttProvider === 'openai' || sttProvider === 'deepgram') {
-          const apiKey = sttProvider === 'groq'
-            ? CredentialsManager.getInstance().getGroqSttApiKey()
-            : sttProvider === 'openai'
-              ? CredentialsManager.getInstance().getOpenAiSttApiKey()
-              : CredentialsManager.getInstance().getDeepgramApiKey();
+        if (sttProvider === 'deepgram') {
+          const apiKey = CredentialsManager.getInstance().getDeepgramApiKey();
+          if (apiKey) {
+            console.log(`[Main] Using DeepgramStreamingSTT for User`);
+            this.googleSTT_User = new DeepgramStreamingSTT(apiKey);
+          } else {
+            console.warn(`[Main] No API key for Deepgram STT, falling back to GoogleSTT`);
+            this.googleSTT_User = new GoogleSTT();
+          }
+        } else if (sttProvider === 'groq' || sttProvider === 'openai' || sttProvider === 'elevenlabs' || sttProvider === 'azure' || sttProvider === 'ibmwatson') {
+          let apiKey: string | undefined;
+          let region: string | undefined;
+          let modelOverride: string | undefined;
+
+          if (sttProvider === 'groq') {
+            apiKey = CredentialsManager.getInstance().getGroqSttApiKey();
+            modelOverride = CredentialsManager.getInstance().getGroqSttModel();
+          } else if (sttProvider === 'openai') {
+            apiKey = CredentialsManager.getInstance().getOpenAiSttApiKey();
+          } else if (sttProvider === 'elevenlabs') {
+            apiKey = CredentialsManager.getInstance().getElevenLabsApiKey();
+          } else if (sttProvider === 'azure') {
+            apiKey = CredentialsManager.getInstance().getAzureApiKey();
+            region = CredentialsManager.getInstance().getAzureRegion();
+          } else if (sttProvider === 'ibmwatson') {
+            apiKey = CredentialsManager.getInstance().getIbmWatsonApiKey();
+            region = CredentialsManager.getInstance().getIbmWatsonRegion();
+          }
 
           if (apiKey) {
-            const modelOverride = sttProvider === 'groq' ? CredentialsManager.getInstance().getGroqSttModel() : undefined;
             console.log(`[Main] Using RestSTT (${sttProvider}) for User`);
-            this.googleSTT_User = new RestSTT(sttProvider, apiKey, modelOverride);
+            this.googleSTT_User = new RestSTT(sttProvider, apiKey, modelOverride, region);
           } else {
             console.warn(`[Main] No API key for ${sttProvider} STT, falling back to GoogleSTT`);
             this.googleSTT_User = new GoogleSTT();

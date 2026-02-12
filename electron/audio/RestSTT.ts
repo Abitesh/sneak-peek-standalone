@@ -1,5 +1,5 @@
 /**
- * RestSTT - REST-based Speech-to-Text for Groq, OpenAI Whisper, and Deepgram
+ * RestSTT - REST-based Speech-to-Text for Groq, OpenAI Whisper, ElevenLabs, Azure, and IBM Watson
  *
  * Implements the same EventEmitter interface as GoogleSTT:
  *   Events: 'transcript' ({ text, isFinal, confidence }), 'error' (Error)
@@ -7,26 +7,29 @@
  *
  * Buffers raw PCM chunks, prepends a WAV header, and uploads via REST every ~3 seconds.
  * Supports two upload modes:
- *   - Multipart FormData (Groq, OpenAI)
- *   - Raw binary body (Deepgram)
+ *   - Multipart FormData (Groq, OpenAI, ElevenLabs)
+ *   - Raw binary body (Azure, IBM Watson)
  */
 
 import { EventEmitter } from 'events';
 import axios from 'axios';
 import FormData from 'form-data';
 
-export type RestSttProvider = 'groq' | 'openai' | 'deepgram';
+export type RestSttProvider = 'groq' | 'openai' | 'elevenlabs' | 'azure' | 'ibmwatson';
 
 interface RestSttProviderConfig {
     endpoint: string;
     model: string;
     authHeader: Record<string, string>;
-    /** 'multipart' for Groq/OpenAI FormData, 'binary' for Deepgram raw body */
     uploadType: 'multipart' | 'binary';
     extraFormFields?: Record<string, string>;
+    /** Extract transcript text from the API response */
+    extractTranscript: (data: any) => string;
 }
 
-const PROVIDER_CONFIGS: Record<RestSttProvider, (apiKey: string) => RestSttProviderConfig> = {
+type ProviderConfigFactory = (apiKey: string, region?: string) => RestSttProviderConfig;
+
+const PROVIDER_CONFIGS: Record<RestSttProvider, ProviderConfigFactory> = {
     groq: (apiKey) => ({
         endpoint: 'https://api.groq.com/openai/v1/audio/transcriptions',
         model: 'whisper-large-v3-turbo',
@@ -37,18 +40,52 @@ const PROVIDER_CONFIGS: Record<RestSttProvider, (apiKey: string) => RestSttProvi
             response_format: 'json',
             language: 'en',
         },
+        extractTranscript: (data: any) => {
+            if (typeof data === 'string') return data;
+            return data?.text ?? '';
+        },
     }),
     openai: (apiKey) => ({
         endpoint: 'https://api.openai.com/v1/audio/transcriptions',
         model: 'whisper-1',
         authHeader: { Authorization: `Bearer ${apiKey}` },
         uploadType: 'multipart',
+        extractTranscript: (data: any) => {
+            if (typeof data === 'string') return data;
+            return data?.text ?? '';
+        },
     }),
-    deepgram: (apiKey) => ({
-        endpoint: 'https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true',
-        model: 'nova-2',
-        authHeader: { Authorization: `Token ${apiKey}` },
+    elevenlabs: (apiKey) => ({
+        endpoint: 'https://api.elevenlabs.io/v1/speech-to-text',
+        model: 'scribe_v1',
+        authHeader: { 'xi-api-key': apiKey },
+        uploadType: 'multipart',
+        extractTranscript: (data: any) => {
+            if (typeof data === 'string') return data;
+            return data?.text ?? '';
+        },
+    }),
+    azure: (apiKey, region = 'eastus') => ({
+        endpoint: `https://${region}.stt.speech.microsoft.com/speech/recognition/conversation/cognitiveservices/v1?language=en-US`,
+        model: '',
+        authHeader: { 'Ocp-Apim-Subscription-Key': apiKey },
         uploadType: 'binary',
+        extractTranscript: (data: any) => {
+            return data?.DisplayText ?? '';
+        },
+    }),
+    ibmwatson: (apiKey, region = 'us-south') => ({
+        endpoint: `https://api.${region}.speech-to-text.watson.cloud.ibm.com/v1/recognize`,
+        model: '',
+        authHeader: { Authorization: `Basic ${Buffer.from(`apikey:${apiKey}`).toString('base64')}` },
+        uploadType: 'binary',
+        extractTranscript: (data: any) => {
+            try {
+                return data?.results?.[0]?.alternatives?.[0]?.transcript ?? '';
+            } catch {
+                return '';
+            }
+        },
     }),
 };
 
@@ -65,6 +102,7 @@ const SILENCE_RMS_THRESHOLD = 50;
 export class RestSTT extends EventEmitter {
     private provider: RestSttProvider;
     private apiKey: string;
+    private region?: string;
     private config: RestSttProviderConfig;
 
     private chunks: Buffer[] = [];
@@ -78,15 +116,16 @@ export class RestSTT extends EventEmitter {
     private numChannels = 1;
     private bitsPerSample = 16;
 
-    constructor(provider: RestSttProvider, apiKey: string, modelOverride?: string) {
+    constructor(provider: RestSttProvider, apiKey: string, modelOverride?: string, region?: string) {
         super();
         this.provider = provider;
         this.apiKey = apiKey;
-        this.config = PROVIDER_CONFIGS[provider](apiKey);
+        this.region = region;
+        this.config = PROVIDER_CONFIGS[provider](apiKey, region);
         if (modelOverride) {
             this.config.model = modelOverride;
         }
-        console.log(`[RestSTT] Initialized for provider: ${provider}, model: ${this.config.model}`);
+        console.log(`[RestSTT] Initialized for provider: ${provider}, model: ${this.config.model || '(default)'}`);
     }
 
     /**
@@ -94,7 +133,7 @@ export class RestSTT extends EventEmitter {
      */
     public setApiKey(apiKey: string): void {
         this.apiKey = apiKey;
-        this.config = PROVIDER_CONFIGS[this.provider](apiKey);
+        this.config = PROVIDER_CONFIGS[this.provider](apiKey, this.region);
         console.log(`[RestSTT] API key updated for ${this.provider}`);
     }
 
@@ -234,7 +273,7 @@ export class RestSTT extends EventEmitter {
     }
 
     /**
-     * Upload via multipart FormData (Groq, OpenAI)
+     * Upload via multipart FormData (Groq, OpenAI, ElevenLabs)
      */
     private async uploadMultipart(wavBuffer: Buffer): Promise<string> {
         const form = new FormData();
@@ -244,7 +283,12 @@ export class RestSTT extends EventEmitter {
             contentType: 'audio/wav',
         });
 
-        form.append('model', this.config.model);
+        // ElevenLabs uses 'model_id' instead of 'model'
+        if (this.provider === 'elevenlabs') {
+            form.append('model_id', this.config.model);
+        } else {
+            form.append('model', this.config.model);
+        }
 
         if (this.config.extraFormFields) {
             for (const [key, value] of Object.entries(this.config.extraFormFields)) {
@@ -260,16 +304,11 @@ export class RestSTT extends EventEmitter {
             timeout: 30000,
         });
 
-        const data = response.data;
-        if (typeof data === 'string') return data;
-        if (data && typeof data.text === 'string') return data.text;
-
-        console.warn(`[RestSTT] Unexpected multipart response format:`, data);
-        return '';
+        return this.config.extractTranscript(response.data);
     }
 
     /**
-     * Upload via raw binary body (Deepgram)
+     * Upload via raw binary body (Azure, IBM Watson)
      */
     private async uploadBinary(wavBuffer: Buffer): Promise<string> {
         const response = await axios.post(this.config.endpoint, wavBuffer, {
@@ -280,21 +319,7 @@ export class RestSTT extends EventEmitter {
             timeout: 30000,
         });
 
-        const data = response.data;
-
-        // Deepgram response: data.results.channels[0].alternatives[0].transcript
-        try {
-            const transcript = data?.results?.channels?.[0]?.alternatives?.[0]?.transcript;
-            if (typeof transcript === 'string') return transcript;
-        } catch (_) {
-            // fall through
-        }
-
-        // Fallback: check for generic text field
-        if (data && typeof data.text === 'string') return data.text;
-
-        console.warn(`[RestSTT] Unexpected binary response format:`, data);
-        return '';
+        return this.config.extractTranscript(response.data);
     }
 
     /**
@@ -318,7 +343,7 @@ export class RestSTT extends EventEmitter {
 
     /**
      * Add a WAV RIFF header to raw PCM data
-     * Critical: Groq and OpenAI require a valid WAV file, NOT raw PCM
+     * Critical: Most REST STT APIs require a valid WAV file, NOT raw PCM
      */
     private addWavHeader(samples: Buffer, sampleRate: number = 16000): Buffer {
         const buffer = Buffer.alloc(44 + samples.length);

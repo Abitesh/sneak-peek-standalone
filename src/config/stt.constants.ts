@@ -1,9 +1,9 @@
 /**
  * Speech-to-Text Provider Constants
- * Configuration for REST-based STT providers (Groq, OpenAI Whisper, Deepgram)
+ * Configuration for STT providers (Google gRPC, REST, WebSocket)
  */
 
-export type SttProviderId = 'google' | 'groq' | 'openai' | 'deepgram';
+export type SttProviderId = 'google' | 'groq' | 'openai' | 'deepgram' | 'elevenlabs' | 'azure' | 'ibmwatson';
 
 export interface SttProviderConfig {
     id: SttProviderId;
@@ -13,8 +13,8 @@ export interface SttProviderConfig {
     model: string;
     /** Available models for this provider (for user selection) */
     availableModels?: { id: string; label: string }[];
-    /** Upload type: 'multipart' for FormData (Groq/OpenAI), 'binary' for raw body (Deepgram) */
-    uploadType?: 'multipart' | 'binary';
+    /** Upload type: 'multipart' for FormData, 'binary' for raw body, 'websocket' for streaming */
+    uploadType?: 'multipart' | 'binary' | 'websocket';
     authHeader: (apiKey: string) => Record<string, string>;
     /** Path to extract transcript text from the JSON response */
     responseContentPath: string;
@@ -68,14 +68,50 @@ export const STT_PROVIDERS: Record<SttProviderId, SttProviderConfig> = {
     deepgram: {
         id: 'deepgram',
         name: 'Deepgram Nova-2',
-        description: 'Accurate transcription via Deepgram API',
-        endpoint: 'https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true',
+        description: 'Real-time streaming transcription via Deepgram WebSocket',
+        endpoint: 'wss://api.deepgram.com/v1/listen',
         model: 'nova-2',
-        uploadType: 'binary',
+        uploadType: 'websocket',
         authHeader: (apiKey: string) => ({
             Authorization: `Token ${apiKey}`,
         }),
-        responseContentPath: 'results.channels[0].alternatives[0].transcript',
+        responseContentPath: 'channel.alternatives[0].transcript',
+    },
+    elevenlabs: {
+        id: 'elevenlabs',
+        name: 'ElevenLabs Scribe',
+        description: 'High-quality STT via ElevenLabs Scribe API',
+        endpoint: 'https://api.elevenlabs.io/v1/speech-to-text',
+        model: 'scribe_v1',
+        uploadType: 'multipart',
+        authHeader: (apiKey: string) => ({
+            'xi-api-key': apiKey,
+        }),
+        responseContentPath: 'text',
+    },
+    azure: {
+        id: 'azure',
+        name: 'Azure Speech',
+        description: 'Microsoft Azure Cognitive Services STT',
+        endpoint: 'https://{region}.stt.speech.microsoft.com/speech/recognition/conversation/cognitiveservices/v1',
+        model: '',
+        uploadType: 'binary',
+        authHeader: (apiKey: string) => ({
+            'Ocp-Apim-Subscription-Key': apiKey,
+        }),
+        responseContentPath: 'DisplayText',
+    },
+    ibmwatson: {
+        id: 'ibmwatson',
+        name: 'IBM Watson',
+        description: 'IBM Watson Speech-to-Text cloud service',
+        endpoint: 'https://api.{region}.speech-to-text.watson.cloud.ibm.com/v1/recognize',
+        model: '',
+        uploadType: 'binary',
+        authHeader: (apiKey: string) => ({
+            Authorization: `Basic ${btoa(`apikey:${apiKey}`)}`,
+        }),
+        responseContentPath: 'results[0].alternatives[0].transcript',
     },
 };
 

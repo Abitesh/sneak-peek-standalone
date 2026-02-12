@@ -529,9 +529,14 @@ export function initializeIpcHandlers(appState: AppState): void {
         hasSttGroqKey: !!creds.groqSttApiKey,
         hasSttOpenaiKey: !!creds.openAiSttApiKey,
         hasDeepgramKey: !!creds.deepgramApiKey,
+        hasElevenLabsKey: !!creds.elevenLabsApiKey,
+        hasAzureKey: !!creds.azureApiKey,
+        azureRegion: creds.azureRegion || 'eastus',
+        hasIbmWatsonKey: !!creds.ibmWatsonApiKey,
+        ibmWatsonRegion: creds.ibmWatsonRegion || 'us-south',
       };
     } catch (error: any) {
-      return { hasGeminiKey: false, hasGroqKey: false, hasOpenaiKey: false, hasClaudeKey: false, googleServiceAccountPath: null, sttProvider: 'google', groqSttModel: 'whisper-large-v3-turbo', hasSttGroqKey: false, hasSttOpenaiKey: false, hasDeepgramKey: false };
+      return { hasGeminiKey: false, hasGroqKey: false, hasOpenaiKey: false, hasClaudeKey: false, googleServiceAccountPath: null, sttProvider: 'google', groqSttModel: 'whisper-large-v3-turbo', hasSttGroqKey: false, hasSttOpenaiKey: false, hasDeepgramKey: false, hasElevenLabsKey: false, hasAzureKey: false, azureRegion: 'eastus', hasIbmWatsonKey: false, ibmWatsonRegion: 'us-south' };
     }
   });
 
@@ -539,7 +544,7 @@ export function initializeIpcHandlers(appState: AppState): void {
   // STT Provider Management Handlers
   // ==========================================
 
-  ipcMain.handle("set-stt-provider", async (_, provider: 'google' | 'groq' | 'openai' | 'deepgram') => {
+  ipcMain.handle("set-stt-provider", async (_, provider: 'google' | 'groq' | 'openai' | 'deepgram' | 'elevenlabs' | 'azure' | 'ibmwatson') => {
     try {
       const { CredentialsManager } = require('./services/CredentialsManager');
       CredentialsManager.getInstance().setSttProvider(provider);
@@ -611,14 +616,90 @@ export function initializeIpcHandlers(appState: AppState): void {
     }
   });
 
-  ipcMain.handle("test-stt-connection", async (_, provider: 'groq' | 'openai' | 'deepgram', apiKey: string) => {
+  ipcMain.handle("set-elevenlabs-api-key", async (_, apiKey: string) => {
     try {
+      const { CredentialsManager } = require('./services/CredentialsManager');
+      CredentialsManager.getInstance().setElevenLabsApiKey(apiKey);
+      return { success: true };
+    } catch (error: any) {
+      console.error("Error saving ElevenLabs API key:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle("set-azure-api-key", async (_, apiKey: string) => {
+    try {
+      const { CredentialsManager } = require('./services/CredentialsManager');
+      CredentialsManager.getInstance().setAzureApiKey(apiKey);
+      return { success: true };
+    } catch (error: any) {
+      console.error("Error saving Azure API key:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle("set-azure-region", async (_, region: string) => {
+    try {
+      const { CredentialsManager } = require('./services/CredentialsManager');
+      CredentialsManager.getInstance().setAzureRegion(region);
+
+      // Reconfigure the pipeline since region changes the endpoint URL
+      await appState.reconfigureSttProvider();
+
+      return { success: true };
+    } catch (error: any) {
+      console.error("Error setting Azure region:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle("set-ibmwatson-api-key", async (_, apiKey: string) => {
+    try {
+      const { CredentialsManager } = require('./services/CredentialsManager');
+      CredentialsManager.getInstance().setIbmWatsonApiKey(apiKey);
+      return { success: true };
+    } catch (error: any) {
+      console.error("Error saving IBM Watson API key:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle("test-stt-connection", async (_, provider: 'groq' | 'openai' | 'deepgram' | 'elevenlabs' | 'azure' | 'ibmwatson', apiKey: string, region?: string) => {
+    try {
+      if (provider === 'deepgram') {
+        // Test Deepgram via WebSocket connection
+        const WebSocket = require('ws');
+        return await new Promise<{ success: boolean; error?: string }>((resolve) => {
+          const url = 'wss://api.deepgram.com/v1/listen?model=nova-2&encoding=linear16&sample_rate=16000&channels=1';
+          const ws = new WebSocket(url, {
+            headers: { Authorization: `Token ${apiKey}` },
+          });
+
+          const timeout = setTimeout(() => {
+            ws.close();
+            resolve({ success: false, error: 'Connection timed out' });
+          }, 15000);
+
+          ws.on('open', () => {
+            clearTimeout(timeout);
+            try { ws.send(JSON.stringify({ type: 'CloseStream' })); } catch { }
+            ws.close();
+            resolve({ success: true });
+          });
+
+          ws.on('error', (err: any) => {
+            clearTimeout(timeout);
+            resolve({ success: false, error: err.message || 'Connection failed' });
+          });
+        });
+      }
+
       const axios = require('axios');
       const FormData = require('form-data');
 
       // Generate a tiny silent WAV (0.5s of silence at 16kHz mono 16-bit)
-      const numSamples = 8000; // 0.5 seconds
-      const pcmData = Buffer.alloc(numSamples * 2); // 16-bit = 2 bytes per sample
+      const numSamples = 8000;
+      const pcmData = Buffer.alloc(numSamples * 2);
       const wavHeader = Buffer.alloc(44);
       wavHeader.write('RIFF', 0);
       wavHeader.writeUInt32LE(36 + pcmData.length, 4);
@@ -635,21 +716,42 @@ export function initializeIpcHandlers(appState: AppState): void {
       wavHeader.writeUInt32LE(pcmData.length, 40);
       const testWav = Buffer.concat([wavHeader, pcmData]);
 
-      if (provider === 'deepgram') {
-        // Deepgram uses raw binary body
+      if (provider === 'elevenlabs') {
+        // ElevenLabs: multipart with xi-api-key header
+        const form = new FormData();
+        form.append('file', testWav, { filename: 'test.wav', contentType: 'audio/wav' });
+        form.append('model_id', 'scribe_v1');
+        await axios.post('https://api.elevenlabs.io/v1/speech-to-text', form, {
+          headers: { 'xi-api-key': apiKey, ...form.getHeaders() },
+          timeout: 15000,
+        });
+      } else if (provider === 'azure') {
+        // Azure: raw binary with subscription key
+        const azureRegion = region || 'eastus';
         await axios.post(
-          'https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true',
+          `https://${azureRegion}.stt.speech.microsoft.com/speech/recognition/conversation/cognitiveservices/v1?language=en-US`,
+          testWav,
+          {
+            headers: { 'Ocp-Apim-Subscription-Key': apiKey, 'Content-Type': 'audio/wav' },
+            timeout: 15000,
+          }
+        );
+      } else if (provider === 'ibmwatson') {
+        // IBM Watson: raw binary with Basic auth
+        const ibmRegion = region || 'us-south';
+        await axios.post(
+          `https://api.${ibmRegion}.speech-to-text.watson.cloud.ibm.com/v1/recognize`,
           testWav,
           {
             headers: {
-              Authorization: `Token ${apiKey}`,
+              Authorization: `Basic ${Buffer.from(`apikey:${apiKey}`).toString('base64')}`,
               'Content-Type': 'audio/wav',
             },
             timeout: 15000,
           }
         );
       } else {
-        // Groq / OpenAI use multipart FormData
+        // Groq / OpenAI: multipart FormData
         const endpoint = provider === 'groq'
           ? 'https://api.groq.com/openai/v1/audio/transcriptions'
           : 'https://api.openai.com/v1/audio/transcriptions';
@@ -670,7 +772,7 @@ export function initializeIpcHandlers(appState: AppState): void {
 
       return { success: true };
     } catch (error: any) {
-      const msg = error?.response?.data?.error?.message || error.message || 'Connection failed';
+      const msg = error?.response?.data?.error?.message || error?.response?.data?.message || error.message || 'Connection failed';
       console.error("STT connection test failed:", msg);
       return { success: false, error: msg };
     }
