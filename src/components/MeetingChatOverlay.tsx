@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import nativelyIcon from './icon.png';
 
 // ============================================
-// Types
+// Types 
 // ============================================
 
 interface Message {
