@@ -313,10 +313,12 @@ export class AppState {
         const { CredentialsManager } = require('./services/CredentialsManager');
         const sttProvider = CredentialsManager.getInstance().getSttProvider();
 
-        if (sttProvider === 'groq' || sttProvider === 'openai') {
+        if (sttProvider === 'groq' || sttProvider === 'openai' || sttProvider === 'deepgram') {
           const apiKey = sttProvider === 'groq'
             ? CredentialsManager.getInstance().getGroqSttApiKey()
-            : CredentialsManager.getInstance().getOpenAiSttApiKey();
+            : sttProvider === 'openai'
+              ? CredentialsManager.getInstance().getOpenAiSttApiKey()
+              : CredentialsManager.getInstance().getDeepgramApiKey();
 
           if (apiKey) {
             const modelOverride = sttProvider === 'groq' ? CredentialsManager.getInstance().getGroqSttModel() : undefined;
@@ -367,10 +369,12 @@ export class AppState {
         const { CredentialsManager } = require('./services/CredentialsManager');
         const sttProvider = CredentialsManager.getInstance().getSttProvider();
 
-        if (sttProvider === 'groq' || sttProvider === 'openai') {
+        if (sttProvider === 'groq' || sttProvider === 'openai' || sttProvider === 'deepgram') {
           const apiKey = sttProvider === 'groq'
             ? CredentialsManager.getInstance().getGroqSttApiKey()
-            : CredentialsManager.getInstance().getOpenAiSttApiKey();
+            : sttProvider === 'openai'
+              ? CredentialsManager.getInstance().getOpenAiSttApiKey()
+              : CredentialsManager.getInstance().getDeepgramApiKey();
 
           if (apiKey) {
             const modelOverride = sttProvider === 'groq' ? CredentialsManager.getInstance().getGroqSttModel() : undefined;

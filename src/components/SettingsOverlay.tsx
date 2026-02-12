@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-    X, Mic, Speaker, Monitor, Keyboard, User, LifeBuoy, LogOut,
+    X, Mic, Speaker, Monitor, Keyboard, User, LifeBuoy, LogOut, Upload,
     ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
     Camera, RotateCcw, Eye, Layout, MessageSquare, Crop,
     ChevronDown, Check, BadgeCheck, Power, Palette, Calendar, Ghost, Sun, Moon, RefreshCw, Info, Globe, FlaskConical, Terminal, Settings, Activity
@@ -264,12 +264,19 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
     const [useLegacyAudio, setUseLegacyAudio] = useState(false);
 
     // STT Provider settings
-    const [sttProvider, setSttProvider] = useState<'google' | 'groq' | 'openai'>('google');
+    const [sttProvider, setSttProvider] = useState<'google' | 'groq' | 'openai' | 'deepgram'>('google');
     const [groqSttModel, setGroqSttModel] = useState('whisper-large-v3-turbo');
     const [sttGroqKey, setSttGroqKey] = useState('');
     const [sttOpenaiKey, setSttOpenaiKey] = useState('');
+    const [sttDeepgramKey, setSttDeepgramKey] = useState('');
     const [sttTestStatus, setSttTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
     const [sttTestError, setSttTestError] = useState('');
+    const [sttSaving, setSttSaving] = useState(false);
+    const [sttSaved, setSttSaved] = useState(false);
+    const [googleServiceAccountPath, setGoogleServiceAccountPath] = useState<string | null>(null);
+    const [hasStoredSttGroqKey, setHasStoredSttGroqKey] = useState(false);
+    const [hasStoredSttOpenaiKey, setHasStoredSttOpenaiKey] = useState(false);
+    const [hasStoredDeepgramKey, setHasStoredDeepgramKey] = useState(false);
     const [isSttDropdownOpen, setIsSttDropdownOpen] = useState(false);
     const sttDropdownRef = React.useRef<HTMLDivElement>(null);
 
@@ -295,6 +302,10 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                 if (creds) {
                     setSttProvider(creds.sttProvider || 'google');
                     if (creds.groqSttModel) setGroqSttModel(creds.groqSttModel);
+                    setGoogleServiceAccountPath(creds.googleServiceAccountPath);
+                    setHasStoredSttGroqKey(creds.hasSttGroqKey);
+                    setHasStoredSttOpenaiKey(creds.hasSttOpenaiKey);
+                    setHasStoredDeepgramKey(creds.hasDeepgramKey);
                 }
             } catch (e) {
                 console.error('Failed to load STT settings:', e);
@@ -303,7 +314,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
         if (isOpen) loadSttSettings();
     }, [isOpen]);
 
-    const handleSttProviderChange = async (provider: 'google' | 'groq' | 'openai') => {
+    const handleSttProviderChange = async (provider: 'google' | 'groq' | 'openai' | 'deepgram') => {
         setSttProvider(provider);
         setIsSttDropdownOpen(false);
         setSttTestStatus('idle');
@@ -316,24 +327,36 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
         }
     };
 
-    const handleSttKeySubmit = async (provider: 'groq' | 'openai', key: string) => {
+    const handleSttKeySubmit = async (provider: 'groq' | 'openai' | 'deepgram', key: string) => {
         if (!key.trim()) return;
+        setSttSaving(true);
         try {
             if (provider === 'groq') {
                 // @ts-ignore
                 await window.electronAPI?.setGroqSttApiKey?.(key.trim());
+            } else if (provider === 'openai') {
+                // @ts-ignore
+                await window.electronAPI?.setOpenaiSttApiKey?.(key.trim());
             } else {
                 // @ts-ignore
-                await window.electronAPI?.setOpenAiSttApiKey?.(key.trim());
+                await window.electronAPI?.setDeepgramApiKey?.(key.trim());
             }
+            if (provider === 'groq') setHasStoredSttGroqKey(true);
+            else if (provider === 'openai') setHasStoredSttOpenaiKey(true);
+            else setHasStoredDeepgramKey(true);
+
+            setSttSaved(true);
+            setTimeout(() => setSttSaved(false), 2000);
         } catch (e) {
             console.error(`Failed to save ${provider} STT key:`, e);
+        } finally {
+            setSttSaving(false);
         }
     };
 
     const handleTestSttConnection = async () => {
         if (sttProvider === 'google') return;
-        const keyToTest = sttProvider === 'groq' ? sttGroqKey : sttOpenaiKey;
+        const keyToTest = sttProvider === 'groq' ? sttGroqKey : sttProvider === 'openai' ? sttOpenaiKey : sttDeepgramKey;
         if (!keyToTest.trim()) {
             setSttTestStatus('error');
             setSttTestError('Please enter an API key first');
@@ -1017,36 +1040,42 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                                     { id: 'google' as const, label: 'Google Cloud', badge: 'Default', desc: 'gRPC streaming via Service Account', color: 'blue' },
                                                     { id: 'groq' as const, label: 'Groq Whisper', badge: 'Fast', desc: 'Ultra-fast REST transcription', color: 'orange' },
                                                     { id: 'openai' as const, label: 'OpenAI Whisper', badge: null, desc: 'OpenAI-compatible Whisper API', color: 'green' },
+                                                    { id: 'deepgram' as const, label: 'Deepgram Nova-2', badge: 'Accurate', desc: 'High-accuracy REST transcription', color: 'purple' },
                                                 ].map((option) => (
                                                     <button
                                                         key={option.id}
                                                         onClick={() => handleSttProviderChange(option.id)}
-                                                        className={`w-full rounded-xl p-3.5 text-left transition-all flex items-center gap-3 border ${sttProvider === option.id
-                                                            ? 'bg-accent-primary/5 border-accent-primary/40 shadow-sm'
-                                                            : 'bg-bg-card border-border-subtle hover:border-border-muted hover:bg-bg-elevated'
+                                                        className={`group w-full rounded-xl p-3.5 text-left transition-all duration-200 ease-in-out flex items-center gap-3 border active:scale-[0.98] ${sttProvider === option.id
+                                                            ? 'bg-blue-600 border-transparent shadow-md'
+                                                            : 'bg-bg-card border-border-subtle hover:bg-bg-elevated'
                                                             }`}
                                                     >
-                                                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${sttProvider === option.id
-                                                            ? 'bg-accent-primary/15 text-accent-primary'
-                                                            : 'bg-bg-input text-text-tertiary'
+                                                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors ${sttProvider === option.id
+                                                            ? 'bg-white/10 text-white'
+                                                            : 'bg-bg-input text-text-tertiary group-hover:text-text-secondary'
                                                             }`}>
                                                             <Mic size={16} />
                                                         </div>
                                                         <div className="flex-1 min-w-0">
                                                             <div className="flex items-center gap-2">
-                                                                <span className="text-sm font-semibold text-text-primary">{option.label}</span>
+                                                                <span className={`text-sm font-semibold transition-colors ${sttProvider === option.id ? 'text-white' : 'text-text-primary'
+                                                                    }`}>{option.label}</span>
                                                                 {option.badge && (
-                                                                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${option.color === 'blue' ? 'bg-blue-500/15 text-blue-500' :
-                                                                        option.color === 'orange' ? 'bg-orange-500/15 text-orange-500' :
-                                                                            'bg-green-500/15 text-green-500'
+                                                                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${sttProvider === option.id
+                                                                        ? 'bg-white/20 text-white'
+                                                                        : option.color === 'blue' ? 'bg-blue-500/15 text-blue-500'
+                                                                            : option.color === 'orange' ? 'bg-orange-500/15 text-orange-500'
+                                                                                : option.color === 'purple' ? 'bg-purple-500/15 text-purple-500'
+                                                                                    : 'bg-green-500/15 text-green-500'
                                                                         }`}>{option.badge}</span>
                                                                 )}
                                                             </div>
-                                                            <span className="text-xs text-text-tertiary">{option.desc}</span>
+                                                            <span className={`text-xs transition-colors ${sttProvider === option.id ? 'text-white/70' : 'text-text-tertiary'
+                                                                }`}>{option.desc}</span>
                                                         </div>
                                                         {sttProvider === option.id && (
-                                                            <div className="w-5 h-5 rounded-full bg-accent-primary flex items-center justify-center shrink-0">
-                                                                <Check size={12} className="text-white" />
+                                                            <div className="w-5 h-5 rounded-full bg-white text-text-primary flex items-center justify-center shrink-0 shadow-sm animate-in zoom-in-50 duration-200">
+                                                                <Check size={12} strokeWidth={3} />
                                                             </div>
                                                         )}
                                                     </button>
@@ -1073,41 +1102,82 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                                                         console.error('Failed to set Groq model:', e);
                                                                     }
                                                                 }}
-                                                                className={`rounded-lg px-3 py-2.5 text-left transition-all border ${groqSttModel === m.id
-                                                                        ? 'bg-accent-primary/5 border-accent-primary/40'
-                                                                        : 'bg-bg-input border-border-subtle hover:border-border-muted'
+                                                                className={`rounded-lg px-3 py-2.5 text-left transition-all duration-200 ease-in-out active:scale-[0.98] ${groqSttModel === m.id
+                                                                    ? 'bg-blue-600 text-white shadow-md'
+                                                                    : 'bg-bg-input hover:bg-bg-elevated text-text-primary'
                                                                     }`}
                                                             >
-                                                                <span className="text-sm font-medium text-text-primary block">{m.label}</span>
-                                                                <span className="text-[11px] text-text-tertiary">{m.desc}</span>
+                                                                <span className="text-sm font-medium block">{m.label}</span>
+                                                                <span className={`text-[11px] transition-colors ${groqSttModel === m.id ? 'text-white/70' : 'text-text-tertiary'
+                                                                    }`}>{m.desc}</span>
                                                             </button>
                                                         ))}
                                                     </div>
                                                 </div>
                                             )}
 
-                                            {/* API Key Input (Groq / OpenAI) */}
+                                            {/* Google Cloud Service Account */}
+                                            {sttProvider === 'google' && (
+                                                <div className="bg-bg-card rounded-xl border border-border-subtle p-4">
+                                                    <label className="text-xs font-medium text-text-secondary mb-2 block">Service Account JSON</label>
+                                                    <div className="flex gap-2">
+                                                        <div className="flex-1 bg-bg-input border border-border-subtle rounded-lg px-3 py-2 text-xs text-text-secondary font-mono truncate">
+                                                            {googleServiceAccountPath
+                                                                ? <span className="text-text-primary">{googleServiceAccountPath.split('/').pop()}</span>
+                                                                : <span className="text-text-tertiary italic">No file selected</span>}
+                                                        </div>
+                                                        <button
+                                                            onClick={async () => {
+                                                                // @ts-ignore
+                                                                const result = await window.electronAPI?.selectServiceAccount?.();
+                                                                if (result?.success && result.path) {
+                                                                    setGoogleServiceAccountPath(result.path);
+                                                                }
+                                                            }}
+                                                            className="px-3 py-2 bg-bg-input hover:bg-bg-elevated border border-border-subtle rounded-lg text-xs font-medium text-text-primary transition-colors flex items-center gap-2"
+                                                        >
+                                                            <Upload size={14} /> Select File
+                                                        </button>
+                                                    </div>
+                                                    <p className="text-[10px] text-text-tertiary mt-2">
+                                                        Required for Google Cloud Speech-to-Text.
+                                                    </p>
+                                                </div>
+                                            )}
+
+                                            {/* API Key Input (Groq / OpenAI / Deepgram) */}
                                             {sttProvider !== 'google' && (
                                                 <div className="bg-bg-card rounded-xl border border-border-subtle p-4 space-y-3">
                                                     <label className="text-xs font-medium text-text-secondary block">
-                                                        {sttProvider === 'groq' ? 'Groq' : 'OpenAI'} API Key
+                                                        {sttProvider === 'groq' ? 'Groq' : sttProvider === 'openai' ? 'OpenAI' : 'Deepgram'} API Key
                                                     </label>
                                                     <div className="flex gap-2">
                                                         <input
                                                             type="password"
-                                                            value={sttProvider === 'groq' ? sttGroqKey : sttOpenaiKey}
+                                                            value={sttProvider === 'groq' ? sttGroqKey : sttProvider === 'openai' ? sttOpenaiKey : sttDeepgramKey}
                                                             onChange={(e) => {
                                                                 if (sttProvider === 'groq') setSttGroqKey(e.target.value);
-                                                                else setSttOpenaiKey(e.target.value);
+                                                                else if (sttProvider === 'openai') setSttOpenaiKey(e.target.value);
+                                                                else setSttDeepgramKey(e.target.value);
                                                             }}
-                                                            placeholder={`Enter ${sttProvider === 'groq' ? 'Groq' : 'OpenAI'} API key`}
+                                                            placeholder={
+                                                                sttProvider === 'groq'
+                                                                    ? (hasStoredSttGroqKey ? '••••••••••••' : 'Enter Groq API key')
+                                                                    : sttProvider === 'openai'
+                                                                        ? (hasStoredSttOpenaiKey ? '••••••••••••' : 'Enter OpenAI API key')
+                                                                        : (hasStoredDeepgramKey ? '••••••••••••' : 'Enter Deepgram API key')
+                                                            }
                                                             className="flex-1 bg-bg-input border border-border-subtle rounded-lg px-3 py-2 text-sm text-text-primary placeholder-text-tertiary focus:outline-none focus:border-accent-primary transition-colors"
                                                         />
                                                         <button
-                                                            onClick={() => handleSttKeySubmit(sttProvider, sttProvider === 'groq' ? sttGroqKey : sttOpenaiKey)}
-                                                            className="px-3 py-2 bg-accent-primary/10 text-accent-primary rounded-lg text-sm font-medium hover:bg-accent-primary/20 transition-colors"
+                                                            onClick={() => handleSttKeySubmit(sttProvider as 'groq' | 'openai' | 'deepgram', sttProvider === 'groq' ? sttGroqKey : sttProvider === 'openai' ? sttOpenaiKey : sttDeepgramKey)}
+                                                            disabled={sttSaving || !(sttProvider === 'groq' ? sttGroqKey : sttProvider === 'openai' ? sttOpenaiKey : sttDeepgramKey).trim()}
+                                                            className={`px-5 py-2.5 rounded-lg text-xs font-medium transition-colors ${sttSaved
+                                                                ? 'bg-green-500/20 text-green-400'
+                                                                : 'bg-bg-input hover:bg-bg-input/80 border border-border-subtle text-text-primary disabled:opacity-50'
+                                                                }`}
                                                         >
-                                                            Save
+                                                            {sttSaving ? 'Saving...' : sttSaved ? 'Saved!' : 'Save'}
                                                         </button>
                                                     </div>
                                                     <div className="flex items-center gap-3">

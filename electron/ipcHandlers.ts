@@ -528,9 +528,10 @@ export function initializeIpcHandlers(appState: AppState): void {
         groqSttModel: creds.groqSttModel || 'whisper-large-v3-turbo',
         hasSttGroqKey: !!creds.groqSttApiKey,
         hasSttOpenaiKey: !!creds.openAiSttApiKey,
+        hasDeepgramKey: !!creds.deepgramApiKey,
       };
     } catch (error: any) {
-      return { hasGeminiKey: false, hasGroqKey: false, hasOpenaiKey: false, hasClaudeKey: false, googleServiceAccountPath: null, sttProvider: 'google', groqSttModel: 'whisper-large-v3-turbo', hasSttGroqKey: false, hasSttOpenaiKey: false };
+      return { hasGeminiKey: false, hasGroqKey: false, hasOpenaiKey: false, hasClaudeKey: false, googleServiceAccountPath: null, sttProvider: 'google', groqSttModel: 'whisper-large-v3-turbo', hasSttGroqKey: false, hasSttOpenaiKey: false, hasDeepgramKey: false };
     }
   });
 
@@ -538,7 +539,7 @@ export function initializeIpcHandlers(appState: AppState): void {
   // STT Provider Management Handlers
   // ==========================================
 
-  ipcMain.handle("set-stt-provider", async (_, provider: 'google' | 'groq' | 'openai') => {
+  ipcMain.handle("set-stt-provider", async (_, provider: 'google' | 'groq' | 'openai' | 'deepgram') => {
     try {
       const { CredentialsManager } = require('./services/CredentialsManager');
       CredentialsManager.getInstance().setSttProvider(provider);
@@ -584,6 +585,17 @@ export function initializeIpcHandlers(appState: AppState): void {
     }
   });
 
+  ipcMain.handle("set-deepgram-api-key", async (_, apiKey: string) => {
+    try {
+      const { CredentialsManager } = require('./services/CredentialsManager');
+      CredentialsManager.getInstance().setDeepgramApiKey(apiKey);
+      return { success: true };
+    } catch (error: any) {
+      console.error("Error saving Deepgram API key:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
   ipcMain.handle("set-groq-stt-model", async (_, model: string) => {
     try {
       const { CredentialsManager } = require('./services/CredentialsManager');
@@ -599,7 +611,7 @@ export function initializeIpcHandlers(appState: AppState): void {
     }
   });
 
-  ipcMain.handle("test-stt-connection", async (_, provider: 'groq' | 'openai', apiKey: string) => {
+  ipcMain.handle("test-stt-connection", async (_, provider: 'groq' | 'openai' | 'deepgram', apiKey: string) => {
     try {
       const axios = require('axios');
       const FormData = require('form-data');
@@ -623,22 +635,38 @@ export function initializeIpcHandlers(appState: AppState): void {
       wavHeader.writeUInt32LE(pcmData.length, 40);
       const testWav = Buffer.concat([wavHeader, pcmData]);
 
-      const endpoint = provider === 'groq'
-        ? 'https://api.groq.com/openai/v1/audio/transcriptions'
-        : 'https://api.openai.com/v1/audio/transcriptions';
-      const model = provider === 'groq' ? 'whisper-large-v3-turbo' : 'whisper-1';
+      if (provider === 'deepgram') {
+        // Deepgram uses raw binary body
+        await axios.post(
+          'https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true',
+          testWav,
+          {
+            headers: {
+              Authorization: `Token ${apiKey}`,
+              'Content-Type': 'audio/wav',
+            },
+            timeout: 15000,
+          }
+        );
+      } else {
+        // Groq / OpenAI use multipart FormData
+        const endpoint = provider === 'groq'
+          ? 'https://api.groq.com/openai/v1/audio/transcriptions'
+          : 'https://api.openai.com/v1/audio/transcriptions';
+        const model = provider === 'groq' ? 'whisper-large-v3-turbo' : 'whisper-1';
 
-      const form = new FormData();
-      form.append('file', testWav, { filename: 'test.wav', contentType: 'audio/wav' });
-      form.append('model', model);
+        const form = new FormData();
+        form.append('file', testWav, { filename: 'test.wav', contentType: 'audio/wav' });
+        form.append('model', model);
 
-      await axios.post(endpoint, form, {
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          ...form.getHeaders(),
-        },
-        timeout: 15000,
-      });
+        await axios.post(endpoint, form, {
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            ...form.getHeaders(),
+          },
+          timeout: 15000,
+        });
+      }
 
       return { success: true };
     } catch (error: any) {

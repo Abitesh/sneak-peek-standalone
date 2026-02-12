@@ -51,15 +51,16 @@ interface ElectronAPI {
   setGroqApiKey: (apiKey: string) => Promise<{ success: boolean; error?: string }>
   setOpenaiApiKey: (apiKey: string) => Promise<{ success: boolean; error?: string }>
   setClaudeApiKey: (apiKey: string) => Promise<{ success: boolean; error?: string }>
-  getStoredCredentials: () => Promise<{ hasGeminiKey: boolean; hasGroqKey: boolean; hasOpenaiKey: boolean; hasClaudeKey: boolean; googleServiceAccountPath: string | null; sttProvider: string; hasSttGroqKey: boolean; hasSttOpenaiKey: boolean }>
+  getStoredCredentials: () => Promise<{ hasGeminiKey: boolean; hasGroqKey: boolean; hasOpenaiKey: boolean; hasClaudeKey: boolean; googleServiceAccountPath: string | null; sttProvider: string; hasSttGroqKey: boolean; hasSttOpenaiKey: boolean; hasDeepgramKey: boolean }>
 
   // STT Provider Management
-  setSttProvider: (provider: 'google' | 'groq' | 'openai') => Promise<{ success: boolean; error?: string }>
+  setSttProvider: (provider: 'google' | 'groq' | 'openai' | 'deepgram') => Promise<{ success: boolean; error?: string }>
   getSttProvider: () => Promise<string>
   setGroqSttApiKey: (apiKey: string) => Promise<{ success: boolean; error?: string }>
   setOpenAiSttApiKey: (apiKey: string) => Promise<{ success: boolean; error?: string }>
+  setDeepgramApiKey: (apiKey: string) => Promise<{ success: boolean; error?: string }>
   setGroqSttModel: (model: string) => Promise<{ success: boolean; error?: string }>
-  testSttConnection: (provider: 'groq' | 'openai', apiKey: string) => Promise<{ success: boolean; error?: string }>
+  testSttConnection: (provider: 'groq' | 'openai' | 'deepgram', apiKey: string) => Promise<{ success: boolean; error?: string }>
 
   // Native Audio Service Events
   onNativeAudioTranscript: (callback: (transcript: { speaker: string; text: string; final: boolean }) => void) => () => void
@@ -346,12 +347,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getStoredCredentials: () => ipcRenderer.invoke("get-stored-credentials"),
 
   // STT Provider Management
-  setSttProvider: (provider: 'google' | 'groq' | 'openai') => ipcRenderer.invoke("set-stt-provider", provider),
+  setSttProvider: (provider: 'google' | 'groq' | 'openai' | 'deepgram') => ipcRenderer.invoke("set-stt-provider", provider),
   getSttProvider: () => ipcRenderer.invoke("get-stt-provider"),
   setGroqSttApiKey: (apiKey: string) => ipcRenderer.invoke("set-groq-stt-api-key", apiKey),
   setOpenAiSttApiKey: (apiKey: string) => ipcRenderer.invoke("set-openai-stt-api-key", apiKey),
+  setDeepgramApiKey: (apiKey: string) => ipcRenderer.invoke("set-deepgram-api-key", apiKey),
   setGroqSttModel: (model: string) => ipcRenderer.invoke("set-groq-stt-model", model),
-  testSttConnection: (provider: 'groq' | 'openai', apiKey: string) => ipcRenderer.invoke("test-stt-connection", provider, apiKey),
+  testSttConnection: (provider: 'groq' | 'openai' | 'deepgram', apiKey: string) => ipcRenderer.invoke("test-stt-connection", provider, apiKey),
 
   // Native Audio Service Events
   onNativeAudioTranscript: (callback: (transcript: { speaker: string; text: string; final: boolean }) => void) => {

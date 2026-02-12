@@ -23,10 +23,11 @@ export interface StoredCredentials {
     googleServiceAccountPath?: string;
     customProviders?: CustomProvider[];
     // STT Provider settings
-    sttProvider?: 'google' | 'groq' | 'openai';
+    sttProvider?: 'google' | 'groq' | 'openai' | 'deepgram';
     groqSttApiKey?: string;
     groqSttModel?: string;
     openAiSttApiKey?: string;
+    deepgramApiKey?: string;
 }
 
 export class CredentialsManager {
@@ -81,8 +82,12 @@ export class CredentialsManager {
         return this.credentials.customProviders || [];
     }
 
-    public getSttProvider(): 'google' | 'groq' | 'openai' {
+    public getSttProvider(): 'google' | 'groq' | 'openai' | 'deepgram' {
         return this.credentials.sttProvider || 'google';
+    }
+
+    public getDeepgramApiKey(): string | undefined {
+        return this.credentials.deepgramApiKey;
     }
 
     public getGroqSttApiKey(): string | undefined {
@@ -135,10 +140,16 @@ export class CredentialsManager {
         console.log('[CredentialsManager] Google Service Account path updated');
     }
 
-    public setSttProvider(provider: 'google' | 'groq' | 'openai'): void {
+    public setSttProvider(provider: 'google' | 'groq' | 'openai' | 'deepgram'): void {
         this.credentials.sttProvider = provider;
         this.saveCredentials();
         console.log(`[CredentialsManager] STT Provider set to: ${provider}`);
+    }
+
+    public setDeepgramApiKey(key: string): void {
+        this.credentials.deepgramApiKey = key;
+        this.saveCredentials();
+        console.log('[CredentialsManager] Deepgram API Key updated');
     }
 
     public setGroqSttApiKey(key: string): void {

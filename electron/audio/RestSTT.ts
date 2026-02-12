@@ -1,23 +1,28 @@
 /**
- * RestSTT - REST-based Speech-to-Text for Groq and OpenAI Whisper
+ * RestSTT - REST-based Speech-to-Text for Groq, OpenAI Whisper, and Deepgram
  *
  * Implements the same EventEmitter interface as GoogleSTT:
  *   Events: 'transcript' ({ text, isFinal, confidence }), 'error' (Error)
  *   Methods: start(), stop(), write(chunk: Buffer)
  *
  * Buffers raw PCM chunks, prepends a WAV header, and uploads via REST every ~3 seconds.
+ * Supports two upload modes:
+ *   - Multipart FormData (Groq, OpenAI)
+ *   - Raw binary body (Deepgram)
  */
 
 import { EventEmitter } from 'events';
 import axios from 'axios';
 import FormData from 'form-data';
 
-export type RestSttProvider = 'groq' | 'openai';
+export type RestSttProvider = 'groq' | 'openai' | 'deepgram';
 
 interface RestSttProviderConfig {
     endpoint: string;
     model: string;
     authHeader: Record<string, string>;
+    /** 'multipart' for Groq/OpenAI FormData, 'binary' for Deepgram raw body */
+    uploadType: 'multipart' | 'binary';
     extraFormFields?: Record<string, string>;
 }
 
@@ -26,6 +31,7 @@ const PROVIDER_CONFIGS: Record<RestSttProvider, (apiKey: string) => RestSttProvi
         endpoint: 'https://api.groq.com/openai/v1/audio/transcriptions',
         model: 'whisper-large-v3-turbo',
         authHeader: { Authorization: `Bearer ${apiKey}` },
+        uploadType: 'multipart',
         extraFormFields: {
             temperature: '0',
             response_format: 'json',
@@ -36,6 +42,13 @@ const PROVIDER_CONFIGS: Record<RestSttProvider, (apiKey: string) => RestSttProvi
         endpoint: 'https://api.openai.com/v1/audio/transcriptions',
         model: 'whisper-1',
         authHeader: { Authorization: `Bearer ${apiKey}` },
+        uploadType: 'multipart',
+    }),
+    deepgram: (apiKey) => ({
+        endpoint: 'https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true',
+        model: 'nova-2',
+        authHeader: { Authorization: `Token ${apiKey}` },
+        uploadType: 'binary',
     }),
 };
 
@@ -214,18 +227,25 @@ export class RestSTT extends EventEmitter {
      * Upload WAV audio to the REST endpoint
      */
     private async uploadAudio(wavBuffer: Buffer): Promise<string> {
+        if (this.config.uploadType === 'binary') {
+            return this.uploadBinary(wavBuffer);
+        }
+        return this.uploadMultipart(wavBuffer);
+    }
+
+    /**
+     * Upload via multipart FormData (Groq, OpenAI)
+     */
+    private async uploadMultipart(wavBuffer: Buffer): Promise<string> {
         const form = new FormData();
 
-        // Append audio file
         form.append('file', wavBuffer, {
             filename: 'audio.wav',
             contentType: 'audio/wav',
         });
 
-        // Append model
         form.append('model', this.config.model);
 
-        // Append extra form fields if any
         if (this.config.extraFormFields) {
             for (const [key, value] of Object.entries(this.config.extraFormFields)) {
                 form.append(key, value);
@@ -237,21 +257,43 @@ export class RestSTT extends EventEmitter {
                 ...this.config.authHeader,
                 ...form.getHeaders(),
             },
-            timeout: 30000, // 30 second timeout
+            timeout: 30000,
         });
 
-        // Extract text from response
+        const data = response.data;
+        if (typeof data === 'string') return data;
+        if (data && typeof data.text === 'string') return data.text;
+
+        console.warn(`[RestSTT] Unexpected multipart response format:`, data);
+        return '';
+    }
+
+    /**
+     * Upload via raw binary body (Deepgram)
+     */
+    private async uploadBinary(wavBuffer: Buffer): Promise<string> {
+        const response = await axios.post(this.config.endpoint, wavBuffer, {
+            headers: {
+                ...this.config.authHeader,
+                'Content-Type': 'audio/wav',
+            },
+            timeout: 30000,
+        });
+
         const data = response.data;
 
-        if (typeof data === 'string') {
-            return data;
+        // Deepgram response: data.results.channels[0].alternatives[0].transcript
+        try {
+            const transcript = data?.results?.channels?.[0]?.alternatives?.[0]?.transcript;
+            if (typeof transcript === 'string') return transcript;
+        } catch (_) {
+            // fall through
         }
 
-        if (data && typeof data.text === 'string') {
-            return data.text;
-        }
+        // Fallback: check for generic text field
+        if (data && typeof data.text === 'string') return data.text;
 
-        console.warn(`[RestSTT] Unexpected response format:`, data);
+        console.warn(`[RestSTT] Unexpected binary response format:`, data);
         return '';
     }
 
