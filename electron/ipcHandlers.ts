@@ -523,10 +523,128 @@ export function initializeIpcHandlers(appState: AppState): void {
         hasGroqKey: !!creds.groqApiKey,
         hasOpenaiKey: !!creds.openaiApiKey,
         hasClaudeKey: !!creds.claudeApiKey,
-        googleServiceAccountPath: creds.googleServiceAccountPath || null
+        googleServiceAccountPath: creds.googleServiceAccountPath || null,
+        sttProvider: creds.sttProvider || 'google',
+        groqSttModel: creds.groqSttModel || 'whisper-large-v3-turbo',
+        hasSttGroqKey: !!creds.groqSttApiKey,
+        hasSttOpenaiKey: !!creds.openAiSttApiKey,
       };
     } catch (error: any) {
-      return { hasGeminiKey: false, hasGroqKey: false, hasOpenaiKey: false, hasClaudeKey: false, googleServiceAccountPath: null };
+      return { hasGeminiKey: false, hasGroqKey: false, hasOpenaiKey: false, hasClaudeKey: false, googleServiceAccountPath: null, sttProvider: 'google', groqSttModel: 'whisper-large-v3-turbo', hasSttGroqKey: false, hasSttOpenaiKey: false };
+    }
+  });
+
+  // ==========================================
+  // STT Provider Management Handlers
+  // ==========================================
+
+  ipcMain.handle("set-stt-provider", async (_, provider: 'google' | 'groq' | 'openai') => {
+    try {
+      const { CredentialsManager } = require('./services/CredentialsManager');
+      CredentialsManager.getInstance().setSttProvider(provider);
+
+      // Reconfigure the audio pipeline to use the new STT provider
+      await appState.reconfigureSttProvider();
+
+      return { success: true };
+    } catch (error: any) {
+      console.error("Error setting STT provider:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle("get-stt-provider", async () => {
+    try {
+      const { CredentialsManager } = require('./services/CredentialsManager');
+      return CredentialsManager.getInstance().getSttProvider();
+    } catch (error: any) {
+      return 'google';
+    }
+  });
+
+  ipcMain.handle("set-groq-stt-api-key", async (_, apiKey: string) => {
+    try {
+      const { CredentialsManager } = require('./services/CredentialsManager');
+      CredentialsManager.getInstance().setGroqSttApiKey(apiKey);
+      return { success: true };
+    } catch (error: any) {
+      console.error("Error saving Groq STT API key:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle("set-openai-stt-api-key", async (_, apiKey: string) => {
+    try {
+      const { CredentialsManager } = require('./services/CredentialsManager');
+      CredentialsManager.getInstance().setOpenAiSttApiKey(apiKey);
+      return { success: true };
+    } catch (error: any) {
+      console.error("Error saving OpenAI STT API key:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle("set-groq-stt-model", async (_, model: string) => {
+    try {
+      const { CredentialsManager } = require('./services/CredentialsManager');
+      CredentialsManager.getInstance().setGroqSttModel(model);
+
+      // Reconfigure the audio pipeline to use the new model
+      await appState.reconfigureSttProvider();
+
+      return { success: true };
+    } catch (error: any) {
+      console.error("Error setting Groq STT model:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle("test-stt-connection", async (_, provider: 'groq' | 'openai', apiKey: string) => {
+    try {
+      const axios = require('axios');
+      const FormData = require('form-data');
+
+      // Generate a tiny silent WAV (0.5s of silence at 16kHz mono 16-bit)
+      const numSamples = 8000; // 0.5 seconds
+      const pcmData = Buffer.alloc(numSamples * 2); // 16-bit = 2 bytes per sample
+      const wavHeader = Buffer.alloc(44);
+      wavHeader.write('RIFF', 0);
+      wavHeader.writeUInt32LE(36 + pcmData.length, 4);
+      wavHeader.write('WAVE', 8);
+      wavHeader.write('fmt ', 12);
+      wavHeader.writeUInt32LE(16, 16);
+      wavHeader.writeUInt16LE(1, 20);
+      wavHeader.writeUInt16LE(1, 22);
+      wavHeader.writeUInt32LE(16000, 24);
+      wavHeader.writeUInt32LE(32000, 28);
+      wavHeader.writeUInt16LE(2, 32);
+      wavHeader.writeUInt16LE(16, 34);
+      wavHeader.write('data', 36);
+      wavHeader.writeUInt32LE(pcmData.length, 40);
+      const testWav = Buffer.concat([wavHeader, pcmData]);
+
+      const endpoint = provider === 'groq'
+        ? 'https://api.groq.com/openai/v1/audio/transcriptions'
+        : 'https://api.openai.com/v1/audio/transcriptions';
+      const model = provider === 'groq' ? 'whisper-large-v3-turbo' : 'whisper-1';
+
+      const form = new FormData();
+      form.append('file', testWav, { filename: 'test.wav', contentType: 'audio/wav' });
+      form.append('model', model);
+
+      await axios.post(endpoint, form, {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          ...form.getHeaders(),
+        },
+        timeout: 15000,
+      });
+
+      return { success: true };
+    } catch (error: any) {
+      const msg = error?.response?.data?.error?.message || error.message || 'Connection failed';
+      console.error("STT connection test failed:", msg);
+      return { success: false, error: msg };
     }
   });
 

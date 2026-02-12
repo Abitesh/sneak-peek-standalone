@@ -22,6 +22,11 @@ export interface StoredCredentials {
     claudeApiKey?: string;
     googleServiceAccountPath?: string;
     customProviders?: CustomProvider[];
+    // STT Provider settings
+    sttProvider?: 'google' | 'groq' | 'openai';
+    groqSttApiKey?: string;
+    groqSttModel?: string;
+    openAiSttApiKey?: string;
 }
 
 export class CredentialsManager {
@@ -76,6 +81,22 @@ export class CredentialsManager {
         return this.credentials.customProviders || [];
     }
 
+    public getSttProvider(): 'google' | 'groq' | 'openai' {
+        return this.credentials.sttProvider || 'google';
+    }
+
+    public getGroqSttApiKey(): string | undefined {
+        return this.credentials.groqSttApiKey;
+    }
+
+    public getGroqSttModel(): string {
+        return this.credentials.groqSttModel || 'whisper-large-v3-turbo';
+    }
+
+    public getOpenAiSttApiKey(): string | undefined {
+        return this.credentials.openAiSttApiKey;
+    }
+
     public getAllCredentials(): StoredCredentials {
         return { ...this.credentials };
     }
@@ -112,6 +133,30 @@ export class CredentialsManager {
         this.credentials.googleServiceAccountPath = filePath;
         this.saveCredentials();
         console.log('[CredentialsManager] Google Service Account path updated');
+    }
+
+    public setSttProvider(provider: 'google' | 'groq' | 'openai'): void {
+        this.credentials.sttProvider = provider;
+        this.saveCredentials();
+        console.log(`[CredentialsManager] STT Provider set to: ${provider}`);
+    }
+
+    public setGroqSttApiKey(key: string): void {
+        this.credentials.groqSttApiKey = key;
+        this.saveCredentials();
+        console.log('[CredentialsManager] Groq STT API Key updated');
+    }
+
+    public setOpenAiSttApiKey(key: string): void {
+        this.credentials.openAiSttApiKey = key;
+        this.saveCredentials();
+        console.log('[CredentialsManager] OpenAI STT API Key updated');
+    }
+
+    public setGroqSttModel(model: string): void {
+        this.credentials.groqSttModel = model;
+        this.saveCredentials();
+        console.log(`[CredentialsManager] Groq STT Model set to: ${model}`);
     }
 
     public saveCustomProvider(provider: CustomProvider): void {

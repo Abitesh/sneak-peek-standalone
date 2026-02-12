@@ -63,6 +63,7 @@ import { IntelligenceManager } from "./IntelligenceManager"
 import { SystemAudioCapture } from "./audio/SystemAudioCapture"
 import { MicrophoneCapture } from "./audio/MicrophoneCapture"
 import { GoogleSTT } from "./audio/GoogleSTT"
+import { RestSTT } from "./audio/RestSTT"
 import { ThemeManager } from "./ThemeManager"
 import { RAGManager } from "./rag/RAGManager"
 import { DatabaseManager } from "./db/DatabaseManager"
@@ -275,8 +276,8 @@ export class AppState {
   private systemAudioCapture: SystemAudioCapture | null = null;
   private microphoneCapture: MicrophoneCapture | null = null;
   private audioTestCapture: MicrophoneCapture | null = null; // For audio settings test
-  private googleSTT: GoogleSTT | null = null; // Interviewer
-  private googleSTT_User: GoogleSTT | null = null; // User
+  private googleSTT: GoogleSTT | RestSTT | null = null; // Interviewer
+  private googleSTT_User: GoogleSTT | RestSTT | null = null; // User
 
   private setupSystemAudioPipeline(): void {
     // REMOVED EARLY RETURN: if (this.systemAudioCapture && this.microphoneCapture) return; // Already initialized
@@ -308,7 +309,27 @@ export class AppState {
 
       // 2. Initialize STT Services if missing
       if (!this.googleSTT) {
-        this.googleSTT = new GoogleSTT();
+        // Check which provider to use
+        const { CredentialsManager } = require('./services/CredentialsManager');
+        const sttProvider = CredentialsManager.getInstance().getSttProvider();
+
+        if (sttProvider === 'groq' || sttProvider === 'openai') {
+          const apiKey = sttProvider === 'groq'
+            ? CredentialsManager.getInstance().getGroqSttApiKey()
+            : CredentialsManager.getInstance().getOpenAiSttApiKey();
+
+          if (apiKey) {
+            const modelOverride = sttProvider === 'groq' ? CredentialsManager.getInstance().getGroqSttModel() : undefined;
+            console.log(`[Main] Using RestSTT (${sttProvider}) for Interviewer`);
+            this.googleSTT = new RestSTT(sttProvider, apiKey, modelOverride);
+          } else {
+            console.warn(`[Main] No API key for ${sttProvider} STT, falling back to GoogleSTT`);
+            this.googleSTT = new GoogleSTT();
+          }
+        } else {
+          this.googleSTT = new GoogleSTT();
+        }
+
         // Wire Transcript Events
         this.googleSTT.on('transcript', (segment: { text: string, isFinal: boolean, confidence: number }) => {
           if (!this.isMeetingActive) {
@@ -337,12 +358,32 @@ export class AppState {
         });
 
         this.googleSTT.on('error', (err: Error) => {
-          console.error('[Main] GoogleSTT (Interviewer) Error:', err);
+          console.error('[Main] STT (Interviewer) Error:', err);
         });
       }
 
       if (!this.googleSTT_User) {
-        this.googleSTT_User = new GoogleSTT();
+        // Check which provider to use
+        const { CredentialsManager } = require('./services/CredentialsManager');
+        const sttProvider = CredentialsManager.getInstance().getSttProvider();
+
+        if (sttProvider === 'groq' || sttProvider === 'openai') {
+          const apiKey = sttProvider === 'groq'
+            ? CredentialsManager.getInstance().getGroqSttApiKey()
+            : CredentialsManager.getInstance().getOpenAiSttApiKey();
+
+          if (apiKey) {
+            const modelOverride = sttProvider === 'groq' ? CredentialsManager.getInstance().getGroqSttModel() : undefined;
+            console.log(`[Main] Using RestSTT (${sttProvider}) for User`);
+            this.googleSTT_User = new RestSTT(sttProvider, apiKey, modelOverride);
+          } else {
+            console.warn(`[Main] No API key for ${sttProvider} STT, falling back to GoogleSTT`);
+            this.googleSTT_User = new GoogleSTT();
+          }
+        } else {
+          this.googleSTT_User = new GoogleSTT();
+        }
+
         // Wire Transcript Events
         this.googleSTT_User.on('transcript', (segment: { text: string, isFinal: boolean, confidence: number }) => {
           if (!this.isMeetingActive) {
@@ -372,7 +413,7 @@ export class AppState {
         });
 
         this.googleSTT_User.on('error', (err: Error) => {
-          console.error('[Main] GoogleSTT (User) Error:', err);
+          console.error('[Main] STT (User) Error:', err);
         });
       }
 
@@ -383,13 +424,17 @@ export class AppState {
       const sysRate = this.systemAudioCapture?.getSampleRate() || 16000;
       console.log(`[Main] Configuring Interviewer STT to ${sysRate}Hz`);
       this.googleSTT?.setSampleRate(sysRate);
-      this.googleSTT?.setAudioChannelCount(1); // Assuming Mono
+      if ('setAudioChannelCount' in this.googleSTT!) {
+        (this.googleSTT as any).setAudioChannelCount(1);
+      }
 
       // 2. Sync Mic Rate
       const micRate = this.microphoneCapture?.getSampleRate() || 16000;
       console.log(`[Main] Configuring User STT to ${micRate}Hz`);
       this.googleSTT_User?.setSampleRate(micRate);
-      this.googleSTT_User?.setAudioChannelCount(1);
+      if ('setAudioChannelCount' in this.googleSTT_User!) {
+        (this.googleSTT_User as any).setAudioChannelCount(1);
+      }
 
       console.log('[Main] Full Audio Pipeline (System + Mic) Initialized (Ready)');
 
@@ -480,6 +525,37 @@ export class AppState {
         console.error('[Main] Failed to initialize MicrophoneCapture (Default):', err2);
       }
     }
+  }
+
+  /**
+   * Reconfigure STT provider mid-session (called from IPC when user changes provider)
+   * Destroys existing STT instances and recreates them with the new provider
+   */
+  public async reconfigureSttProvider(): Promise<void> {
+    console.log('[Main] Reconfiguring STT Provider...');
+
+    // Stop existing STT instances
+    if (this.googleSTT) {
+      this.googleSTT.stop();
+      this.googleSTT.removeAllListeners();
+      this.googleSTT = null;
+    }
+    if (this.googleSTT_User) {
+      this.googleSTT_User.stop();
+      this.googleSTT_User.removeAllListeners();
+      this.googleSTT_User = null;
+    }
+
+    // Reinitialize the pipeline (will pick up the new provider from CredentialsManager)
+    this.setupSystemAudioPipeline();
+
+    // Start the new STT instances if a meeting is active
+    if (this.isMeetingActive) {
+      this.googleSTT?.start();
+      this.googleSTT_User?.start();
+    }
+
+    console.log('[Main] STT Provider reconfigured');
   }
 
 

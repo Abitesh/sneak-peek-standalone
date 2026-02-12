@@ -263,6 +263,101 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
     const [micLevel, setMicLevel] = useState(0);
     const [useLegacyAudio, setUseLegacyAudio] = useState(false);
 
+    // STT Provider settings
+    const [sttProvider, setSttProvider] = useState<'google' | 'groq' | 'openai'>('google');
+    const [groqSttModel, setGroqSttModel] = useState('whisper-large-v3-turbo');
+    const [sttGroqKey, setSttGroqKey] = useState('');
+    const [sttOpenaiKey, setSttOpenaiKey] = useState('');
+    const [sttTestStatus, setSttTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
+    const [sttTestError, setSttTestError] = useState('');
+    const [isSttDropdownOpen, setIsSttDropdownOpen] = useState(false);
+    const sttDropdownRef = React.useRef<HTMLDivElement>(null);
+
+    // Close STT dropdown when clicking outside
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (sttDropdownRef.current && !sttDropdownRef.current.contains(event.target as Node)) {
+                setIsSttDropdownOpen(false);
+            }
+        };
+        if (isSttDropdownOpen) {
+            document.addEventListener('mousedown', handleClickOutside);
+        }
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [isSttDropdownOpen]);
+
+    // Load STT settings on mount
+    useEffect(() => {
+        const loadSttSettings = async () => {
+            try {
+                // @ts-ignore
+                const creds = await window.electronAPI?.getStoredCredentials?.();
+                if (creds) {
+                    setSttProvider(creds.sttProvider || 'google');
+                    if (creds.groqSttModel) setGroqSttModel(creds.groqSttModel);
+                }
+            } catch (e) {
+                console.error('Failed to load STT settings:', e);
+            }
+        };
+        if (isOpen) loadSttSettings();
+    }, [isOpen]);
+
+    const handleSttProviderChange = async (provider: 'google' | 'groq' | 'openai') => {
+        setSttProvider(provider);
+        setIsSttDropdownOpen(false);
+        setSttTestStatus('idle');
+        setSttTestError('');
+        try {
+            // @ts-ignore
+            await window.electronAPI?.setSttProvider?.(provider);
+        } catch (e) {
+            console.error('Failed to set STT provider:', e);
+        }
+    };
+
+    const handleSttKeySubmit = async (provider: 'groq' | 'openai', key: string) => {
+        if (!key.trim()) return;
+        try {
+            if (provider === 'groq') {
+                // @ts-ignore
+                await window.electronAPI?.setGroqSttApiKey?.(key.trim());
+            } else {
+                // @ts-ignore
+                await window.electronAPI?.setOpenAiSttApiKey?.(key.trim());
+            }
+        } catch (e) {
+            console.error(`Failed to save ${provider} STT key:`, e);
+        }
+    };
+
+    const handleTestSttConnection = async () => {
+        if (sttProvider === 'google') return;
+        const keyToTest = sttProvider === 'groq' ? sttGroqKey : sttOpenaiKey;
+        if (!keyToTest.trim()) {
+            setSttTestStatus('error');
+            setSttTestError('Please enter an API key first');
+            return;
+        }
+
+        setSttTestStatus('testing');
+        setSttTestError('');
+        try {
+            // @ts-ignore
+            const result = await window.electronAPI?.testSttConnection?.(sttProvider, keyToTest.trim());
+            if (result?.success) {
+                setSttTestStatus('success');
+                setTimeout(() => setSttTestStatus('idle'), 3000);
+            } else {
+                setSttTestStatus('error');
+                setSttTestError(result?.error || 'Connection failed');
+            }
+        } catch (e: any) {
+            setSttTestStatus('error');
+            setSttTestError(e.message || 'Test failed');
+        }
+    };
+
 
     const [calendarStatus, setCalendarStatus] = useState<{ connected: boolean; email?: string }>({ connected: false });
     const [isCalendarsLoading, setIsCalendarsLoading] = useState(false);
@@ -910,151 +1005,271 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
 
                             {activeTab === 'audio' && (
                                 <div className="space-y-6 animated fadeIn">
+                                    {/* ── Speech Provider Section ── */}
                                     <div>
-                                        <h3 className="text-lg font-bold text-text-primary mb-2">Audio Configuration</h3>
-                                        <p className="text-xs text-text-secondary mb-6">Manage input and output devices.</p>
+                                        <h3 className="text-lg font-bold text-text-primary mb-1">Speech Provider</h3>
+                                        <p className="text-xs text-text-secondary mb-5">Choose the engine that transcribes audio to text.</p>
 
-                                        <div className="space-y-6">
-                                            {/* Speech Recognition Section */}
+                                        <div className="space-y-4">
+                                            {/* Provider Selector Cards */}
+                                            <div className="grid gap-2">
+                                                {[
+                                                    { id: 'google' as const, label: 'Google Cloud', badge: 'Default', desc: 'gRPC streaming via Service Account', color: 'blue' },
+                                                    { id: 'groq' as const, label: 'Groq Whisper', badge: 'Fast', desc: 'Ultra-fast REST transcription', color: 'orange' },
+                                                    { id: 'openai' as const, label: 'OpenAI Whisper', badge: null, desc: 'OpenAI-compatible Whisper API', color: 'green' },
+                                                ].map((option) => (
+                                                    <button
+                                                        key={option.id}
+                                                        onClick={() => handleSttProviderChange(option.id)}
+                                                        className={`w-full rounded-xl p-3.5 text-left transition-all flex items-center gap-3 border ${sttProvider === option.id
+                                                            ? 'bg-accent-primary/5 border-accent-primary/40 shadow-sm'
+                                                            : 'bg-bg-card border-border-subtle hover:border-border-muted hover:bg-bg-elevated'
+                                                            }`}
+                                                    >
+                                                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${sttProvider === option.id
+                                                            ? 'bg-accent-primary/15 text-accent-primary'
+                                                            : 'bg-bg-input text-text-tertiary'
+                                                            }`}>
+                                                            <Mic size={16} />
+                                                        </div>
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-sm font-semibold text-text-primary">{option.label}</span>
+                                                                {option.badge && (
+                                                                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${option.color === 'blue' ? 'bg-blue-500/15 text-blue-500' :
+                                                                        option.color === 'orange' ? 'bg-orange-500/15 text-orange-500' :
+                                                                            'bg-green-500/15 text-green-500'
+                                                                        }`}>{option.badge}</span>
+                                                                )}
+                                                            </div>
+                                                            <span className="text-xs text-text-tertiary">{option.desc}</span>
+                                                        </div>
+                                                        {sttProvider === option.id && (
+                                                            <div className="w-5 h-5 rounded-full bg-accent-primary flex items-center justify-center shrink-0">
+                                                                <Check size={12} className="text-white" />
+                                                            </div>
+                                                        )}
+                                                    </button>
+                                                ))}
+                                            </div>
+
+                                            {/* Groq Model Selector */}
+                                            {sttProvider === 'groq' && (
+                                                <div className="bg-bg-card rounded-xl border border-border-subtle p-4">
+                                                    <label className="text-xs font-medium text-text-secondary mb-2.5 block">Whisper Model</label>
+                                                    <div className="grid grid-cols-2 gap-2">
+                                                        {[
+                                                            { id: 'whisper-large-v3-turbo', label: 'V3 Turbo', desc: 'Fastest' },
+                                                            { id: 'whisper-large-v3', label: 'V3', desc: 'Most Accurate' },
+                                                        ].map((m) => (
+                                                            <button
+                                                                key={m.id}
+                                                                onClick={async () => {
+                                                                    setGroqSttModel(m.id);
+                                                                    try {
+                                                                        // @ts-ignore
+                                                                        await window.electronAPI?.setGroqSttModel?.(m.id);
+                                                                    } catch (e) {
+                                                                        console.error('Failed to set Groq model:', e);
+                                                                    }
+                                                                }}
+                                                                className={`rounded-lg px-3 py-2.5 text-left transition-all border ${groqSttModel === m.id
+                                                                        ? 'bg-accent-primary/5 border-accent-primary/40'
+                                                                        : 'bg-bg-input border-border-subtle hover:border-border-muted'
+                                                                    }`}
+                                                            >
+                                                                <span className="text-sm font-medium text-text-primary block">{m.label}</span>
+                                                                <span className="text-[11px] text-text-tertiary">{m.desc}</span>
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {/* API Key Input (Groq / OpenAI) */}
+                                            {sttProvider !== 'google' && (
+                                                <div className="bg-bg-card rounded-xl border border-border-subtle p-4 space-y-3">
+                                                    <label className="text-xs font-medium text-text-secondary block">
+                                                        {sttProvider === 'groq' ? 'Groq' : 'OpenAI'} API Key
+                                                    </label>
+                                                    <div className="flex gap-2">
+                                                        <input
+                                                            type="password"
+                                                            value={sttProvider === 'groq' ? sttGroqKey : sttOpenaiKey}
+                                                            onChange={(e) => {
+                                                                if (sttProvider === 'groq') setSttGroqKey(e.target.value);
+                                                                else setSttOpenaiKey(e.target.value);
+                                                            }}
+                                                            placeholder={`Enter ${sttProvider === 'groq' ? 'Groq' : 'OpenAI'} API key`}
+                                                            className="flex-1 bg-bg-input border border-border-subtle rounded-lg px-3 py-2 text-sm text-text-primary placeholder-text-tertiary focus:outline-none focus:border-accent-primary transition-colors"
+                                                        />
+                                                        <button
+                                                            onClick={() => handleSttKeySubmit(sttProvider, sttProvider === 'groq' ? sttGroqKey : sttOpenaiKey)}
+                                                            className="px-3 py-2 bg-accent-primary/10 text-accent-primary rounded-lg text-sm font-medium hover:bg-accent-primary/20 transition-colors"
+                                                        >
+                                                            Save
+                                                        </button>
+                                                    </div>
+                                                    <div className="flex items-center gap-3">
+                                                        <button
+                                                            onClick={handleTestSttConnection}
+                                                            disabled={sttTestStatus === 'testing'}
+                                                            className="text-xs bg-bg-input hover:bg-bg-elevated text-text-primary px-3 py-1.5 rounded-md transition-colors flex items-center gap-2 disabled:opacity-50"
+                                                        >
+                                                            {sttTestStatus === 'testing' ? (
+                                                                <><RefreshCw size={12} className="animate-spin" /> Testing...</>
+                                                            ) : sttTestStatus === 'success' ? (
+                                                                <><Check size={12} className="text-green-500" /> Connected!</>
+                                                            ) : (
+                                                                <>Test Connection</>
+                                                            )}
+                                                        </button>
+                                                        {sttTestStatus === 'error' && (
+                                                            <span className="text-xs text-red-400">{sttTestError}</span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {/* Accent Preference */}
+                                            <CustomSelect
+                                                label="Preferred English Accent"
+                                                icon={null}
+                                                value={recognitionLanguage}
+                                                options={languageOptions}
+                                                onChange={handleLanguageChange}
+                                                placeholder="Select Accent"
+                                            />
+                                            <div className="flex gap-2 items-center -mt-2 px-1">
+                                                <Info size={14} className="text-text-secondary shrink-0" />
+                                                <p className="text-xs text-text-secondary whitespace-nowrap">
+                                                    Improves accuracy by prioritizing your accent. Other English accents are still supported.
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="h-px bg-border-subtle" />
+
+                                    {/* ── Audio Configuration Section ── */}
+                                    <div>
+                                        <h3 className="text-lg font-bold text-text-primary mb-1">Audio Configuration</h3>
+                                        <p className="text-xs text-text-secondary mb-5">Manage input and output devices.</p>
+
+                                        <div className="space-y-4">
+                                            <CustomSelect
+                                                label="Input Device"
+                                                icon={<Mic size={16} />}
+                                                value={selectedInput}
+                                                options={inputDevices}
+                                                onChange={(id) => {
+                                                    setSelectedInput(id);
+                                                    localStorage.setItem('preferredInputDeviceId', id);
+                                                }}
+                                                placeholder="Default Microphone"
+                                            />
+
                                             <div>
-                                                <CustomSelect
-                                                    label="Preferred English Accent"
-                                                    icon={null}
-                                                    value={recognitionLanguage}
-                                                    options={languageOptions}
-                                                    onChange={handleLanguageChange}
-                                                    placeholder="Select Accent"
-                                                />
-
-                                                <div className="flex gap-2 items-center mt-2 px-1">
-                                                    <Info size={14} className="text-text-secondary shrink-0" />
-                                                    <p className="text-xs text-text-secondary whitespace-nowrap">
-                                                        Improves accuracy by prioritizing your accent. Other English accents are still supported.
-                                                    </p>
+                                                <div className="flex justify-between text-xs text-text-secondary mb-2 px-1">
+                                                    <span>Input Level</span>
+                                                </div>
+                                                <div className="h-1.5 bg-bg-input rounded-full overflow-hidden">
+                                                    <div
+                                                        className="h-full bg-green-500 transition-all duration-100 ease-out"
+                                                        style={{ width: `${micLevel}%` }}
+                                                    />
                                                 </div>
                                             </div>
 
-                                            <div className="h-px bg-border-subtle" />
+                                            <div className="h-px bg-border-subtle my-2" />
 
-                                            <div className="space-y-4">
-                                                <CustomSelect
-                                                    label="Input Device"
-                                                    icon={<Mic size={16} />}
-                                                    value={selectedInput}
-                                                    options={inputDevices}
-                                                    onChange={(id) => {
-                                                        setSelectedInput(id);
-                                                        localStorage.setItem('preferredInputDeviceId', id);
-                                                    }}
-                                                    placeholder="Default Microphone"
-                                                />
+                                            <CustomSelect
+                                                label="Output Device"
+                                                icon={<Speaker size={16} />}
+                                                value={selectedOutput}
+                                                options={outputDevices}
+                                                onChange={(id) => {
+                                                    setSelectedOutput(id);
+                                                    localStorage.setItem('preferredOutputDeviceId', id);
+                                                }}
+                                                placeholder="Default Speakers"
+                                            />
 
-                                                <div>
-                                                    <div className="flex justify-between text-xs text-text-secondary mb-2 px-1">
-                                                        <span>Input Level</span>
-                                                    </div>
-                                                    <div className="h-1.5 bg-bg-input rounded-full overflow-hidden">
-                                                        <div
-                                                            className="h-full bg-green-500 transition-all duration-100 ease-out"
-                                                            style={{ width: `${micLevel}%` }}
-                                                        />
-                                                    </div>
-                                                </div>
-
-                                                <div className="h-px bg-border-subtle my-4" />
-
-                                                <CustomSelect
-                                                    label="Output Device"
-                                                    icon={<Speaker size={16} />}
-                                                    value={selectedOutput}
-                                                    options={outputDevices}
-                                                    onChange={(id) => {
-                                                        setSelectedOutput(id);
-                                                        localStorage.setItem('preferredOutputDeviceId', id);
-                                                    }}
-                                                    placeholder="Default Speakers"
-                                                />
-
-                                                <div className="flex justify-end">
-                                                    <button
-                                                        onClick={async () => {
-                                                            try {
-                                                                const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-                                                                if (!AudioContext) {
-                                                                    console.error("Web Audio API not supported");
-                                                                    return;
-                                                                }
-
-                                                                const ctx = new AudioContext();
-
-                                                                // Ensure context is running (it can start in 'suspended' state)
-                                                                if (ctx.state === 'suspended') {
-                                                                    await ctx.resume();
-                                                                }
-
-                                                                const oscillator = ctx.createOscillator();
-                                                                const gainNode = ctx.createGain();
-
-                                                                oscillator.connect(gainNode);
-                                                                gainNode.connect(ctx.destination);
-
-                                                                // Louder, clearer beep
-                                                                oscillator.type = 'sine';
-                                                                oscillator.frequency.setValueAtTime(523.25, ctx.currentTime); // C5
-                                                                gainNode.gain.setValueAtTime(0.5, ctx.currentTime);
-                                                                gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 1.0);
-
-                                                                // Try to set sinkId if supported (Chrome/Edge only)
-                                                                if (selectedOutput && (ctx as any).setSinkId) {
-                                                                    try {
-                                                                        await (ctx as any).setSinkId(selectedOutput);
-                                                                    } catch (e) {
-                                                                        console.warn("Error setting sink for AudioContext", e);
-                                                                    }
-                                                                }
-
-                                                                oscillator.start();
-                                                                oscillator.stop(ctx.currentTime + 1.0);
-                                                            } catch (e) {
-                                                                console.error("Error playing test sound", e);
+                                            <div className="flex justify-end">
+                                                <button
+                                                    onClick={async () => {
+                                                        try {
+                                                            const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+                                                            if (!AudioContext) {
+                                                                console.error("Web Audio API not supported");
+                                                                return;
                                                             }
+
+                                                            const ctx = new AudioContext();
+
+                                                            if (ctx.state === 'suspended') {
+                                                                await ctx.resume();
+                                                            }
+
+                                                            const oscillator = ctx.createOscillator();
+                                                            const gainNode = ctx.createGain();
+
+                                                            oscillator.connect(gainNode);
+                                                            gainNode.connect(ctx.destination);
+
+                                                            oscillator.type = 'sine';
+                                                            oscillator.frequency.setValueAtTime(523.25, ctx.currentTime);
+                                                            gainNode.gain.setValueAtTime(0.5, ctx.currentTime);
+                                                            gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 1.0);
+
+                                                            if (selectedOutput && (ctx as any).setSinkId) {
+                                                                try {
+                                                                    await (ctx as any).setSinkId(selectedOutput);
+                                                                } catch (e) {
+                                                                    console.warn("Error setting sink for AudioContext", e);
+                                                                }
+                                                            }
+
+                                                            oscillator.start();
+                                                            oscillator.stop(ctx.currentTime + 1.0);
+                                                        } catch (e) {
+                                                            console.error("Error playing test sound", e);
+                                                        }
+                                                    }}
+                                                    className="text-xs bg-bg-input hover:bg-bg-elevated text-text-primary px-3 py-1.5 rounded-md transition-colors flex items-center gap-2"
+                                                >
+                                                    <Speaker size={12} /> Test Sound
+                                                </button>
+                                            </div>
+
+                                            <div className="h-px bg-border-subtle my-2" />
+
+                                            {/* CoreAudio Beta Toggle */}
+                                            <div className="bg-amber-500/5 rounded-xl border border-amber-500/20 p-4">
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex items-start gap-3">
+                                                        <div className="mt-0.5 p-1.5 rounded-lg bg-amber-500/10 text-amber-500">
+                                                            <FlaskConical size={18} />
+                                                        </div>
+                                                        <div>
+                                                            <div className="flex items-center gap-2 mb-0.5">
+                                                                <h3 className="text-sm font-bold text-text-primary">CoreAudio Backend</h3>
+                                                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-600 uppercase tracking-wide">Beta</span>
+                                                            </div>
+                                                            <p className="text-xs text-text-secondary leading-relaxed max-w-[300px]">
+                                                                Legacy audio capture method. Use only if you experience issues with the default engine.
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                    <div
+                                                        onClick={() => {
+                                                            const newState = !useLegacyAudio;
+                                                            setUseLegacyAudio(newState);
+                                                            window.localStorage.setItem('useLegacyAudioBackend', newState ? 'true' : 'false');
                                                         }}
-                                                        className="text-xs bg-bg-input hover:bg-bg-elevated text-text-primary px-3 py-1.5 rounded-md transition-colors flex items-center gap-2"
+                                                        className={`w-11 h-6 rounded-full relative cursor-pointer transition-colors shrink-0 ${useLegacyAudio ? 'bg-amber-500' : 'bg-bg-toggle-switch border border-border-muted'}`}
                                                     >
-                                                        <Speaker size={12} /> Test Sound
-                                                    </button>
-                                                </div>
-
-                                                <div className="h-px bg-border-subtle my-4" />
-
-                                                {/* Experimental ScreenCaptureKit Toggle */}
-                                                {/* Experimental ScreenCaptureKit Toggle */}
-                                                <div className="bg-amber-500/5 rounded-xl border border-amber-500/20 p-4">
-                                                    <div className="flex items-center justify-between">
-                                                        <div className="flex items-start gap-3">
-                                                            <div className="mt-0.5 p-1.5 rounded-lg bg-amber-500/10 text-amber-500">
-                                                                <FlaskConical size={18} />
-                                                            </div>
-                                                            <div>
-                                                                <div className="flex items-center gap-2 mb-0.5">
-                                                                    <h3 className="text-sm font-bold text-text-primary">CoreAudio Backend</h3>
-                                                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-600 uppercase tracking-wide">Beta</span>
-                                                                </div>
-                                                                <p className="text-xs text-text-secondary leading-relaxed max-w-[300px]">
-                                                                    Legacy audio capture method. Use only if you experience issues with the default engine.
-                                                                </p>
-                                                            </div>
-                                                        </div>
-                                                        <div
-                                                            onClick={() => {
-                                                                const newState = !useLegacyAudio;
-                                                                setUseLegacyAudio(newState);
-                                                                window.localStorage.setItem('useLegacyAudioBackend', newState ? 'true' : 'false');
-                                                            }}
-                                                            className={`w-11 h-6 rounded-full relative cursor-pointer transition-colors shrink-0 ${useLegacyAudio ? 'bg-amber-500' : 'bg-bg-toggle-switch border border-border-muted'}`}
-                                                        >
-                                                            <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${useLegacyAudio ? 'translate-x-5' : 'translate-x-0'}`} />
-                                                        </div>
+                                                        <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${useLegacyAudio ? 'translate-x-5' : 'translate-x-0'}`} />
                                                     </div>
                                                 </div>
                                             </div>
