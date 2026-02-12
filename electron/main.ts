@@ -1091,6 +1091,9 @@ export class AppState {
         app.dock.hide();
         this.hideTray(); // User said: "Tray Hidden in 'stealth'"
 
+        // Apply the selected disguise when entering undetectable mode
+        this._applyDisguise(this.disguiseMode);
+
         // Critical Fix: Force focus back to the active window to prevent it from being backgrounded
         // When Dock icon is hidden, macOS treats app as "accessory", potentially losing focus
         if (targetFocusWindow && !targetFocusWindow.isDestroyed() && targetFocusWindow.isVisible()) {
@@ -1101,6 +1104,10 @@ export class AppState {
       } else {
         app.dock.show();
         this.showTray();
+
+        // Revert to "Natively" appearance when exiting undetectable mode
+        // But do NOT reset this.disguiseMode so it's remembered for next time
+        this._applyDisguise('none');
 
         // Restore focus when coming back to foreground/dock mode
         if (targetFocusWindow && !targetFocusWindow.isDestroyed() && targetFocusWindow.isVisible()) {
@@ -1124,6 +1131,14 @@ export class AppState {
   public setDisguise(mode: 'terminal' | 'settings' | 'activity' | 'none'): void {
     this.disguiseMode = mode;
 
+    // Only apply the disguise if we are currently in undetectable mode
+    // Otherwise, just save the preference for later
+    if (this.isUndetectable) {
+      this._applyDisguise(mode);
+    }
+  }
+
+  private _applyDisguise(mode: 'terminal' | 'settings' | 'activity' | 'none'): void {
     let appName = "Natively";
     let iconPath = "";
 
@@ -1154,7 +1169,7 @@ export class AppState {
         break;
     }
 
-    console.log(`[AppState] Setting disguise to: ${mode} (${appName})`);
+    console.log(`[AppState] Applying disguise: ${mode} (${appName})`);
 
     // 1. Update process title (affects Activity Monitor / Task Manager)
     process.title = appName;

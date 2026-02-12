@@ -297,6 +297,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getUndetectable: () => ipcRenderer.invoke("get-undetectable"),
   setOpenAtLogin: (open: boolean) => ipcRenderer.invoke("set-open-at-login", open),
   getOpenAtLogin: () => ipcRenderer.invoke("get-open-at-login"),
+  setDisguise: (mode: 'terminal' | 'settings' | 'activity' | 'none') => ipcRenderer.invoke("set-disguise", mode),
+  onDisguiseChanged: (callback: (mode: 'terminal' | 'settings' | 'activity' | 'none') => void) => {
+    const subscription = (_: any, mode: any) => callback(mode)
+    ipcRenderer.on('disguise-changed', subscription)
+    return () => {
+      ipcRenderer.removeListener('disguise-changed', subscription)
+    }
+  },
 
   onSettingsVisibilityChange: (callback: (isVisible: boolean) => void) => {
     const subscription = (_: any, isVisible: boolean) => callback(isVisible)

@@ -275,11 +275,13 @@ export const AIProvidersSettings: React.FC = () => {
     };
 
     return (
-        <div className="space-y-8 animated fadeIn pb-10">
+        <div className="space-y-5 animated fadeIn pb-10">
             {/* Default Model for Chat */}
-            <div>
-                <h3 className="text-lg font-bold text-text-primary mb-1">Default Model for Chat</h3>
-                <p className="text-xs text-text-secondary mb-2">Primary model for new chats. Other configured models act as fallbacks.</p>
+            <div className="space-y-5">
+                <div>
+                    <h3 className="text-sm font-bold text-text-primary mb-1">Default Model for Chat</h3>
+                    <p className="text-xs text-text-secondary mb-2">Primary model for new chats. Other configured models act as fallbacks.</p>
+                </div>
 
                 <div className="bg-bg-item-surface rounded-xl p-5 border border-border-subtle flex items-center justify-between">
                     <div>
@@ -306,9 +308,11 @@ export const AIProvidersSettings: React.FC = () => {
             </div>
 
             {/* Cloud Providers */}
-            <div>
-                <h3 className="text-lg font-bold text-text-primary mb-1">Cloud Providers</h3>
-                <p className="text-xs text-text-secondary mb-2">Add API keys to unlock cloud AI models.</p>
+            <div className="space-y-5">
+                <div>
+                    <h3 className="text-sm font-bold text-text-primary mb-1">Cloud Providers</h3>
+                    <p className="text-xs text-text-secondary mb-2">Add API keys to unlock cloud AI models.</p>
+                </div>
 
                 <div className="space-y-4">
 
@@ -423,13 +427,11 @@ export const AIProvidersSettings: React.FC = () => {
                 </div>
             </div>
 
-            <div className="h-px bg-border-subtle" />
-
             {/* Local (Ollama) Providers */}
-            <div>
+            <div className="space-y-5">
                 <div className="flex items-center justify-between mb-2">
                     <div>
-                        <h3 className="text-lg font-bold text-text-primary mb-1">Local Models (Ollama)</h3>
+                        <h3 className="text-sm font-bold text-text-primary mb-1">Local Models (Ollama)</h3>
                         <p className="text-xs text-text-secondary">Run open-source models locally.</p>
                     </div>
                     <button
@@ -505,14 +507,12 @@ export const AIProvidersSettings: React.FC = () => {
                 </div>
             </div>
 
-            <div className="h-px bg-border-subtle" />
-
             {/* Custom Providers */}
-            <div>
+            <div className="space-y-5">
                 <div className="flex items-center justify-between mb-2">
                     <div>
                         <div className="flex items-center gap-2 mb-1">
-                            <h3 className="text-lg font-bold text-text-primary">Custom Providers</h3>
+                            <h3 className="text-sm font-bold text-text-primary">Custom Providers</h3>
                             <span className="px-1.5 py-0 rounded-full text-[7px] font-bold bg-yellow-500/10 text-yellow-500 uppercase tracking-widest border border-yellow-500/20 leading-loose mt-0.5">Experimental</span>
                         </div>
                         <p className="text-xs text-text-secondary">Add your own AI endpoints via cURL.</p>

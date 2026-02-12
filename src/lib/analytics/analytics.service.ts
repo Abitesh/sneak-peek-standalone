@@ -6,7 +6,7 @@
 
 export type ModelProviderType = 'cloud' | 'local';
 
-export type AssistantMode = 'launcher' | 'overlay' | 'undetectable';
+export type AssistantMode = 'launcher' | 'overlay' | 'undetectable' | string;
 
 export type AnalyticsEventName =
     // App Lifecycle

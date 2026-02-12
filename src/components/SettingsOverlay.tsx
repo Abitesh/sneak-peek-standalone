@@ -3,7 +3,7 @@ import {
     X, Mic, Speaker, Monitor, Keyboard, User, LifeBuoy, LogOut,
     ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
     Camera, RotateCcw, Eye, Layout, MessageSquare, Crop,
-    ChevronDown, Check, BadgeCheck, Power, Palette, Calendar, Ghost, Sun, Moon, RefreshCw, Info, Globe, FlaskConical
+    ChevronDown, Check, BadgeCheck, Power, Palette, Calendar, Ghost, Sun, Moon, RefreshCw, Info, Globe, FlaskConical, Terminal, Settings, Activity
 } from 'lucide-react';
 import { analytics } from '../lib/analytics/analytics.service';
 import { AboutSection } from './AboutSection';
@@ -88,6 +88,7 @@ interface SettingsOverlayProps {
 const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) => {
     const [activeTab, setActiveTab] = useState('general');
     const [isUndetectable, setIsUndetectable] = useState(false);
+    const [disguiseMode, setDisguiseMode] = useState<'terminal' | 'settings' | 'activity' | 'none'>('none');
     const [openOnLogin, setOpenOnLogin] = useState(false);
     const [themeMode, setThemeMode] = useState<'system' | 'light' | 'dark'>('system');
     const [isThemeDropdownOpen, setIsThemeDropdownOpen] = useState(false);
@@ -100,6 +101,15 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
         if (window.electronAPI?.onUndetectableChanged) {
             const unsubscribe = window.electronAPI.onUndetectableChanged((newState: boolean) => {
                 setIsUndetectable(newState);
+            });
+            return () => unsubscribe();
+        }
+    }, []);
+
+    useEffect(() => {
+        if (window.electronAPI?.onDisguiseChanged) {
+            const unsubscribe = window.electronAPI.onDisguiseChanged((newMode: any) => {
+                setDisguiseMode(newMode);
             });
             return () => unsubscribe();
         }
@@ -559,219 +569,270 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                         {/* Content */}
                         <div className="flex-1 overflow-y-auto bg-bg-main p-8">
                             {activeTab === 'general' && (
-                                <div className="space-y-8 animated fadeIn">
-                                    <div className="bg-bg-item-surface rounded-xl p-5 border border-border-subtle flex items-center justify-between">
-                                        <div className="flex flex-col gap-1">
-                                            <div className="flex items-center gap-2">
-                                                {isUndetectable ? (
-                                                    <svg
-                                                        width="18"
-                                                        height="18"
-                                                        viewBox="0 0 24 24"
-                                                        fill="none"
-                                                        stroke="currentColor"
-                                                        strokeWidth="2"
-                                                        strokeLinecap="round"
-                                                        strokeLinejoin="round"
-                                                        className="text-text-primary"
-                                                    >
-                                                        <path d="M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8z" fill="currentColor" stroke="currentColor" />
-                                                        <path d="M9 10h.01" stroke="var(--bg-item-surface)" strokeWidth="2.5" />
-                                                        <path d="M15 10h.01" stroke="var(--bg-item-surface)" strokeWidth="2.5" />
-                                                    </svg>
-                                                ) : (
-                                                    <Ghost size={18} className="text-text-primary" />
-                                                )}
-                                                <h3 className="text-lg font-bold text-text-primary">{isUndetectable ? 'Undetectable' : 'Detectable'}</h3>
+                                <div className="space-y-6 animated fadeIn">
+                                    <div className="space-y-3.5">
+                                        {/* UndetectableToggle */}
+                                        <div className={`bg-bg-item-surface rounded-xl p-5 border border-border-subtle flex items-center justify-between transition-all ${isUndetectable ? 'shadow-lg shadow-blue-500/10' : ''}`}>
+                                            <div className="flex flex-col gap-1">
+                                                <div className="flex items-center gap-2">
+                                                    {isUndetectable ? (
+                                                        <svg
+                                                            width="18"
+                                                            height="18"
+                                                            viewBox="0 0 24 24"
+                                                            fill="none"
+                                                            stroke="currentColor"
+                                                            strokeWidth="2"
+                                                            strokeLinecap="round"
+                                                            strokeLinejoin="round"
+                                                            className="text-text-primary"
+                                                        >
+                                                            <path d="M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8z" fill="currentColor" stroke="currentColor" />
+                                                            <path d="M9 10h.01" stroke="var(--bg-item-surface)" strokeWidth="2.5" />
+                                                            <path d="M15 10h.01" stroke="var(--bg-item-surface)" strokeWidth="2.5" />
+                                                        </svg>
+                                                    ) : (
+                                                        <Ghost size={18} className="text-text-primary" />
+                                                    )}
+                                                    <h3 className="text-lg font-bold text-text-primary">{isUndetectable ? 'Undetectable' : 'Detectable'}</h3>
+                                                </div>
+                                                <p className="text-xs text-text-secondary">
+                                                    Natively is currently {isUndetectable ? 'undetectable' : 'detectable'} by screen-sharing. <button className="text-blue-400 hover:underline">Supported apps here</button>
+                                                </p>
                                             </div>
-                                            <p className="text-xs text-text-secondary">
-                                                Natively is currently {isUndetectable ? 'undetectable' : 'detectable'} by screen-sharing. <button className="text-blue-400 hover:underline">Supported apps here</button>
-                                            </p>
+                                            <div
+                                                onClick={() => {
+                                                    const newState = !isUndetectable;
+                                                    setIsUndetectable(newState);
+                                                    window.electronAPI?.setUndetectable(newState);
+                                                    // Analytics: Undetectable Mode Toggle
+                                                    analytics.trackModeSelected(newState ? 'undetectable' : 'overlay');
+                                                }}
+                                                className={`w-11 h-6 rounded-full relative cursor-pointer transition-colors ${isUndetectable ? 'bg-accent-primary' : 'bg-bg-toggle-switch border border-border-muted'}`}
+                                            >
+                                                <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${isUndetectable ? 'translate-x-5' : 'translate-x-0'}`} />
+                                            </div>
                                         </div>
-                                        <div
-                                            onClick={() => {
-                                                const newState = !isUndetectable;
-                                                setIsUndetectable(newState);
-                                                window.electronAPI?.setUndetectable(newState);
-                                                // Analytics: Undetectable Mode Toggle
-                                                analytics.trackModeSelected(newState ? 'undetectable' : 'overlay');
-                                            }}
-                                            className={`w-11 h-6 rounded-full relative cursor-pointer transition-colors ${isUndetectable ? 'bg-accent-primary' : 'bg-bg-toggle-switch border border-border-muted'}`}
-                                        >
-                                            <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${isUndetectable ? 'translate-x-5' : 'translate-x-0'}`} />
+
+                                        <div>
+                                            <h3 className="text-lg font-bold text-text-primary mb-1">General settings</h3>
+                                            <p className="text-xs text-text-secondary mb-2">Customize how Natively works for you</p>
+
+                                            <div className="space-y-4">
+                                                {/* Open at Login */}
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex items-center gap-4">
+                                                        <div className="w-10 h-10 bg-bg-item-surface rounded-lg border border-border-subtle flex items-center justify-center text-text-tertiary">
+                                                            <Power size={20} />
+                                                        </div>
+                                                        <div>
+                                                            <h3 className="text-sm font-bold text-text-primary">Open Natively when you log in</h3>
+                                                            <p className="text-xs text-text-secondary mt-0.5">Natively will open automatically when you log in to your computer</p>
+                                                        </div>
+                                                    </div>
+                                                    <div
+                                                        onClick={() => {
+                                                            const newState = !openOnLogin;
+                                                            setOpenOnLogin(newState);
+                                                            window.electronAPI?.setOpenAtLogin(newState);
+                                                        }}
+                                                        className={`w-11 h-6 rounded-full relative cursor-pointer transition-colors ${openOnLogin ? 'bg-accent-primary' : 'bg-bg-toggle-switch border border-border-muted'}`}
+                                                    >
+                                                        <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${openOnLogin ? 'translate-x-5' : 'translate-x-0'}`} />
+                                                    </div>
+                                                </div>
+
+                                                {/* Interviewer Transcript */}
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex items-center gap-4">
+                                                        <div className="w-10 h-10 bg-bg-item-surface rounded-lg border border-border-subtle flex items-center justify-center text-text-tertiary">
+                                                            <MessageSquare size={20} />
+                                                        </div>
+                                                        <div>
+                                                            <h3 className="text-sm font-bold text-text-primary">Interviewer Transcript</h3>
+                                                            <p className="text-xs text-text-secondary mt-0.5">Show real-time transcription of the interviewer</p>
+                                                        </div>
+                                                    </div>
+                                                    <div
+                                                        onClick={() => {
+                                                            const newState = !showTranscript;
+                                                            setShowTranscript(newState);
+                                                            localStorage.setItem('natively_interviewer_transcript', String(newState));
+                                                            window.dispatchEvent(new Event('storage'));
+                                                        }}
+                                                        className={`w-11 h-6 rounded-full relative cursor-pointer transition-colors ${showTranscript ? 'bg-accent-primary' : 'bg-bg-toggle-switch border border-border-muted'}`}
+                                                    >
+                                                        <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${showTranscript ? 'translate-x-5' : 'translate-x-0'}`} />
+                                                    </div>
+                                                </div>
+
+
+                                                {/* Theme */}
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex items-center gap-4">
+                                                        <div className="w-10 h-10 bg-bg-item-surface rounded-lg border border-border-subtle flex items-center justify-center text-text-tertiary">
+                                                            <Palette size={20} />
+                                                        </div>
+                                                        <div>
+                                                            <h3 className="text-sm font-bold text-text-primary">Theme</h3>
+                                                            <p className="text-xs text-text-secondary mt-0.5">Customize how Natively looks on your device</p>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="relative" ref={themeDropdownRef}>
+                                                        <button
+                                                            onClick={() => setIsThemeDropdownOpen(!isThemeDropdownOpen)}
+                                                            className="bg-bg-component hover:bg-bg-elevated border border-border-subtle text-text-primary px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-2 min-w-[100px] justify-between"
+                                                        >
+                                                            <div className="flex items-center gap-2 overflow-hidden">
+                                                                <span className="text-text-secondary shrink-0">
+                                                                    {themeMode === 'system' && <Monitor size={14} />}
+                                                                    {themeMode === 'light' && <Sun size={14} />}
+                                                                    {themeMode === 'dark' && <Moon size={14} />}
+                                                                </span>
+                                                                <span className="capitalize text-ellipsis overflow-hidden whitespace-nowrap">{themeMode}</span>
+                                                            </div>
+                                                            <ChevronDown size={12} className={`shrink-0 transition-transform ${isThemeDropdownOpen ? 'rotate-180' : ''}`} />
+                                                        </button>
+
+                                                        {/* Dropdown Menu */}
+                                                        {isThemeDropdownOpen && (
+                                                            <div className="absolute right-0 top-full mt-1 w-full bg-bg-elevated border border-border-subtle rounded-lg shadow-xl overflow-hidden z-20 p-1 animated fadeIn select-none">
+                                                                {[
+                                                                    { mode: 'system', label: 'System', icon: <Monitor size={14} /> },
+                                                                    { mode: 'light', label: 'Light', icon: <Sun size={14} /> },
+                                                                    { mode: 'dark', label: 'Dark', icon: <Moon size={14} /> }
+                                                                ].map((option) => (
+                                                                    <button
+                                                                        key={option.mode}
+                                                                        onClick={() => {
+                                                                            handleSetTheme(option.mode as any);
+                                                                            setIsThemeDropdownOpen(false);
+                                                                        }}
+                                                                        className={`w-full text-left px-2 py-1.5 rounded-md text-xs flex items-center gap-2 transition-colors ${themeMode === option.mode ? 'text-text-primary bg-bg-item-active/50' : 'text-text-secondary hover:bg-bg-input hover:text-text-primary'}`}
+                                                                    >
+                                                                        <span className={themeMode === option.mode ? 'text-text-primary' : 'text-text-secondary group-hover:text-text-primary'}>{option.icon}</span>
+                                                                        <span className="font-medium">{option.label}</span>
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+
+                                                {/* Version */}
+                                                <div className="flex items-start justify-between gap-4">
+                                                    <div className="flex items-start gap-4">
+                                                        <div className="w-10 h-10 bg-bg-item-surface rounded-lg border border-border-subtle flex items-center justify-center text-text-tertiary shrink-0">
+                                                            <BadgeCheck size={20} />
+                                                        </div>
+                                                        <div>
+                                                            <h3 className="text-sm font-bold text-text-primary">Version</h3>
+                                                            <p className="text-xs text-text-secondary mt-0.5">
+                                                                You are currently using Natively version 1.0.1.
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                    <button
+                                                        onClick={async () => {
+                                                            if (updateStatus === 'available') {
+                                                                try {
+                                                                    // @ts-ignore
+                                                                    await window.electronAPI.downloadUpdate();
+                                                                    onClose(); // Close settings to show the banner
+                                                                } catch (err) {
+                                                                    console.error("Failed to start download:", err);
+                                                                }
+                                                            } else {
+                                                                handleCheckForUpdates();
+                                                            }
+                                                        }}
+                                                        disabled={updateStatus === 'checking'}
+                                                        className={`px-5 py-2 rounded-lg text-[13px] font-bold transition-all flex items-center gap-2 shrink-0 ${updateStatus === 'checking' ? 'bg-bg-input text-text-tertiary cursor-wait' :
+                                                            updateStatus === 'available' ? 'bg-accent-primary text-white hover:bg-accent-secondary shadow-lg shadow-blue-500/20' :
+                                                                updateStatus === 'uptodate' ? 'bg-green-500/10 text-green-400 border border-green-500/20' :
+                                                                    updateStatus === 'error' ? 'bg-red-500/10 text-red-400 border border-red-500/20' :
+                                                                        'bg-bg-component hover:bg-bg-input text-text-primary'
+                                                            }`}
+                                                    >
+                                                        {updateStatus === 'checking' ? (
+                                                            <>
+                                                                <RefreshCw size={14} className="animate-spin" />
+                                                                Checking...
+                                                            </>
+                                                        ) : updateStatus === 'available' ? (
+                                                            <>
+                                                                <ArrowDown size={14} />
+                                                                Update Available
+                                                            </>
+                                                        ) : updateStatus === 'uptodate' ? (
+                                                            <>
+                                                                <Check size={14} />
+                                                                Up to date
+                                                            </>
+                                                        ) : updateStatus === 'error' ? (
+                                                            <>
+                                                                <X size={14} />
+                                                                Error
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <RefreshCw size={14} />
+                                                                Check for updates
+                                                            </>
+                                                        )}
+                                                    </button>
+                                                </div>
+
+                                            </div>
                                         </div>
+
                                     </div>
 
-                                    <div className="pt-2">
-                                        <h3 className="text-lg font-bold text-text-primary mb-1">General settings</h3>
-                                        <p className="text-xs text-text-secondary mb-2">Customize how Natively works for you</p>
-
-                                        <div className="space-y-4">
-                                            {/* Open at Login */}
-                                            <div className="flex items-center justify-between">
-                                                <div className="flex items-center gap-4">
-                                                    <div className="w-10 h-10 bg-bg-item-surface rounded-lg border border-border-subtle flex items-center justify-center text-text-tertiary">
-                                                        <Power size={20} />
-                                                    </div>
-                                                    <div>
-                                                        <h3 className="text-sm font-bold text-text-primary">Open Natively when you log in</h3>
-                                                        <p className="text-xs text-text-secondary mt-0.5">Natively will open automatically when you log in to your computer</p>
-                                                    </div>
-                                                </div>
-                                                <div
-                                                    onClick={() => {
-                                                        const newState = !openOnLogin;
-                                                        setOpenOnLogin(newState);
-                                                        window.electronAPI?.setOpenAtLogin(newState);
-                                                    }}
-                                                    className={`w-11 h-6 rounded-full relative cursor-pointer transition-colors ${openOnLogin ? 'bg-accent-primary' : 'bg-bg-toggle-switch border border-border-muted'}`}
-                                                >
-                                                    <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${openOnLogin ? 'translate-x-5' : 'translate-x-0'}`} />
-                                                </div>
+                                    {/* Process Disguise */}
+                                    {/* Process Disguise */}
+                                    <div className="bg-bg-item-surface rounded-xl p-5 border border-border-subtle">
+                                        <div className="flex flex-col gap-1 mb-3">
+                                            <div className="flex items-center gap-2">
+                                                <h3 className="text-lg font-bold text-text-primary">Process Disguise</h3>
                                             </div>
+                                            <p className="text-xs text-text-secondary">
+                                                Disguise Natively as another application to prevent detection during screen sharing.
+                                                <span className="block mt-1 text-text-tertiary">
+                                                    Select a disguise to be automatically applied when Undetectable mode is on.
+                                                </span>
+                                            </p>
+                                        </div>
 
-                                            {/* Interviewer Transcript */}
-                                            <div className="flex items-center justify-between">
-                                                <div className="flex items-center gap-4">
-                                                    <div className="w-10 h-10 bg-bg-item-surface rounded-lg border border-border-subtle flex items-center justify-center text-text-tertiary">
-                                                        <MessageSquare size={20} />
-                                                    </div>
-                                                    <div>
-                                                        <h3 className="text-sm font-bold text-text-primary">Interviewer Transcript</h3>
-                                                        <p className="text-xs text-text-secondary mt-0.5">Show real-time transcription of the interviewer</p>
-                                                    </div>
-                                                </div>
-                                                <div
-                                                    onClick={() => {
-                                                        const newState = !showTranscript;
-                                                        setShowTranscript(newState);
-                                                        localStorage.setItem('natively_interviewer_transcript', String(newState));
-                                                        window.dispatchEvent(new Event('storage'));
-                                                    }}
-                                                    className={`w-11 h-6 rounded-full relative cursor-pointer transition-colors ${showTranscript ? 'bg-accent-primary' : 'bg-bg-toggle-switch border border-border-muted'}`}
-                                                >
-                                                    <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${showTranscript ? 'translate-x-5' : 'translate-x-0'}`} />
-                                                </div>
-                                            </div>
-
-
-                                            {/* Theme */}
-                                            <div className="flex items-center justify-between">
-                                                <div className="flex items-center gap-4">
-                                                    <div className="w-10 h-10 bg-bg-item-surface rounded-lg border border-border-subtle flex items-center justify-center text-text-tertiary">
-                                                        <Palette size={20} />
-                                                    </div>
-                                                    <div>
-                                                        <h3 className="text-sm font-bold text-text-primary">Theme</h3>
-                                                        <p className="text-xs text-text-secondary mt-0.5">Customize how Natively looks on your device</p>
-                                                    </div>
-                                                </div>
-
-                                                <div className="relative" ref={themeDropdownRef}>
-                                                    <button
-                                                        onClick={() => setIsThemeDropdownOpen(!isThemeDropdownOpen)}
-                                                        className="bg-bg-component hover:bg-bg-elevated border border-border-subtle text-text-primary px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-2 min-w-[100px] justify-between"
-                                                    >
-                                                        <div className="flex items-center gap-2 overflow-hidden">
-                                                            <span className="text-text-secondary shrink-0">
-                                                                {themeMode === 'system' && <Monitor size={14} />}
-                                                                {themeMode === 'light' && <Sun size={14} />}
-                                                                {themeMode === 'dark' && <Moon size={14} />}
-                                                            </span>
-                                                            <span className="capitalize text-ellipsis overflow-hidden whitespace-nowrap">{themeMode}</span>
-                                                        </div>
-                                                        <ChevronDown size={12} className={`shrink-0 transition-transform ${isThemeDropdownOpen ? 'rotate-180' : ''}`} />
-                                                    </button>
-
-                                                    {/* Dropdown Menu */}
-                                                    {isThemeDropdownOpen && (
-                                                        <div className="absolute right-0 top-full mt-1 w-full bg-bg-elevated border border-border-subtle rounded-lg shadow-xl overflow-hidden z-20 p-1 animated fadeIn select-none">
-                                                            {[
-                                                                { mode: 'system', label: 'System', icon: <Monitor size={14} /> },
-                                                                { mode: 'light', label: 'Light', icon: <Sun size={14} /> },
-                                                                { mode: 'dark', label: 'Dark', icon: <Moon size={14} /> }
-                                                            ].map((option) => (
-                                                                <button
-                                                                    key={option.mode}
-                                                                    onClick={() => {
-                                                                        handleSetTheme(option.mode as any);
-                                                                        setIsThemeDropdownOpen(false);
-                                                                    }}
-                                                                    className={`w-full text-left px-2 py-1.5 rounded-md text-xs flex items-center gap-2 transition-colors ${themeMode === option.mode ? 'text-text-primary bg-bg-item-active/50' : 'text-text-secondary hover:bg-bg-input hover:text-text-primary'}`}
-                                                                >
-                                                                    <span className={themeMode === option.mode ? 'text-text-primary' : 'text-text-secondary group-hover:text-text-primary'}>{option.icon}</span>
-                                                                    <span className="font-medium">{option.label}</span>
-                                                                </button>
-                                                            ))}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </div>
-
-                                            {/* Version */}
-                                            <div className="flex items-start justify-between gap-4">
-                                                <div className="flex items-start gap-4">
-                                                    <div className="w-10 h-10 bg-bg-item-surface rounded-lg border border-border-subtle flex items-center justify-center text-text-tertiary shrink-0">
-                                                        <BadgeCheck size={20} />
-                                                    </div>
-                                                    <div>
-                                                        <h3 className="text-sm font-bold text-text-primary">Version</h3>
-                                                        <p className="text-xs text-text-secondary mt-0.5">
-                                                            You are currently using Natively version 1.0.1.
-                                                        </p>
-                                                    </div>
-                                                </div>
+                                        <div className="grid grid-cols-2 gap-3">
+                                            {[
+                                                { id: 'none', label: 'None (Default)', icon: <Layout size={14} /> },
+                                                { id: 'terminal', label: 'Terminal', icon: <Terminal size={14} /> },
+                                                { id: 'settings', label: 'System Settings', icon: <Settings size={14} /> },
+                                                { id: 'activity', label: 'Activity Monitor', icon: <Activity size={14} /> }
+                                            ].map((option) => (
                                                 <button
-                                                    onClick={async () => {
-                                                        if (updateStatus === 'available') {
-                                                            try {
-                                                                // @ts-ignore
-                                                                await window.electronAPI.downloadUpdate();
-                                                                onClose(); // Close settings to show the banner
-                                                            } catch (err) {
-                                                                console.error("Failed to start download:", err);
-                                                            }
-                                                        } else {
-                                                            handleCheckForUpdates();
-                                                        }
+                                                    key={option.id}
+                                                    onClick={() => {
+                                                        // @ts-ignore
+                                                        setDisguiseMode(option.id);
+                                                        // @ts-ignore
+                                                        window.electronAPI?.setDisguise(option.id);
+                                                        // Analytics
+                                                        analytics.trackModeSelected(`disguise_${option.id}`);
                                                     }}
-                                                    disabled={updateStatus === 'checking'}
-                                                    className={`px-5 py-2 rounded-lg text-[13px] font-bold transition-all flex items-center gap-2 shrink-0 ${updateStatus === 'checking' ? 'bg-bg-input text-text-tertiary cursor-wait' :
-                                                        updateStatus === 'available' ? 'bg-accent-primary text-white hover:bg-accent-secondary shadow-lg shadow-blue-500/20' :
-                                                            updateStatus === 'uptodate' ? 'bg-green-500/10 text-green-400 border border-green-500/20' :
-                                                                updateStatus === 'error' ? 'bg-red-500/10 text-red-400 border border-red-500/20' :
-                                                                    'bg-bg-component hover:bg-bg-input text-text-primary'
+                                                    className={`p-3 rounded-lg border text-left flex items-center gap-3 transition-all ${disguiseMode === option.id
+                                                        ? 'bg-accent-primary border-accent-primary text-white shadow-lg shadow-blue-500/20'
+                                                        : 'bg-bg-input border-border-subtle text-text-secondary hover:text-text-primary hover:bg-bg-subtle-hover'
                                                         }`}
                                                 >
-                                                    {updateStatus === 'checking' ? (
-                                                        <>
-                                                            <RefreshCw size={14} className="animate-spin" />
-                                                            Checking...
-                                                        </>
-                                                    ) : updateStatus === 'available' ? (
-                                                        <>
-                                                            <ArrowDown size={14} />
-                                                            Update Available
-                                                        </>
-                                                    ) : updateStatus === 'uptodate' ? (
-                                                        <>
-                                                            <Check size={14} />
-                                                            Up to date
-                                                        </>
-                                                    ) : updateStatus === 'error' ? (
-                                                        <>
-                                                            <X size={14} />
-                                                            Error
-                                                        </>
-                                                    ) : (
-                                                        <>
-                                                            <RefreshCw size={14} />
-                                                            Check for updates
-                                                        </>
-                                                    )}
+                                                    <div className={`w-8 h-8 rounded-md flex items-center justify-center shrink-0 ${disguiseMode === option.id ? 'bg-white/20 text-white' : 'bg-bg-item-surface text-text-secondary'
+                                                        }`}>
+                                                        {option.icon}
+                                                    </div>
+                                                    <span className="text-xs font-medium">{option.label}</span>
                                                 </button>
-                                            </div>
-
+                                            ))}
                                         </div>
                                     </div>
 
@@ -916,14 +977,47 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
 
                                                 <div className="flex justify-end">
                                                     <button
-                                                        onClick={() => {
-                                                            const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3'); // Simple test sound
-                                                            // Try to set sinkId if supported
-                                                            if (selectedOutput && (audio as any).setSinkId) {
-                                                                (audio as any).setSinkId(selectedOutput)
-                                                                    .catch((e: any) => console.error("Error setting sink", e));
+                                                        onClick={async () => {
+                                                            try {
+                                                                const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+                                                                if (!AudioContext) {
+                                                                    console.error("Web Audio API not supported");
+                                                                    return;
+                                                                }
+
+                                                                const ctx = new AudioContext();
+
+                                                                // Ensure context is running (it can start in 'suspended' state)
+                                                                if (ctx.state === 'suspended') {
+                                                                    await ctx.resume();
+                                                                }
+
+                                                                const oscillator = ctx.createOscillator();
+                                                                const gainNode = ctx.createGain();
+
+                                                                oscillator.connect(gainNode);
+                                                                gainNode.connect(ctx.destination);
+
+                                                                // Louder, clearer beep
+                                                                oscillator.type = 'sine';
+                                                                oscillator.frequency.setValueAtTime(523.25, ctx.currentTime); // C5
+                                                                gainNode.gain.setValueAtTime(0.5, ctx.currentTime);
+                                                                gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 1.0);
+
+                                                                // Try to set sinkId if supported (Chrome/Edge only)
+                                                                if (selectedOutput && (ctx as any).setSinkId) {
+                                                                    try {
+                                                                        await (ctx as any).setSinkId(selectedOutput);
+                                                                    } catch (e) {
+                                                                        console.warn("Error setting sink for AudioContext", e);
+                                                                    }
+                                                                }
+
+                                                                oscillator.start();
+                                                                oscillator.stop(ctx.currentTime + 1.0);
+                                                            } catch (e) {
+                                                                console.error("Error playing test sound", e);
                                                             }
-                                                            audio.play().catch(e => console.error("Error playing test sound", e));
                                                         }}
                                                         className="text-xs bg-bg-input hover:bg-bg-elevated text-text-primary px-3 py-1.5 rounded-md transition-colors flex items-center gap-2"
                                                     >
@@ -1057,8 +1151,9 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                         </div>
                     </motion.div>
                 </motion.div>
-            )}
-        </AnimatePresence>
+            )
+            }
+        </AnimatePresence >
     );
 };
 
