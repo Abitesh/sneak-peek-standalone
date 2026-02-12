@@ -3,7 +3,7 @@ import {
     X, Mic, Speaker, Monitor, Keyboard, User, LifeBuoy, LogOut, Upload,
     ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
     Camera, RotateCcw, Eye, Layout, MessageSquare, Crop,
-    ChevronDown, Check, BadgeCheck, Power, Palette, Calendar, Ghost, Sun, Moon, RefreshCw, Info, Globe, FlaskConical, Terminal, Settings, Activity
+    ChevronDown, Check, BadgeCheck, Power, Palette, Calendar, Ghost, Sun, Moon, RefreshCw, Info, Globe, FlaskConical, Terminal, Settings, Activity, ExternalLink
 } from 'lucide-react';
 import { analytics } from '../lib/analytics/analytics.service';
 import { AboutSection } from './AboutSection';
@@ -111,84 +111,101 @@ const ProviderSelect: React.FC<ProviderSelectProps> = ({ value, options, onChang
 
     const selected = options.find(o => o.id === value);
 
-    const getBadgeColor = (color?: string, isSelected: boolean = false) => {
-        if (isSelected) return 'bg-white/20 text-white';
+    const getBadgeStyle = (color?: string) => {
         switch (color) {
-            case 'blue': return 'bg-blue-500/15 text-blue-500';
-            case 'orange': return 'bg-orange-500/15 text-orange-500';
-            case 'purple': return 'bg-purple-500/15 text-purple-500';
-            case 'teal': return 'bg-teal-500/15 text-teal-500';
-            case 'cyan': return 'bg-cyan-500/15 text-cyan-500';
-            case 'indigo': return 'bg-indigo-500/15 text-indigo-500';
-            case 'green': return 'bg-green-500/15 text-green-500';
-            default: return 'bg-gray-500/15 text-gray-500';
+            case 'blue': return 'bg-blue-500/10 text-blue-500 border-blue-500/20';
+            case 'orange': return 'bg-orange-500/10 text-orange-500 border-orange-500/20';
+            case 'purple': return 'bg-purple-500/10 text-purple-500 border-purple-500/20';
+            case 'teal': return 'bg-teal-500/10 text-teal-500 border-teal-500/20';
+            case 'cyan': return 'bg-cyan-500/10 text-cyan-500 border-cyan-500/20';
+            case 'indigo': return 'bg-indigo-500/10 text-indigo-500 border-indigo-500/20';
+            case 'green': return 'bg-green-500/10 text-green-500 border-green-500/20';
+            default: return 'bg-gray-500/10 text-gray-500 border-gray-500/20';
         }
     };
 
-    const getIconBg = (isSelected: boolean = false) => {
-        if (isSelected) return 'bg-white/10 text-white';
-        return 'bg-bg-input text-text-tertiary';
+    const getIconStyle = (color?: string, isSelectedItem: boolean = false) => {
+        if (isSelectedItem) return 'bg-accent-primary text-white shadow-sm';
+        // For unselected items in list or trigger
+        switch (color) {
+            case 'blue': return 'bg-blue-500/10 text-blue-600';
+            case 'orange': return 'bg-orange-500/10 text-orange-600';
+            case 'purple': return 'bg-purple-500/10 text-purple-600';
+            case 'teal': return 'bg-teal-500/10 text-teal-600';
+            case 'cyan': return 'bg-cyan-500/10 text-cyan-600';
+            case 'indigo': return 'bg-indigo-500/10 text-indigo-600';
+            case 'green': return 'bg-green-500/10 text-green-600';
+            default: return 'bg-gray-500/10 text-gray-600';
+        }
     };
 
     return (
-        <div ref={containerRef} className="relative z-20">
+        <div ref={containerRef} className="relative z-20 font-sans">
             <button
                 onClick={() => setIsOpen(!isOpen)}
-                className={`w-full bg-bg-card border border-border-subtle hover:bg-bg-elevated rounded-xl p-3 flex items-center justify-between transition-all duration-200 text-left`}
+                className={`w-full group bg-bg-input border border-border-subtle hover:border-border-muted shadow-sm rounded-xl p-2.5 pr-3.5 flex items-center justify-between transition-all duration-200 outline-none focus:ring-2 focus:ring-accent-primary/20 ${isOpen ? 'ring-2 ring-accent-primary/20 border-accent-primary/50' : 'hover:shadow-md'}`}
             >
                 {selected ? (
                     <div className="flex items-center gap-3 overflow-hidden">
-                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors ${getIconBg(false)}`}>
+                        <div className={`w-9 h-9 rounded-[10px] flex items-center justify-center shrink-0 transition-all duration-300 ${getIconStyle(selected.color)}`}>
                             {selected.icon}
                         </div>
-                        <div className="min-w-0">
+                        <div className="min-w-0 flex-1 text-left">
                             <div className="flex items-center gap-2">
-                                <span className="text-sm font-semibold text-text-primary truncate">{selected.label}</span>
+                                <span className="text-[13px] font-semibold text-text-primary truncate leading-tight">{selected.label}</span>
                                 {selected.badge && (
-                                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${getBadgeColor(selected.color, false)}`}>
+                                    <span className={`px-1.5 py-[1px] rounded-[6px] text-[9px] font-bold uppercase tracking-wider border ${getBadgeStyle(selected.color)}`}>
                                         {selected.badge}
                                     </span>
                                 )}
                             </div>
-                            <span className="text-xs text-text-tertiary truncate block">{selected.desc}</span>
+                            {/* Short description for trigger */}
+                            <span className="text-[11px] text-text-tertiary truncate block leading-tight mt-0.5">{selected.desc}</span>
                         </div>
                     </div>
-                ) : <span className="text-text-secondary">Select Provider</span>}
-                <ChevronDown size={16} className={`text-text-secondary ml-2 shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                ) : <span className="text-text-secondary px-2 text-sm">Select Provider</span>}
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-text-tertiary transition-transform duration-300 group-hover:bg-bg-surface ${isOpen ? 'rotate-180 bg-bg-surface text-text-primary' : ''}`}>
+                    <ChevronDown size={14} strokeWidth={2.5} />
+                </div>
             </button>
 
-            {isOpen && (
-                <div className="absolute top-full left-0 w-full mt-2 bg-bg-elevated border border-border-subtle rounded-xl shadow-xl overflow-hidden animated fadeIn">
-                    <div className="max-h-[320px] overflow-y-auto p-1 space-y-1">
-                        {options.map(option => {
-                            const isSelected = value === option.id;
-                            return (
-                                <button
-                                    key={option.id}
-                                    onClick={() => { onChange(option.id); setIsOpen(false); }}
-                                    className={`w-full rounded-lg p-2.5 flex items-center gap-3 transition-colors ${isSelected ? 'bg-accent-primary text-white' : 'hover:bg-bg-input'}`}
-                                >
-                                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${isSelected ? 'bg-white/10 text-white' : 'bg-bg-card text-text-tertiary'}`}>
-                                        {option.icon}
-                                    </div>
-                                    <div className="flex-1 min-w-0 text-left">
-                                        <div className="flex items-center gap-2">
-                                            <span className={`text-sm font-semibold ${isSelected ? 'text-white' : 'text-text-primary'}`}>{option.label}</span>
-                                            {option.badge && (
-                                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${getBadgeColor(option.color, isSelected)}`}>
-                                                    {option.badge}
-                                                </span>
-                                            )}
+            <AnimatePresence>
+                {isOpen && (
+                    <motion.div
+                        initial={{ opacity: 0, y: 4, scale: 0.98 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 4, scale: 0.98 }}
+                        transition={{ duration: 0.15, ease: "easeOut" }}
+                        className="absolute top-full left-0 w-full mt-2 bg-bg-elevated/90 backdrop-blur-xl border border-white/5 rounded-xl shadow-2xl overflow-hidden ring-1 ring-black/5"
+                    >
+                        <div className="max-h-[320px] overflow-y-auto p-1.5 space-y-0.5 custom-scrollbar">
+                            {options.map(option => {
+                                const isSelected = value === option.id;
+                                return (
+                                    <button
+                                        key={option.id}
+                                        onClick={() => { onChange(option.id); setIsOpen(false); }}
+                                        className={`w-full rounded-[10px] p-2 flex items-center gap-3 transition-all duration-200 group relative ${isSelected ? 'bg-white/10 shadow-inner' : 'hover:bg-white/5'}`}
+                                    >
+                                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-transform duration-200 ${isSelected ? 'scale-100' : 'scale-95 group-hover:scale-100'} ${getIconStyle(option.color, false)}`}>
+                                            {option.icon}
                                         </div>
-                                        <span className={`text-xs ${isSelected ? 'text-white/70' : 'text-text-tertiary'}`}>{option.desc}</span>
-                                    </div>
-                                    {isSelected && <Check size={16} className="text-white ml-2" />}
-                                </button>
-                            );
-                        })}
-                    </div>
-                </div>
-            )}
+                                        <div className="flex-1 min-w-0 text-left">
+                                            <div className="flex items-center justify-between mb-0.5">
+                                                <span className={`text-[13px] font-medium transition-colors ${isSelected ? 'text-white' : 'text-text-primary'}`}>{option.label}</span>
+                                                {isSelected && <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }}><Check size={14} className="text-accent-primary" strokeWidth={3} /></motion.div>}
+                                            </div>
+                                            <span className={`text-[11px] block truncate transition-colors ${isSelected ? 'text-white/70' : 'text-text-tertiary'}`}>{option.desc}</span>
+                                        </div>
+                                        {/* Hover Indicator */}
+                                        {!isSelected && <div className="absolute inset-0 rounded-[10px] ring-1 ring-inset ring-white/0 group-hover:ring-white/5 pointer-events-none" />}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </div>
     );
 };
@@ -1178,20 +1195,23 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                         <p className="text-xs text-text-secondary mb-5">Choose the engine that transcribes audio to text.</p>
 
                                         <div className="space-y-4">
-                                            <div className="relative">
-                                                <ProviderSelect
-                                                    value={sttProvider}
-                                                    onChange={(val) => handleSttProviderChange(val as any)}
-                                                    options={[
-                                                        { id: 'google', label: 'Google Cloud', badge: 'Default', desc: 'gRPC streaming via Service Account', color: 'blue', icon: <Mic size={14} /> },
-                                                        { id: 'groq', label: 'Groq Whisper', badge: 'Fast', desc: 'Ultra-fast REST transcription', color: 'orange', icon: <Mic size={14} /> },
-                                                        { id: 'openai', label: 'OpenAI Whisper', badge: null, desc: 'OpenAI-compatible Whisper API', color: 'green', icon: <Mic size={14} /> },
-                                                        { id: 'deepgram', label: 'Deepgram Nova-2', badge: 'Accurate', desc: 'High-accuracy REST transcription', color: 'purple', icon: <Mic size={14} /> },
-                                                        { id: 'elevenlabs', label: 'ElevenLabs Scribe', badge: null, desc: 'High-quality Scribe v1 API', color: 'teal', icon: <Mic size={14} /> },
-                                                        { id: 'azure', label: 'Azure Speech', badge: null, desc: 'Microsoft Cognitive Services STT', color: 'cyan', icon: <Mic size={14} /> },
-                                                        { id: 'ibmwatson', label: 'IBM Watson', badge: null, desc: 'IBM Watson cloud STT service', color: 'indigo', icon: <Mic size={14} /> },
-                                                    ]}
-                                                />
+                                            <div className="bg-bg-card rounded-xl border border-border-subtle p-4 space-y-3">
+                                                <label className="text-xs font-medium text-text-secondary block">Speech Provider</label>
+                                                <div className="relative">
+                                                    <ProviderSelect
+                                                        value={sttProvider}
+                                                        onChange={(val) => handleSttProviderChange(val as any)}
+                                                        options={[
+                                                            { id: 'google', label: 'Google Cloud', badge: 'Default', desc: 'gRPC streaming via Service Account', color: 'blue', icon: <Mic size={14} /> },
+                                                            { id: 'groq', label: 'Groq Whisper', badge: 'Fast', desc: 'Ultra-fast REST transcription', color: 'orange', icon: <Mic size={14} /> },
+                                                            { id: 'openai', label: 'OpenAI Whisper', badge: null, desc: 'OpenAI-compatible Whisper API', color: 'green', icon: <Mic size={14} /> },
+                                                            { id: 'deepgram', label: 'Deepgram Nova-2', badge: 'Accurate', desc: 'High-accuracy REST transcription', color: 'purple', icon: <Mic size={14} /> },
+                                                            { id: 'elevenlabs', label: 'ElevenLabs Scribe', badge: null, desc: 'High-quality Scribe v1 API', color: 'teal', icon: <Mic size={14} /> },
+                                                            { id: 'azure', label: 'Azure Speech', badge: null, desc: 'Microsoft Cognitive Services STT', color: 'cyan', icon: <Mic size={14} /> },
+                                                            { id: 'ibmwatson', label: 'IBM Watson', badge: null, desc: 'IBM Watson cloud STT service', color: 'indigo', icon: <Mic size={14} /> },
+                                                        ]}
+                                                    />
+                                                </div>
                                             </div>
 
                                             {/* Groq Model Selector */}
@@ -1364,6 +1384,26 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                                             ) : (
                                                                 <>Test Connection</>
                                                             )}
+                                                        </button>
+                                                        <button
+                                                            onClick={() => {
+                                                                const urls: Record<string, string> = {
+                                                                    groq: 'https://console.groq.com/keys',
+                                                                    openai: 'https://platform.openai.com/api-keys',
+                                                                    deepgram: 'https://console.deepgram.com',
+                                                                    elevenlabs: 'https://elevenlabs.io/app/settings/api-keys',
+                                                                    azure: 'https://portal.azure.com/#create/Microsoft.CognitiveServicesSpeech',
+                                                                    ibmwatson: 'https://cloud.ibm.com/catalog/services/speech-to-text'
+                                                                };
+                                                                if (urls[sttProvider]) {
+                                                                    // @ts-ignore
+                                                                    window.electronAPI?.openExternal(urls[sttProvider]);
+                                                                }
+                                                            }}
+                                                            className="text-xs text-text-tertiary hover:text-text-primary flex items-center gap-1 transition-colors ml-1"
+                                                            title="Get API Key"
+                                                        >
+                                                            <ExternalLink size={12} />
                                                         </button>
                                                         {sttTestStatus === 'error' && (
                                                             <span className="text-xs text-red-400">{sttTestError}</span>
