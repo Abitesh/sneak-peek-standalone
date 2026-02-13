@@ -3,7 +3,7 @@ import {
     X, Mic, Speaker, Monitor, Keyboard, User, LifeBuoy, LogOut, Upload,
     ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
     Camera, RotateCcw, Eye, Layout, MessageSquare, Crop,
-    ChevronDown, Check, BadgeCheck, Power, Palette, Calendar, Ghost, Sun, Moon, RefreshCw, Info, Globe, FlaskConical, Terminal, Settings, Activity, ExternalLink
+    ChevronDown, Check, BadgeCheck, Power, Palette, Calendar, Ghost, Sun, Moon, RefreshCw, Info, Globe, FlaskConical, Terminal, Settings, Activity, ExternalLink, Trash2
 } from 'lucide-react';
 import { analytics } from '../lib/analytics/analytics.service';
 import { AboutSection } from './AboutSection';
@@ -528,6 +528,46 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
             setSttTestError(e.message || 'Validation failed');
         } finally {
             setSttSaving(false);
+        }
+    };
+
+    const handleRemoveSttKey = async (provider: 'groq' | 'openai' | 'deepgram' | 'elevenlabs' | 'azure' | 'ibmwatson') => {
+        if (!confirm(`Are you sure you want to remove the ${provider === 'ibmwatson' ? 'IBM Watson' : provider.charAt(0).toUpperCase() + provider.slice(1)} API key?`)) return;
+
+        try {
+            if (provider === 'groq') {
+                // @ts-ignore
+                await window.electronAPI?.setGroqSttApiKey?.('');
+                setSttGroqKey('');
+                setHasStoredSttGroqKey(false);
+            } else if (provider === 'openai') {
+                // @ts-ignore
+                await window.electronAPI?.setOpenaiSttApiKey?.('');
+                setSttOpenaiKey('');
+                setHasStoredSttOpenaiKey(false);
+            } else if (provider === 'elevenlabs') {
+                // @ts-ignore
+                await window.electronAPI?.setElevenLabsApiKey?.('');
+                setSttElevenLabsKey('');
+                setHasStoredElevenLabsKey(false);
+            } else if (provider === 'azure') {
+                // @ts-ignore
+                await window.electronAPI?.setAzureApiKey?.('');
+                setSttAzureKey('');
+                setHasStoredAzureKey(false);
+            } else if (provider === 'ibmwatson') {
+                // @ts-ignore
+                await window.electronAPI?.setIbmWatsonApiKey?.('');
+                setSttIbmKey('');
+                setHasStoredIbmWatsonKey(false);
+            } else {
+                // @ts-ignore
+                await window.electronAPI?.setDeepgramApiKey?.('');
+                setSttDeepgramKey('');
+                setHasStoredDeepgramKey(false);
+            }
+        } catch (e) {
+            console.error(`Failed to remove ${provider} STT key:`, e);
         }
     };
 
@@ -1363,6 +1403,25 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                                         >
                                                             {sttSaving ? 'Saving...' : sttSaved ? 'Saved!' : 'Save'}
                                                         </button>
+                                                        {(() => {
+                                                            const hasKeyMap: Record<string, boolean> = {
+                                                                groq: hasStoredSttGroqKey,
+                                                                openai: hasStoredSttOpenaiKey,
+                                                                deepgram: hasStoredDeepgramKey,
+                                                                elevenlabs: hasStoredElevenLabsKey,
+                                                                azure: hasStoredAzureKey,
+                                                                ibmwatson: hasStoredIbmWatsonKey,
+                                                            };
+                                                            return hasKeyMap[sttProvider] ? (
+                                                                <button
+                                                                    onClick={() => handleRemoveSttKey(sttProvider as any)}
+                                                                    className="px-2.5 py-2.5 rounded-lg text-xs font-medium text-text-tertiary hover:text-red-500 hover:bg-red-500/10 transition-all"
+                                                                    title="Remove API Key"
+                                                                >
+                                                                    <Trash2 size={16} strokeWidth={1.5} />
+                                                                </button>
+                                                            ) : null;
+                                                        })()}
                                                     </div>
 
                                                     {/* Azure Region Input */}

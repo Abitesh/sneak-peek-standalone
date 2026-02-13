@@ -215,6 +215,28 @@ export const AIProvidersSettings: React.FC = () => {
         }
     };
 
+    const handleRemoveKey = async (provider: string, setter: (val: string) => void) => {
+        if (!confirm(`Are you sure you want to remove the ${provider} API key?`)) return;
+        try {
+            let result;
+            // @ts-ignore
+            if (provider === 'gemini') result = await window.electronAPI.setGeminiApiKey('');
+            // @ts-ignore
+            if (provider === 'groq') result = await window.electronAPI.setGroqApiKey('');
+            // @ts-ignore
+            if (provider === 'openai') result = await window.electronAPI.setOpenaiApiKey('');
+            // @ts-ignore
+            if (provider === 'claude') result = await window.electronAPI.setClaudeApiKey('');
+
+            if (result && result.success) {
+                setHasStoredKey(prev => ({ ...prev, [provider]: false }));
+                setter('');
+            }
+        } catch (e) {
+            console.error(`Failed to remove ${provider} key:`, e);
+        }
+    };
+
     const handleTestConnection = async (provider: string, key: string) => {
         // Allow testing if key is provided OR if we have a stored key
         if (!key.trim() && !hasStoredKey[provider]) {
@@ -391,6 +413,15 @@ export const AIProvidersSettings: React.FC = () => {
                             >
                                 {savingStatus.gemini ? 'Saving...' : savedStatus.gemini ? 'Saved!' : 'Save'}
                             </button>
+                            {hasStoredKey.gemini && (
+                                <button
+                                    onClick={() => handleRemoveKey('gemini', setApiKey)}
+                                    className="px-2.5 py-2.5 rounded-lg text-xs font-medium text-text-tertiary hover:text-red-500 hover:bg-red-500/10 transition-all"
+                                    title="Remove API Key"
+                                >
+                                    <Trash2 size={16} strokeWidth={1.5} />
+                                </button>
+                            )}
                         </div>
                         <div className="flex items-center gap-3">
                             <button
@@ -444,6 +475,15 @@ export const AIProvidersSettings: React.FC = () => {
                             >
                                 {savingStatus.groq ? 'Saving...' : savedStatus.groq ? 'Saved!' : 'Save'}
                             </button>
+                            {hasStoredKey.groq && (
+                                <button
+                                    onClick={() => handleRemoveKey('groq', setGroqApiKey)}
+                                    className="px-2.5 py-2.5 rounded-lg text-xs font-medium text-text-tertiary hover:text-red-500 hover:bg-red-500/10 transition-all"
+                                    title="Remove API Key"
+                                >
+                                    <Trash2 size={16} strokeWidth={1.5} />
+                                </button>
+                            )}
                         </div>
                         <div className="flex items-center gap-3">
                             <button
@@ -497,6 +537,15 @@ export const AIProvidersSettings: React.FC = () => {
                             >
                                 {savingStatus.openai ? 'Saving...' : savedStatus.openai ? 'Saved!' : 'Save'}
                             </button>
+                            {hasStoredKey.openai && (
+                                <button
+                                    onClick={() => handleRemoveKey('openai', setOpenaiApiKey)}
+                                    className="px-2.5 py-2.5 rounded-lg text-xs font-medium text-text-tertiary hover:text-red-500 hover:bg-red-500/10 transition-all"
+                                    title="Remove API Key"
+                                >
+                                    <Trash2 size={16} strokeWidth={1.5} />
+                                </button>
+                            )}
                         </div>
                         <div className="flex items-center gap-3">
                             <button
@@ -550,6 +599,15 @@ export const AIProvidersSettings: React.FC = () => {
                             >
                                 {savingStatus.claude ? 'Saving...' : savedStatus.claude ? 'Saved!' : 'Save'}
                             </button>
+                            {hasStoredKey.claude && (
+                                <button
+                                    onClick={() => handleRemoveKey('claude', setClaudeApiKey)}
+                                    className="px-2.5 py-2.5 rounded-lg text-xs font-medium text-text-tertiary hover:text-red-500 hover:bg-red-500/10 transition-all"
+                                    title="Remove API Key"
+                                >
+                                    <Trash2 size={16} strokeWidth={1.5} />
+                                </button>
+                            )}
                         </div>
                         <div className="flex items-center gap-3">
                             <button
