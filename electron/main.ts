@@ -59,7 +59,7 @@ import { WindowHelper } from "./WindowHelper"
 import { SettingsWindowHelper } from "./SettingsWindowHelper"
 import { ModelSelectorWindowHelper } from "./ModelSelectorWindowHelper"
 import { ScreenshotHelper } from "./ScreenshotHelper"
-import { ShortcutsHelper } from "./shortcuts"
+import { KeybindManager } from "./services/KeybindManager"
 import { ProcessingHelper } from "./ProcessingHelper"
 
 import { IntelligenceManager } from "./IntelligenceManager"
@@ -81,7 +81,6 @@ export class AppState {
   public settingsWindowHelper: SettingsWindowHelper
   public modelSelectorWindowHelper: ModelSelectorWindowHelper
   private screenshotHelper: ScreenshotHelper
-  public shortcutsHelper: ShortcutsHelper
   public processingHelper: ProcessingHelper
 
   private intelligenceManager: IntelligenceManager
@@ -137,8 +136,17 @@ export class AppState {
     // Initialize ProcessingHelper
     this.processingHelper = new ProcessingHelper(this)
 
-    // Initialize ShortcutsHelper
-    this.shortcutsHelper = new ShortcutsHelper(this)
+    // Initialize KeybindManager
+    const keybindManager = KeybindManager.getInstance();
+    keybindManager.setWindowHelper(this.windowHelper);
+    keybindManager.setupIpcHandlers();
+    keybindManager.onUpdate(() => {
+      this.updateTrayMenu();
+    });
+
+    // Inject WindowHelper into other helpers
+    this.settingsWindowHelper.setWindowHelper(this.windowHelper);
+    this.modelSelectorWindowHelper.setWindowHelper(this.windowHelper);
 
 
 
@@ -232,16 +240,71 @@ export class AppState {
       this.getMainWindow()?.webContents.send("update-downloaded", info)
     })
 
-    // Only skip the automatic check in development
-    if (process.env.NODE_ENV === "development") {
-      console.log("[AutoUpdater] Skipping automatic update check in development mode")
-      return
-    }
-
     // Start checking for updates
-    autoUpdater.checkForUpdatesAndNotify().catch(err => {
-      console.error("[AutoUpdater] Failed to check for updates:", err)
-    })
+    if (process.env.NODE_ENV === "development") {
+      console.log("[AutoUpdater] Development mode: Running manual update check...");
+      this.checkForUpdatesManual();
+    } else {
+      autoUpdater.checkForUpdatesAndNotify().catch(err => {
+        console.error("[AutoUpdater] Failed to check for updates:", err);
+      });
+    }
+  }
+
+  private async checkForUpdatesManual(): Promise<void> {
+    try {
+      console.log('[AutoUpdater] Checking for updates manually via GitHub API...');
+      const releaseManager = ReleaseNotesManager.getInstance();
+      // Fetch latest release
+      const notes = await releaseManager.fetchReleaseNotes('latest');
+
+      if (notes) {
+        const currentVersion = app.getVersion();
+        const latestVersionTag = notes.version; // e.g., "v1.2.0" or "1.2.0"
+        const latestVersion = latestVersionTag.replace(/^v/, '');
+
+        console.log(`[AutoUpdater] Manual Check: Current=${currentVersion}, Latest=${latestVersion}`);
+
+        if (this.isVersionNewer(currentVersion, latestVersion)) {
+          console.log('[AutoUpdater] Manual Check: New version found!');
+          this.updateAvailable = true;
+
+          // Mock an info object compatible with electron-updater
+          const info = {
+            version: latestVersion,
+            files: [] as any[],
+            path: '',
+            sha512: '',
+            releaseName: notes.summary,
+            releaseNotes: notes.fullBody
+          };
+
+          // Notify renderer
+          this.getMainWindow()?.webContents.send("update-available", {
+            ...info,
+            parsedNotes: notes
+          });
+        } else {
+          console.log('[AutoUpdater] Manual Check: App is up to date.');
+          this.getMainWindow()?.webContents.send("update-not-available", { version: currentVersion });
+        }
+      }
+    } catch (err) {
+      console.error('[AutoUpdater] Manual update check failed:', err);
+    }
+  }
+
+  private isVersionNewer(current: string, latest: string): boolean {
+    const c = current.split('.').map(Number);
+    const l = latest.split('.').map(Number);
+
+    for (let i = 0; i < 3; i++) {
+      const cv = c[i] || 0;
+      const lv = l[i] || 0;
+      if (lv > cv) return true;
+      if (lv < cv) return false;
+    }
+    return false;
   }
 
 
@@ -1136,6 +1199,41 @@ export class AppState {
     trayIcon.setTemplateImage(iconToUse.endsWith('Template.png'));
 
     this.tray = new Tray(trayIcon)
+    this.tray.setToolTip('Natively - Press Cmd+Shift+Space to show') // This tooltip might also need update if we change global shortcut, but global shortcut is removed.
+    this.updateTrayMenu();
+
+    // Double-click to show window
+    this.tray.on('double-click', () => {
+      this.centerAndShowWindow()
+    })
+  }
+
+  public updateTrayMenu() {
+    if (!this.tray) return;
+
+    const keybindManager = KeybindManager.getInstance();
+    const screenshotAccel = keybindManager.getKeybind('general:take-screenshot') || 'CommandOrControl+H';
+
+    console.log('[Main] updateTrayMenu called. Screenshot Accelerator:', screenshotAccel);
+
+    // Update tooltip for verification
+    this.tray.setToolTip(`Natively (${screenshotAccel}) - Press Cmd+Shift+Space to show`);
+
+    // Helper to format accelerator for display (e.g. CommandOrControl+H -> Cmd+H)
+    const formatAccel = (accel: string) => {
+      return accel
+        .replace('CommandOrControl', 'Cmd')
+        .replace('Command', 'Cmd')
+        .replace('Control', 'Ctrl')
+        .replace('OrControl', '') // Cleanup just in case
+        .replace(/\+/g, '+');
+    };
+
+    const displayScreenshot = formatAccel(screenshotAccel);
+    // We can also get the toggle visibility shortcut if desired
+    const toggleKb = keybindManager.getKeybind('general:toggle-visibility');
+    const toggleAccel = toggleKb || 'CommandOrControl+B';
+    const displayToggle = formatAccel(toggleAccel);
 
     const contextMenu = Menu.buildFromTemplate([
       {
@@ -1145,7 +1243,7 @@ export class AppState {
         }
       },
       {
-        label: 'Toggle Window',
+        label: `Toggle Window (${displayToggle})`,
         click: () => {
           this.toggleMainWindow()
         }
@@ -1154,7 +1252,8 @@ export class AppState {
         type: 'separator'
       },
       {
-        label: 'Take Screenshot (Cmd+H)',
+        label: `Take Screenshot (${displayScreenshot})`,
+        accelerator: screenshotAccel,
         click: async () => {
           try {
             const screenshotPath = await this.takeScreenshot()
@@ -1183,13 +1282,7 @@ export class AppState {
       }
     ])
 
-    this.tray.setToolTip('Natively - Press Cmd+Shift+Space to show')
     this.tray.setContextMenu(contextMenu)
-
-    // Double-click to show window
-    this.tray.on('double-click', () => {
-      this.centerAndShowWindow()
-    })
   }
 
   public hideTray(): void {
@@ -1367,6 +1460,8 @@ export class AppState {
         }
       }, 10);
 
+      this.hideTray();
+
     } else {
       app.setActivationPolicy('regular');
       // No delay needed for regular mode, but good practice to ensure focus
@@ -1375,6 +1470,7 @@ export class AppState {
         win.show();
         win.focus();
       }
+      this.showTray();
     }
 
     this.visibilityMode = mode;
@@ -1455,6 +1551,7 @@ async function initializeApp() {
         app.setActivationPolicy('accessory');
       } else {
         app.setActivationPolicy('regular');
+        appState.showTray();
       }
     } else {
       // Non-macOS explicit handling if needed (mostly handled via window skipTaskbar)
@@ -1464,8 +1561,8 @@ async function initializeApp() {
         appState.showTray();
       }
     }
-    // Register global shortcuts using ShortcutsHelper
-    appState.shortcutsHelper.registerGlobalShortcuts()
+    // Register global shortcuts using KeybindManager
+    KeybindManager.getInstance().registerGlobalShortcuts()
 
     // Pre-create settings window in background for faster first open
     appState.settingsWindowHelper.preloadWindow()

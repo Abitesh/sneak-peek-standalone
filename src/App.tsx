@@ -9,6 +9,7 @@ import SettingsOverlay from "./components/SettingsOverlay"
 import StartupSequence from "./components/StartupSequence"
 import { AnimatePresence, motion } from "framer-motion"
 import UpdateBanner from "./components/UpdateBanner"
+import { SupportToaster } from "./components/SupportToaster"
 import { analytics } from "./lib/analytics/analytics.service"
 
 const queryClient = new QueryClient()
@@ -194,6 +195,7 @@ const App: React.FC = () => {
         )}
       </AnimatePresence>
       <UpdateBanner />
+      <SupportToaster />
     </div>
   )
 }

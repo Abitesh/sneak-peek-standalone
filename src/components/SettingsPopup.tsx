@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { MessageSquare, Link, Camera, Zap, Heart } from 'lucide-react';
+import { useShortcuts } from '../hooks/useShortcuts';
 
 const SettingsPopup = () => {
+    const { shortcuts } = useShortcuts();
     const [isUndetectable, setIsUndetectable] = useState(false);
     const [useGeminiPro, setUseGeminiPro] = useState(() => {
         return localStorage.getItem('natively_model_preference') === 'pro';
@@ -170,8 +172,12 @@ const SettingsPopup = () => {
                         <span className="text-[12px] text-slate-400 group-hover:text-slate-200 transition-colors">Show/Hide</span>
                     </div>
                     <div className="flex gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
-                        <div className="px-1.5 py-0.5 rounded border border-white/10 bg-white/5 text-[10px] text-slate-500 font-medium">⌘</div>
-                        <div className="px-1.5 py-0.5 rounded border border-white/10 bg-white/5 text-[10px] text-slate-500 font-medium">B</div>
+                        {/* Dynamic Keys for Toggle Visibility */}
+                        {(shortcuts.toggleVisibility || ['⌘', 'B']).map((key, index) => (
+                            <div key={index} className="px-1.5 py-0.5 rounded border border-white/10 bg-white/5 text-[10px] text-slate-500 font-medium min-w-[20px] text-center">
+                                {key}
+                            </div>
+                        ))}
                     </div>
                 </div>
 
@@ -182,8 +188,12 @@ const SettingsPopup = () => {
                         <span className="text-[12px] text-slate-400 group-hover:text-slate-200 transition-colors">Screenshot</span>
                     </div>
                     <div className="flex gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
-                        <div className="px-1.5 py-0.5 rounded border border-white/10 bg-white/5 text-[10px] text-slate-500 font-medium">⌘</div>
-                        <div className="px-1.5 py-0.5 rounded border border-white/10 bg-white/5 text-[10px] text-slate-500 font-medium">H</div>
+                        {/* Dynamic Keys for Take Screenshot */}
+                        {(shortcuts.takeScreenshot || ['⌘', 'H']).map((key, index) => (
+                            <div key={index} className="px-1.5 py-0.5 rounded border border-white/10 bg-white/5 text-[10px] text-slate-500 font-medium min-w-[20px] text-center">
+                                {key}
+                            </div>
+                        ))}
                     </div>
                 </div>
 

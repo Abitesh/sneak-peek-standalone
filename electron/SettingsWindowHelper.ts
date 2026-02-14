@@ -1,4 +1,5 @@
 import { BrowserWindow, screen } from "electron"
+import { WindowHelper } from "./WindowHelper"
 import path from "node:path"
 
 const isDev = process.env.NODE_ENV === "development"
@@ -9,6 +10,7 @@ const startUrl = isDev
 
 export class SettingsWindowHelper {
     private settingsWindow: BrowserWindow | null = null
+    private windowHelper: WindowHelper | null = null;
 
     public getSettingsWindow(): BrowserWindow | null {
         return this.settingsWindow
@@ -47,6 +49,10 @@ export class SettingsWindowHelper {
         }
     }
 
+    public setWindowHelper(wh: WindowHelper): void {
+        this.windowHelper = wh;
+    }
+
     public toggleWindow(x?: number, y?: number): void {
         const mainWindow = BrowserWindow.getAllWindows().find(w => !w.isDestroyed() && w !== this.settingsWindow);
         if (mainWindow && x !== undefined && y !== undefined) {
@@ -62,7 +68,7 @@ export class SettingsWindowHelper {
             }
 
             if (this.settingsWindow.isVisible()) {
-                this.settingsWindow.hide()
+                this.closeWindow(); // Use closeWindow to handle focus restore
             } else {
                 this.showWindow(x, y)
             }
@@ -75,6 +81,12 @@ export class SettingsWindowHelper {
         if (!this.settingsWindow || this.settingsWindow.isDestroyed()) {
             this.createWindow(x, y)
             return
+        }
+
+        // Set parent to ensure it stays on top of the correct window
+        const mainWin = this.windowHelper?.getMainWindow();
+        if (mainWin && !mainWin.isDestroyed()) {
+            this.settingsWindow.setParentWindow(mainWin);
         }
 
         if (x !== undefined && y !== undefined) {

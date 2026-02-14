@@ -61,6 +61,46 @@ const UpdateModal: React.FC<UpdateModalProps> = ({
         setTimeout(() => setCopied(false), 2000);
     };
 
+    // Auto-scroll logic
+    const scrollContainerRef = React.useRef<HTMLDivElement>(null);
+    const isUserInteractionRef = React.useRef(false);
+    const animationFrameRef = React.useRef<number>();
+
+    React.useEffect(() => {
+        // Only run if not downloading and we have notes
+        if (status === 'downloading' || showFallback || !isOpen) return;
+
+        const scroll = () => {
+            if (isUserInteractionRef.current || !scrollContainerRef.current) return;
+
+            const el = scrollContainerRef.current;
+            // Smooth scroll speed
+            el.scrollTop += 0.5;
+
+            // Check if reached bottom (with small buffer)
+            if (el.scrollTop + el.clientHeight >= el.scrollHeight - 1) {
+                el.scrollTop = 0; // Cycle to top
+            }
+
+            animationFrameRef.current = requestAnimationFrame(scroll);
+        };
+
+        // Start scrolling after a small delay to let render finish
+        const timeoutId = setTimeout(() => {
+            animationFrameRef.current = requestAnimationFrame(scroll);
+        }, 1000);
+
+        return () => {
+            clearTimeout(timeoutId);
+            if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+        };
+    }, [status, showFallback, isOpen]);
+
+    const handleUserScrollInteraction = () => {
+        isUserInteractionRef.current = true;
+        if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+    };
+
     return (
         <AnimatePresence>
             {isOpen && (
@@ -102,7 +142,10 @@ const UpdateModal: React.FC<UpdateModalProps> = ({
                                 </div>
 
                                 {/* 2. Premium Troubleshooting Card */}
-                                <div className="w-full max-w-[360px] bg-white/[0.03] rounded-xl border border-white/[0.06] p-3.5 flex flex-col gap-2.5 text-left transition-colors mb-8 outline-none">
+                                <div
+                                    tabIndex={-1}
+                                    className="w-full max-w-[360px] bg-white/[0.03] rounded-xl border border-white/[0.06] p-3.5 flex flex-col gap-2.5 text-left mb-8 outline-none focus:outline-none focus:ring-0"
+                                >
                                     <div className="flex items-start gap-2.5">
                                         <div className="w-5 h-5 rounded-full bg-amber-500/10 flex items-center justify-center flex-shrink-0 mt-0.5">
                                             <span className="text-[10px] text-amber-500">!</span>
@@ -159,7 +202,7 @@ const UpdateModal: React.FC<UpdateModalProps> = ({
                                 </button>
                             </div>
                         ) : (
-                            <div className="p-7 pb-3 flex flex-col gap-4 h-full min-h-0">
+                            <div className="p-7 pb-4 flex flex-col gap-2 h-full min-h-0">
                                 {/* Header Group */}
                                 <div className="flex flex-col gap-0.5 text-center relative flex-shrink-0 pt-1">
                                     <h2 className="text-[19px] font-semibold text-white tracking-tight">
@@ -171,7 +214,13 @@ const UpdateModal: React.FC<UpdateModalProps> = ({
                                 </div>
 
                                 {/* Minimal List - Scrollable area */}
-                                <div className="py-2 flex-1 overflow-y-auto custom-scrollbar min-h-[120px] pr-2 -mr-2">
+                                <div
+                                    ref={scrollContainerRef}
+                                    onWheel={handleUserScrollInteraction}
+                                    onTouchMove={handleUserScrollInteraction}
+                                    onMouseDown={handleUserScrollInteraction}
+                                    className="py-2 flex-1 overflow-y-auto custom-scrollbar min-h-[120px] pr-2 -mr-2"
+                                >
                                     {showFallback ? (
                                         <p className="text-[13px] text-white/60 text-center leading-relaxed mt-8">
                                             Includes performance improvements and bug fixes.
@@ -206,7 +255,7 @@ const UpdateModal: React.FC<UpdateModalProps> = ({
                                 </div>
 
                                 {/* Footer Actions */}
-                                <div className="pt-2 flex items-center justify-between mt-2 flex-shrink-0">
+                                <div className="flex items-center justify-between flex-shrink-0">
                                     {/* Secondary Action - Left Aligned, Plain Text */}
                                     <button
                                         onClick={onDismiss}

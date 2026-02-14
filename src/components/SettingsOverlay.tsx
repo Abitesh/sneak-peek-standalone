@@ -1,14 +1,18 @@
 import React, { useState, useEffect } from 'react';
+import packageJson from '../../package.json';
 import {
     X, Mic, Speaker, Monitor, Keyboard, User, LifeBuoy, LogOut, Upload,
     ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
     Camera, RotateCcw, Eye, Layout, MessageSquare, Crop,
-    ChevronDown, Check, BadgeCheck, Power, Palette, Calendar, Ghost, Sun, Moon, RefreshCw, Info, Globe, FlaskConical, Terminal, Settings, Activity, ExternalLink, Trash2
+    ChevronDown, Check, BadgeCheck, Power, Palette, Calendar, Ghost, Sun, Moon, RefreshCw, Info, Globe, FlaskConical, Terminal, Settings, Activity, ExternalLink, Trash2,
+    Sparkles, Pencil
 } from 'lucide-react';
 import { analytics } from '../lib/analytics/analytics.service';
 import { AboutSection } from './AboutSection';
 import { AIProvidersSettings } from './settings/AIProvidersSettings';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useShortcuts } from '../hooks/useShortcuts';
+import { KeyRecorder } from './ui/KeyRecorder';
 
 interface CustomSelectProps {
     label: string;
@@ -216,6 +220,7 @@ interface SettingsOverlayProps {
 
 const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) => {
     const [activeTab, setActiveTab] = useState('general');
+    const { shortcuts, updateShortcut, resetShortcuts } = useShortcuts();
     const [isUndetectable, setIsUndetectable] = useState(false);
     const [disguiseMode, setDisguiseMode] = useState<'terminal' | 'settings' | 'activity' | 'none'>('none');
     const [openOnLogin, setOpenOnLogin] = useState(false);
@@ -1072,7 +1077,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                                         <div>
                                                             <h3 className="text-sm font-bold text-text-primary">Version</h3>
                                                             <p className="text-xs text-text-secondary mt-0.5">
-                                                                You are currently using Natively version 1.0.1.
+                                                                You are currently using Natively version {packageJson.version}
                                                             </p>
                                                         </div>
                                                     </div>
@@ -1185,10 +1190,19 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                 <AIProvidersSettings />
                             )}
                             {activeTab === 'keybinds' && (
-                                <div className="space-y-5 animated fadeIn select-text h-full flex flex-col justify-center">
-                                    <div>
-                                        <h3 className="text-lg font-bold text-text-primary mb-1">Keyboard shortcuts</h3>
-                                        <p className="text-xs text-text-secondary">Natively works with these easy to remember commands.</p>
+                                <div className="space-y-5 animated fadeIn select-text pb-4">
+                                    <div className="flex items-start justify-between">
+                                        <div>
+                                            <h3 className="text-lg font-bold text-text-primary mb-1">Keyboard shortcuts</h3>
+                                            <p className="text-xs text-text-secondary">Natively works with these easy to remember commands.</p>
+                                        </div>
+                                        <button
+                                            onClick={resetShortcuts}
+                                            className="flex items-center gap-2 px-4 py-1.5 rounded-full border border-border-subtle bg-bg-subtle/30 hover:bg-bg-subtle hover:border-green-500/30 transition-all duration-200 text-xs font-medium text-text-secondary hover:text-green-500 active:scale-95 mt-1"
+                                        >
+                                            <RotateCcw size={13} strokeWidth={2.5} />
+                                            Restore Default
+                                        </button>
                                     </div>
 
                                     <div className="grid gap-6">
@@ -1196,26 +1210,83 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                         <div>
                                             <h4 className="text-sm font-bold text-text-primary mb-3">General</h4>
                                             <div className="space-y-1">
+                                                <div className="flex items-center justify-between py-1.5 group">
+                                                    <div className="flex items-center gap-3">
+                                                        <span className="text-text-tertiary group-hover:text-text-primary transition-colors w-5 flex justify-center"><Eye size={14} /></span>
+                                                        <span className="text-sm text-text-secondary font-medium group-hover:text-text-primary transition-colors">Toggle Visibility</span>
+                                                    </div>
+                                                    <KeyRecorder
+                                                        currentKeys={shortcuts.toggleVisibility}
+                                                        onSave={(keys) => updateShortcut('toggleVisibility', keys)}
+                                                    />
+                                                </div>
+                                                <div className="flex items-center justify-between py-1.5 group">
+                                                    <div className="flex items-center gap-3">
+                                                        <span className="text-text-tertiary group-hover:text-text-primary transition-colors w-5 flex justify-center"><MessageSquare size={14} /></span>
+                                                        <span className="text-sm text-text-secondary font-medium group-hover:text-text-primary transition-colors">Process Screenshots</span>
+                                                    </div>
+                                                    <KeyRecorder
+                                                        currentKeys={shortcuts.processScreenshots}
+                                                        onSave={(keys) => updateShortcut('processScreenshots', keys)}
+                                                    />
+                                                </div>
+                                                <div className="flex items-center justify-between py-1.5 group">
+                                                    <div className="flex items-center gap-3">
+                                                        <span className="text-text-tertiary group-hover:text-text-primary transition-colors w-5 flex justify-center"><RotateCcw size={14} /></span>
+                                                        <span className="text-sm text-text-secondary font-medium group-hover:text-text-primary transition-colors">Reset / Cancel</span>
+                                                    </div>
+                                                    <KeyRecorder
+                                                        currentKeys={shortcuts.resetCancel}
+                                                        onSave={(keys) => updateShortcut('resetCancel', keys)}
+                                                    />
+                                                </div>
+                                                <div className="flex items-center justify-between py-1.5 group">
+                                                    <div className="flex items-center gap-3">
+                                                        <span className="text-text-tertiary group-hover:text-text-primary transition-colors w-5 flex justify-center"><Camera size={14} /></span>
+                                                        <span className="text-sm text-text-secondary font-medium group-hover:text-text-primary transition-colors">Take Screenshot</span>
+                                                    </div>
+                                                    <KeyRecorder
+                                                        currentKeys={shortcuts.takeScreenshot}
+                                                        onSave={(keys) => updateShortcut('takeScreenshot', keys)}
+                                                    />
+                                                </div>
+                                                <div className="flex items-center justify-between py-1.5 group">
+                                                    <div className="flex items-center gap-3">
+                                                        <span className="text-text-tertiary group-hover:text-text-primary transition-colors w-5 flex justify-center"><Crop size={14} /></span>
+                                                        <span className="text-sm text-text-secondary font-medium group-hover:text-text-primary transition-colors">Selective Screenshot</span>
+                                                    </div>
+                                                    <KeyRecorder
+                                                        currentKeys={shortcuts.selectiveScreenshot}
+                                                        onSave={(keys) => updateShortcut('selectiveScreenshot', keys)}
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Chat Category */}
+                                        <div>
+                                            <div className="mb-3">
+                                                <h4 className="text-sm font-bold text-text-primary">Chat</h4>
+                                            </div>
+                                            <div className="space-y-1">
                                                 {[
-                                                    { label: 'Toggle Visibility', keys: ['⌘', 'B'], icon: <Eye size={14} /> },
-                                                    { label: 'Show/Center Natively', keys: ['⌘', '⇧', 'Space'], icon: <Layout size={14} /> },
-                                                    { label: 'Process Screenshots', keys: ['⌘', 'Enter'], icon: <MessageSquare size={14} /> },
-                                                    { label: 'Reset / Cancel', keys: ['⌘', 'R'], icon: <RotateCcw size={14} /> },
-                                                    { label: 'Take Screenshot', keys: ['⌘', 'H'], icon: <Camera size={14} /> },
-                                                    { label: 'Selective Screenshot', keys: ['⌘', '⇧', 'H'], icon: <Crop size={14} /> },
+                                                    { id: 'whatToAnswer', label: 'What to Answer', icon: <Sparkles size={14} /> },
+                                                    { id: 'shorten', label: 'Shorten', icon: <Pencil size={14} /> },
+                                                    { id: 'followUp', label: 'Follow Up', icon: <MessageSquare size={14} /> },
+                                                    { id: 'recap', label: 'Get Recap', icon: <RefreshCw size={14} /> },
+                                                    { id: 'answer', label: 'Answer / Record', icon: <Mic size={14} /> },
+                                                    { id: 'scrollUp', label: 'Scroll Up', icon: <ArrowUp size={14} /> },
+                                                    { id: 'scrollDown', label: 'Scroll Down', icon: <ArrowDown size={14} /> },
                                                 ].map((item, i) => (
                                                     <div key={i} className="flex items-center justify-between py-1.5 group">
                                                         <div className="flex items-center gap-3">
-                                                            <span className="text-text-tertiary group-hover:text-text-primary transition-colors">{item.icon}</span>
+                                                            <span className="text-text-tertiary group-hover:text-text-primary transition-colors w-5 flex justify-center">{item.icon}</span>
                                                             <span className="text-sm text-text-secondary font-medium group-hover:text-text-primary transition-colors">{item.label}</span>
                                                         </div>
-                                                        <div className="flex items-center gap-1.5">
-                                                            {item.keys.map((k, j) => (
-                                                                <span key={j} className="bg-bg-input text-text-secondary px-2 py-1 rounded-md text-xs font-sans min-w-[24px] text-center shadow-sm border border-border-subtle">
-                                                                    {k}
-                                                                </span>
-                                                            ))}
-                                                        </div>
+                                                        <KeyRecorder
+                                                            currentKeys={shortcuts[item.id as keyof typeof shortcuts]}
+                                                            onSave={(keys) => updateShortcut(item.id as any, keys)}
+                                                        />
                                                     </div>
                                                 ))}
                                             </div>
@@ -1226,23 +1297,20 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                             <h4 className="text-sm font-bold text-text-primary mb-3">Window</h4>
                                             <div className="space-y-1">
                                                 {[
-                                                    { label: 'Move Window Up', keys: ['⌘', '↑'], icon: <ArrowUp size={14} /> },
-                                                    { label: 'Move Window Down', keys: ['⌘', '↓'], icon: <ArrowDown size={14} /> },
-                                                    { label: 'Move Window Left', keys: ['⌘', '←'], icon: <ArrowLeft size={14} /> },
-                                                    { label: 'Move Window Right', keys: ['⌘', '→'], icon: <ArrowRight size={14} /> }
+                                                    { id: 'moveWindowUp', label: 'Move Window Up', icon: <ArrowUp size={14} /> },
+                                                    { id: 'moveWindowDown', label: 'Move Window Down', icon: <ArrowDown size={14} /> },
+                                                    { id: 'moveWindowLeft', label: 'Move Window Left', icon: <ArrowLeft size={14} /> },
+                                                    { id: 'moveWindowRight', label: 'Move Window Right', icon: <ArrowRight size={14} /> }
                                                 ].map((item, i) => (
                                                     <div key={i} className="flex items-center justify-between py-1.5 group">
                                                         <div className="flex items-center gap-3">
-                                                            <span className="text-text-tertiary group-hover:text-text-primary transition-colors">{item.icon}</span>
+                                                            <span className="text-text-tertiary group-hover:text-text-primary transition-colors w-5 flex justify-center">{item.icon}</span>
                                                             <span className="text-sm text-text-secondary font-medium group-hover:text-text-primary transition-colors">{item.label}</span>
                                                         </div>
-                                                        <div className="flex items-center gap-1.5">
-                                                            {item.keys.map((k, j) => (
-                                                                <span key={j} className="bg-bg-input text-text-secondary px-2 py-1 rounded-md text-xs font-sans min-w-[24px] text-center shadow-sm border border-border-subtle">
-                                                                    {k}
-                                                                </span>
-                                                            ))}
-                                                        </div>
+                                                        <KeyRecorder
+                                                            currentKeys={shortcuts[item.id as keyof typeof shortcuts]}
+                                                            onSave={(keys) => updateShortcut(item.id as any, keys)}
+                                                        />
                                                     </div>
                                                 ))}
                                             </div>
@@ -1345,8 +1413,13 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                             {sttProvider !== 'google' && (
                                                 <div className="bg-bg-card rounded-xl border border-border-subtle p-4 space-y-3">
                                                     <label className="text-xs font-medium text-text-secondary block">
-                                                        {sttProvider === 'groq' ? 'Groq' : sttProvider === 'openai' ? 'OpenAI' : sttProvider === 'elevenlabs' ? 'ElevenLabs' : sttProvider === 'azure' ? 'Azure' : sttProvider === 'ibmwatson' ? 'IBM Watson' : 'Deepgram'} API Key
+                                                        {sttProvider === 'groq' ? 'Groq' : sttProvider === 'openai' ? 'OpenAI STT' : sttProvider === 'elevenlabs' ? 'ElevenLabs' : sttProvider === 'azure' ? 'Azure' : sttProvider === 'ibmwatson' ? 'IBM Watson' : 'Deepgram'} API Key
                                                     </label>
+                                                    {sttProvider === 'openai' && (
+                                                        <p className="text-[10px] text-text-tertiary mb-1.5">
+                                                            This key is separate from your main AI Provider key.
+                                                        </p>
+                                                    )}
                                                     <div className="flex gap-2">
                                                         <input
                                                             type="password"
@@ -1370,7 +1443,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                                                 sttProvider === 'groq'
                                                                     ? (hasStoredSttGroqKey ? '••••••••••••' : 'Enter Groq API key')
                                                                     : sttProvider === 'openai'
-                                                                        ? (hasStoredSttOpenaiKey ? '••••••••••••' : 'Enter OpenAI API key')
+                                                                        ? (hasStoredSttOpenaiKey ? '••••••••••••' : 'Enter OpenAI STT API key')
                                                                         : sttProvider === 'elevenlabs'
                                                                             ? (hasStoredElevenLabsKey ? '••••••••••••' : 'Enter ElevenLabs API key')
                                                                             : sttProvider === 'azure'

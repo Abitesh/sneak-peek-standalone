@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.6] - 2026-02-15
+
+### New Features
+- **Speech Providers**: Added support for multiple speech providers including Google, Groq, OpenAI, Deepgram, ElevenLabs, Azure, and IBM Watson.
+- **Custom Key Bindings**: Added ability to customize global shortcuts for easier control.
+- **Stealth Mode Improvements**: Enhanced disguise modes (Terminal, Settings, Activity Monitor) for better privacy.
+- **Markdown Support**: Improved Markdown rendering in the Usage section for better readability of AI responses.
+- **Image Processing**: Integrated `sharp` for optimized image handling and faster analysis.
+
+### Improvements & Fixes
+- Fixed various UI bugs and focus stealing issues.
+- Improved application stability and performance.
+
 ## [1.1.5] - 2026-02-13
 
 ### Summary

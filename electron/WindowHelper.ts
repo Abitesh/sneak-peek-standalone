@@ -170,9 +170,9 @@ export class WindowHelper {
       console.error(`[WindowHelper] did-fail-load: ${errorCode} ${errorDescription}`);
     });
 
-    if (isDev) {
-      this.launcherWindow.webContents.openDevTools({ mode: 'detach' }); // DEBUG: Open DevTools
-    }
+    // if (isDev) {
+    //   this.launcherWindow.webContents.openDevTools({ mode: 'detach' }); // DEBUG: Open DevTools
+    // }
 
     // --- 2. Create Overlay Window (Hidden initially) ---
     const overlaySettings: Electron.BrowserWindowConstructorOptions = {
@@ -303,6 +303,10 @@ export class WindowHelper {
     }
   }
 
+  public toggleOverlayWindow(): void {
+    this.toggleMainWindow();
+  }
+
   public centerAndShowWindow(): void {
     // Default to launcher
     this.switchToLauncher();
@@ -325,7 +329,7 @@ export class WindowHelper {
       const y = Math.floor((workArea.height - 600) / 2)
 
       // Only reset if not already positioned? existing logic used to remember but let's reset for predictability
-      this.overlayWindow.setBounds({ x, y, width: 600, height: 600 });
+      this.overlayWindow.setBounds({ x, y, width: 600, height: 216 });
 
       this.overlayWindow.show();
       this.overlayWindow.focus();

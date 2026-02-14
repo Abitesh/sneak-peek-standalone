@@ -89,6 +89,19 @@ export function initializeIpcHandlers(appState: AppState): void {
     }
   })
 
+  safeHandle("take-selective-screenshot", async () => {
+    try {
+      const screenshotPath = await appState.takeSelectiveScreenshot()
+      const preview = await appState.getImagePreview(screenshotPath)
+      return { path: screenshotPath, preview }
+    } catch (error) {
+      if (error.message === "Selection cancelled") {
+        return { cancelled: true }
+      }
+      throw error
+    }
+  })
+
   safeHandle("get-screenshots", async () => {
     // console.log({ view: appState.getView() })
     try {
@@ -140,6 +153,28 @@ export function initializeIpcHandlers(appState: AppState): void {
     }
   })
 
+  // Donation IPC Handlers
+  safeHandle("get-donation-status", async () => {
+    const { DonationManager } = require('./DonationManager');
+    const manager = DonationManager.getInstance();
+    return {
+      shouldShow: manager.shouldShowToaster(),
+      hasDonated: manager.getDonationState().hasDonated,
+      lifetimeShows: manager.getDonationState().lifetimeShows
+    };
+  });
+
+  safeHandle("mark-donation-toast-shown", async () => {
+    const { DonationManager } = require('./DonationManager');
+    DonationManager.getInstance().markAsShown();
+    return { success: true };
+  });
+
+  safeHandle("set-donation-complete", async () => {
+    const { DonationManager } = require('./DonationManager');
+    DonationManager.getInstance().setHasDonated(true);
+    return { success: true };
+  });
 
 
   // Generate suggestion from transcript - Natively-style text-only reasoning
@@ -392,6 +427,16 @@ export function initializeIpcHandlers(appState: AppState): void {
       return { success };
     } catch (error: any) {
       return { success: false, error: error.message };
+    }
+  });
+
+  safeHandle("ensure-ollama-running", async () => {
+    try {
+      const llmHelper = appState.processingHelper.getLLMHelper();
+      const result = await llmHelper.ensureOllamaRunning();
+      return result;
+    } catch (error: any) {
+      return { success: false, message: error.message };
     }
   });
 

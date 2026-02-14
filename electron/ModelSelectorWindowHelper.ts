@@ -7,6 +7,8 @@ const startUrl = isDev
     ? "http://localhost:5180"
     : `file://${path.join(__dirname, "../dist/index.html")}`
 
+import type { WindowHelper } from "./WindowHelper"
+
 export class ModelSelectorWindowHelper {
     private window: BrowserWindow | null = null
 
@@ -15,6 +17,12 @@ export class ModelSelectorWindowHelper {
     private ignoreBlur: boolean = false;
 
     constructor() { }
+
+    private windowHelper: WindowHelper | null = null;
+
+    public setWindowHelper(wh: WindowHelper): void {
+        this.windowHelper = wh;
+    }
 
     public getWindow(): BrowserWindow | null {
         return this.window
@@ -32,8 +40,23 @@ export class ModelSelectorWindowHelper {
             return
         }
 
-        // Standard dropdown positioning: top-left of window at (x, y)
-        // Or centered if needed. For now, assume (x, y) is the bottom-left of the button.
+        // Set parent and align window settings
+        const mainWin = this.windowHelper?.getMainWindow();
+        const isOverlay = mainWin === this.windowHelper?.getOverlayWindow();
+
+        if (mainWin && !mainWin.isDestroyed()) {
+            this.window.setParentWindow(mainWin);
+        }
+
+        if (process.platform === "darwin") {
+            // Align with parent window behavior
+            this.window.setVisibleOnAllWorkspaces(isOverlay, { visibleOnFullScreen: isOverlay });
+            this.window.setAlwaysOnTop(isOverlay, "floating");
+            // Always hide from MC as it's a dropdown
+            this.window.setHiddenInMissionControl(true);
+        }
+
+        // Standard dropdown positioning
         this.window.setPosition(Math.round(x), Math.round(y))
 
         this.ensureVisibleOnScreen();
@@ -43,7 +66,14 @@ export class ModelSelectorWindowHelper {
 
     public hideWindow(): void {
         if (this.window && !this.window.isDestroyed()) {
+            this.window.setParentWindow(null);
             this.window.hide()
+
+            // Restore focus
+            const mainWin = this.windowHelper?.getMainWindow();
+            if (mainWin && !mainWin.isDestroyed() && mainWin.isVisible()) {
+                mainWin.focus();
+            }
         }
     }
 
@@ -55,7 +85,7 @@ export class ModelSelectorWindowHelper {
             }
 
             if (this.window.isVisible()) {
-                this.window.hide()
+                this.hideWindow()
             } else {
                 this.showWindow(x, y)
             }
@@ -97,9 +127,8 @@ export class ModelSelectorWindowHelper {
         this.window = new BrowserWindow(windowSettings)
 
         if (process.platform === "darwin") {
-            this.window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+            // Initial defaults - will be updated in showWindow
             this.window.setHiddenInMissionControl(true)
-            this.window.setAlwaysOnTop(true, "floating")
         }
 
         // Load with query param for routing

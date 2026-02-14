@@ -12,7 +12,7 @@ interface ModelOption {
 
 
 const ModelSelectorWindow = () => {
-    const [currentModel, setCurrentModel] = useState<string>('');
+    const [currentModel, setCurrentModel] = useState<string>(() => localStorage.getItem('cached-current-model') || '');
     const [availableModels, setAvailableModels] = useState<ModelOption[]>(() => {
         try {
             const cached = localStorage.getItem('cached-models');
@@ -28,7 +28,10 @@ const ModelSelectorWindow = () => {
     // Load Data
     useEffect(() => {
         const loadModels = async () => {
-            setIsLoading(true);
+            // Only show loader if we don't have cached models
+            if (availableModels.length === 0) {
+                setIsLoading(true);
+            }
             try {
                 // 1. Get Stored Credentials (to know which Cloud providers are active)
                 // @ts-ignore
@@ -107,6 +110,7 @@ const ModelSelectorWindow = () => {
                 const config = await window.electronAPI?.invoke('get-current-llm-config'); // Get runtime model
                 if (config && config.model) {
                     setCurrentModel(config.model);
+                    localStorage.setItem('cached-current-model', config.model);
                 }
 
             } catch (err) {
@@ -128,6 +132,7 @@ const ModelSelectorWindow = () => {
 
     const handleSelectFn = (modelId: string) => {
         setCurrentModel(modelId);
+        localStorage.setItem('cached-current-model', modelId);
         // @ts-ignore - this will set model + close window
         window.electronAPI?.invoke('set-model', modelId)
             .catch((err: any) => console.error("Failed to set model:", err));

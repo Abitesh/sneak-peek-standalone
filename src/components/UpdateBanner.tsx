@@ -56,14 +56,14 @@ const UpdateBanner: React.FC = () => {
 
                 // Call the new test method
                 window.electronAPI.testReleaseFetch()
-                    .then(result => {
+                    .then((result: { success: boolean; error?: string }) => {
                         if (result.success) {
                             console.log("[UpdateBanner] Test fetch successful");
                         } else {
                             console.error("[UpdateBanner] Test fetch failed:", result.error);
                         }
                     })
-                    .catch(err => console.error("[UpdateBanner] Test fetch error:", err));
+                    .catch((err: any) => console.error("[UpdateBanner] Test fetch error:", err));
             }
         };
         window.addEventListener('keydown', handleKeyDown);

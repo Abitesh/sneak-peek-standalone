@@ -30,6 +30,7 @@ interface ElectronAPI {
   onUnauthorized: (callback: () => void) => () => void
   onDebugError: (callback: (error: string) => void) => () => void
   takeScreenshot: () => Promise<void>
+  takeSelectiveScreenshot: () => Promise<{ path: string; preview: string; cancelled?: boolean }>
   moveWindowLeft: () => Promise<void>
   moveWindowRight: () => Promise<void>
   moveWindowUp: () => Promise<void>
@@ -157,6 +158,17 @@ interface ElectronAPI {
   onRAGStreamChunk: (callback: (data: { meetingId?: string; global?: boolean; chunk: string }) => void) => () => void
   onRAGStreamComplete: (callback: (data: { meetingId?: string; global?: boolean }) => void) => () => void
   onRAGStreamError: (callback: (data: { meetingId?: string; global?: boolean; error: string }) => void) => () => void
+
+  // Keybind Management
+  getKeybinds: () => Promise<Array<{ id: string; label: string; accelerator: string; isGlobal: boolean; defaultAccelerator: string }>>
+  setKeybind: (id: string, accelerator: string) => Promise<boolean>
+  resetKeybinds: () => Promise<Array<{ id: string; label: string; accelerator: string; isGlobal: boolean; defaultAccelerator: string }>>
+  onKeybindsUpdate: (callback: (keybinds: Array<any>) => void) => () => void
+
+  // Donation API
+  getDonationStatus: () => Promise<{ shouldShow: boolean; hasDonated: boolean; lifetimeShows: number }>;
+  markDonationToastShown: () => Promise<{ success: boolean }>;
+  setDonationComplete: () => Promise<{ success: boolean }>;
 }
 
 export const PROCESSING_EVENTS = {
@@ -182,6 +194,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke("update-content-dimensions", dimensions),
   getRecognitionLanguages: () => ipcRenderer.invoke("get-recognition-languages"),
   takeScreenshot: () => ipcRenderer.invoke("take-screenshot"),
+  takeSelectiveScreenshot: () => ipcRenderer.invoke("take-selective-screenshot"),
   getScreenshots: () => ipcRenderer.invoke("get-screenshots"),
   deleteScreenshot: (path: string) =>
     ipcRenderer.invoke("delete-screenshot", path),
@@ -702,4 +715,21 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.removeListener('rag:stream-error', subscription)
     }
   },
+
+  // Keybind Management
+  getKeybinds: () => ipcRenderer.invoke('keybinds:get-all'),
+  setKeybind: (id: string, accelerator: string) => ipcRenderer.invoke('keybinds:set', id, accelerator),
+  resetKeybinds: () => ipcRenderer.invoke('keybinds:reset'),
+  onKeybindsUpdate: (callback: (keybinds: Array<any>) => void) => {
+    const subscription = (_: any, keybinds: any) => callback(keybinds)
+    ipcRenderer.on('keybinds:update', subscription)
+    return () => {
+      ipcRenderer.removeListener('keybinds:update', subscription)
+    }
+  },
+
+  // Donation API
+  getDonationStatus: () => ipcRenderer.invoke("get-donation-status"),
+  markDonationToastShown: () => ipcRenderer.invoke("mark-donation-toast-shown"),
+  setDonationComplete: () => ipcRenderer.invoke('set-donation-complete'),
 } as ElectronAPI)

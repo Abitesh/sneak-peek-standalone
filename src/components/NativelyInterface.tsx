@@ -39,6 +39,7 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { analytics, detectProviderType } from '../lib/analytics/analytics.service';
+import { useShortcuts } from '../hooks/useShortcuts';
 
 interface Message {
     id: string;
@@ -58,6 +59,7 @@ interface NativelyInterfaceProps {
 const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) => {
     const [isExpanded, setIsExpanded] = useState(true);
     const [inputValue, setInputValue] = useState('');
+    const { shortcuts, isShortcutPressed } = useShortcuts();
     const [messages, setMessages] = useState<Message[]>([]);
     const [isConnected, setIsConnected] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
@@ -92,6 +94,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) =
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const contentRef = useRef<HTMLDivElement>(null);
+    const scrollContainerRef = useRef<HTMLDivElement>(null);
     // const settingsButtonRef = useRef<HTMLButtonElement>(null);
 
     // Latent Context State (Screenshot attached but not sent)
@@ -1256,6 +1259,141 @@ Provide only the answer, nothing else.`;
         );
     };
 
+
+    // Keyboard Shortcuts
+
+    // Keyboard Shortcuts
+    // We use a ref to hold the latest handlers to avoid re-binding the event listener on every render
+    const handlersRef = useRef({
+        handleWhatToSay,
+        handleFollowUp,
+        handleFollowUpQuestions,
+        handleRecap,
+        handleAnswerNow
+    });
+
+    // Update ref on every render so the event listener always access latest state/props
+    handlersRef.current = {
+        handleWhatToSay,
+        handleFollowUp,
+        handleFollowUpQuestions,
+        handleRecap,
+        handleAnswerNow
+    };
+
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            const { handleWhatToSay, handleFollowUp, handleFollowUpQuestions, handleRecap, handleAnswerNow } = handlersRef.current;
+
+            // Chat Shortcuts (Scope: Local to Chat/Overlay usually, but we allow them here if focused)
+            if (isShortcutPressed(e, 'whatToAnswer')) {
+                e.preventDefault();
+                handleWhatToSay();
+            } else if (isShortcutPressed(e, 'shorten')) {
+                e.preventDefault();
+                handleFollowUp('shorten');
+            } else if (isShortcutPressed(e, 'followUp')) {
+                e.preventDefault();
+                handleFollowUpQuestions();
+            } else if (isShortcutPressed(e, 'recap')) {
+                e.preventDefault();
+                handleRecap();
+            } else if (isShortcutPressed(e, 'answer')) {
+                e.preventDefault();
+                handleAnswerNow();
+            } else if (isShortcutPressed(e, 'scrollUp')) {
+                e.preventDefault();
+                scrollContainerRef.current?.scrollBy({ top: -100, behavior: 'smooth' });
+            } else if (isShortcutPressed(e, 'scrollDown')) {
+                e.preventDefault();
+                scrollContainerRef.current?.scrollBy({ top: 100, behavior: 'smooth' });
+            } else if (isShortcutPressed(e, 'moveWindowUp') || isShortcutPressed(e, 'moveWindowDown')) {
+                // Prevent default scrolling when moving window
+                e.preventDefault();
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [isShortcutPressed]);
+
+    // General Global Shortcuts (Rebindable)
+    // We listen here to handle them when the window is focused (renderer side)
+    // Global shortcuts (when window blurred) are handled by Main process -> GlobalShortcuts
+    // But Main process events might not reach here if we don't listen, or we want unified handling.
+    // Actually, KeybindManager registers global shortcuts. If they are registered as global, 
+    // Electron might consume them before they reach here?
+    // 'toggle-app' is Global.
+    // 'toggle-visibility' is NOT Global in default config (isGlobal: false), so it depends on focus.
+    // So we MUST listen for them here.
+
+    const generalHandlersRef = useRef({
+        toggleVisibility: () => window.electronAPI.toggleWindow(),
+        processScreenshots: handleWhatToSay,
+        resetCancel: async () => {
+            if (isProcessing) {
+                setIsProcessing(false);
+            } else {
+                await window.electronAPI.resetIntelligence();
+                setMessages([]);
+                setAttachedContext(null);
+                setInputValue('');
+            }
+        },
+        takeScreenshot: () => window.electronAPI.takeScreenshot(),
+        selectiveScreenshot: () => window.electronAPI.takeSelectiveScreenshot()
+    });
+
+    // Update ref
+    generalHandlersRef.current = {
+        toggleVisibility: () => window.electronAPI.toggleWindow(),
+        processScreenshots: handleWhatToSay,
+        resetCancel: async () => {
+            if (isProcessing) {
+                setIsProcessing(false);
+            } else {
+                await window.electronAPI.resetIntelligence();
+                setMessages([]);
+                setAttachedContext(null);
+                setInputValue('');
+            }
+        },
+        takeScreenshot: () => window.electronAPI.takeScreenshot(),
+        selectiveScreenshot: () => window.electronAPI.takeSelectiveScreenshot()
+    };
+
+    useEffect(() => {
+        const handleGeneralKeyDown = (e: KeyboardEvent) => {
+            const handlers = generalHandlersRef.current;
+            const target = e.target as HTMLElement;
+            const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+
+            if (isShortcutPressed(e, 'toggleVisibility')) {
+                // Always allow toggling visibility
+                e.preventDefault();
+                handlers.toggleVisibility();
+            } else if (isShortcutPressed(e, 'processScreenshots')) {
+                if (!isInput) {
+                    e.preventDefault();
+                    handlers.processScreenshots();
+                }
+                // If input focused, let default behavior (Enter) happen or handle it via onKeyDown in Input
+            } else if (isShortcutPressed(e, 'resetCancel')) {
+                e.preventDefault();
+                handlers.resetCancel();
+            } else if (isShortcutPressed(e, 'takeScreenshot')) {
+                e.preventDefault();
+                handlers.takeScreenshot();
+            } else if (isShortcutPressed(e, 'selectiveScreenshot')) {
+                e.preventDefault();
+                handlers.selectiveScreenshot();
+            }
+        };
+
+        window.addEventListener('keydown', handleGeneralKeyDown);
+        return () => window.removeEventListener('keydown', handleGeneralKeyDown);
+    }, [isShortcutPressed]);
+
     return (
         <div ref={contentRef} className="flex flex-col items-center w-fit mx-auto h-fit min-h-0 bg-transparent p-0 rounded-[24px] font-sans text-slate-200 gap-2">
 
@@ -1298,7 +1436,7 @@ Provide only the answer, nothing else.`;
 
                             {/* Chat History - Only show if there are messages OR active states */}
                             {(messages.length > 0 || isManualRecording || isProcessing) && (
-                                <div className="flex-1 overflow-y-auto p-4 space-y-3 max-h-[clamp(300px,35vh,450px)]" style={{ scrollbarWidth: 'none' }}>
+                                <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-4 space-y-3 max-h-[clamp(300px,35vh,450px)] no-drag" style={{ scrollbarWidth: 'none' }}>
                                     {messages.map((msg) => (
                                         <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in-up`}>
                                             <div className={`
@@ -1466,11 +1604,14 @@ Provide only the answer, nothing else.`;
                                         <div className="absolute left-3 top-1/2 -translate-y-1/2 flex items-center gap-1.5 pointer-events-none text-[13px] text-slate-400">
                                             <span>Ask anything on screen or conversation, or</span>
                                             <div className="flex items-center gap-1 opacity-80">
-                                                <kbd className="px-1.5 py-0.5 rounded border border-white/10 bg-white/5 text-[10px] font-sans">⌘</kbd>
-                                                <span className="text-[10px]">+</span>
-                                                <kbd className="px-1.5 py-0.5 rounded border border-white/10 bg-white/5 text-[10px] font-sans">H</kbd>
+                                                {(shortcuts.selectiveScreenshot || ['⌘', 'Shift', 'H']).map((key, i) => (
+                                                    <React.Fragment key={i}>
+                                                        {i > 0 && <span className="text-[10px]">+</span>}
+                                                        <kbd className="px-1.5 py-0.5 rounded border border-white/10 bg-white/5 text-[10px] font-sans min-w-[20px] text-center">{key}</kbd>
+                                                    </React.Fragment>
+                                                ))}
                                             </div>
-                                            <span>for screenshot</span>
+                                            <span>for selective screenshot</span>
                                         </div>
                                     )}
 

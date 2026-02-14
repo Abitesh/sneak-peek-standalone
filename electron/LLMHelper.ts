@@ -1745,6 +1745,42 @@ ANSWER DIRECTLY:`;
     }
   }
 
+  /**
+   * Smart Startup: Check if running -> Connect. If not -> Start.
+   */
+  public async ensureOllamaRunning(): Promise<{ success: boolean; message: string }> {
+    try {
+      // 1. Fast Check
+      const isRunning = await this.checkOllamaAvailable();
+      if (isRunning) {
+        console.log("[LLMHelper] Ollama is already running. Connecting immediately.");
+        return { success: true, message: "already-running" };
+      }
+
+      // 2. Not running - Start it
+      console.log("[LLMHelper] Ollama not detected. Starting 'ollama serve'...");
+      const child = exec('ollama serve');
+      child.unref(); // Detach process so it persists
+
+      // 3. Wait/Poll for it to come up (max 5s)
+      for (let i = 0; i < 10; i++) {
+        await this.delay(500); // 500ms * 10 = 5s
+        const available = await this.checkOllamaAvailable();
+        if (available) {
+          console.log("[LLMHelper] Ollama started successfully.");
+          return { success: true, message: "started" };
+        }
+      }
+
+      console.warn("[LLMHelper] Ollama started but did not respond within 5s.");
+      return { success: false, message: "timeout" };
+
+    } catch (error: any) {
+      console.error("[LLMHelper] Failed to ensure Ollama running:", error);
+      return { success: false, message: error.message };
+    }
+  }
+
   public getCurrentProvider(): "ollama" | "gemini" | "custom" {
     if (this.customProvider) return "custom";
     return this.useOllama ? "ollama" : "gemini";

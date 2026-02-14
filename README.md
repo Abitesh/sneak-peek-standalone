@@ -42,8 +42,8 @@ This demo shows **a complete live meeting scenario**:
 
 Download the latest prebuilt version from **[Releases](https://github.com/evinjohnn/natively-cluely-ai-assistant/releases)**.
 
-### [Windows (v1.1.2)](https://github.com/evinjohnn/natively-cluely-ai-assistant/releases/tag/v1.1.2)
-### [macOS (v1.1.5)](https://github.com/evinjohnn/natively-cluely-ai-assistant/releases/tag/v1.1.5)
+### [Windows (v1.1.6)](https://github.com/evinjohnn/natively-cluely-ai-assistant/releases/tag/v1.1.6)
+### [macOS (v1.1.6)](https://github.com/evinjohnn/natively-cluely-ai-assistant/releases/tag/v1.1.6)
 
 No build steps required.
 
@@ -57,15 +57,13 @@ No build steps required.
 >     ```
 >     *(Or point to wherever you installed the app)*
 
-### What's New in v1.1.5
-- **Expanded Speech Providers:** Native support for Deepgram, Groq, and OpenAI.
-- **Custom LLM Providers:** Connect to any OpenAI-compatible API (OpenRouter, DeepSeek) using cURL.
-- **Smart Local AI:** Auto-detection of available Ollama models.
-- **Global Spotlight Search:** Toggle chat overlay with Cmd+K (macOS) or Ctrl+K (Windows/Linux).
-- **Masquerading:** Disguise as system processes like Terminal or Activity Monitor.
-- **Stealth Mode:** Improved activation and window focus transitions.
-- **Refined Persona:** System prompts updated for concise, human-like responses.
-- **Performance:** Better UI scaling and reduced STT latency.
+### What's New in v1.1.6
+- **Expanded Speech Providers:** Support for **Google, Groq, OpenAI, Deepgram, ElevenLabs, Azure, and IBM Watson**.
+- **Custom Key Bindings:** Fully customizable global shortcuts.
+- **Stealth Mode 2.0:** Enhanced masquerading (Terminal, Activity Monitor) and "undetectable" dock mode.
+- **Markdown Rendering:** Improved formatting for AI responses in the Usage section.
+- **Performance:** Optimized image analysis with `sharp` and faster UI transitions.
+- **UI Polish:** Fixed focus stealing bugs and refined visual details.
 
 ---
 

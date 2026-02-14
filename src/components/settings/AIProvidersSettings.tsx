@@ -145,8 +145,39 @@ export const AIProvidersSettings: React.FC = () => {
         loadCredentials();
     }, []);
 
+    // Poll for Ollama status every 3 seconds requesting smart start on mount
+    useEffect(() => {
+        // Immediate "Smart Start" check
+        ensureOllamaStartup();
+
+        // Background polling for maintenance
+        const interval = setInterval(() => {
+            checkOllama(false);
+        }, 3000);
+        return () => clearInterval(interval);
+    }, []);
+
+    const ensureOllamaStartup = async () => {
+        setOllamaStatus('checking');
+        try {
+            // @ts-ignore
+            const result = await window.electronAPI?.invoke('ensure-ollama-running');
+            if (result && result.success) {
+                // It's running (or just started), now fetch models
+                checkOllama(true);
+            } else {
+                setOllamaStatus('not-found');
+            }
+        } catch (e) {
+            console.warn("Ollama ensure startup failed:", e);
+            setOllamaStatus('not-found');
+        }
+    };
+
     const checkOllama = async (isInitial = true) => {
-        if (isInitial) setOllamaStatus('checking');
+        // Don't override 'checking' if we are already in smart-start mode
+        // if (isInitial) setOllamaStatus('checking'); 
+
         try {
             // @ts-ignore
             const models = await window.electronAPI?.invoke('get-available-ollama-models');
@@ -154,17 +185,15 @@ export const AIProvidersSettings: React.FC = () => {
                 setOllamaModels(models);
                 setOllamaStatus('detected');
             } else {
-                if (isInitial && !ollamaRestarted) {
-                    handleFixOllama();
-                } else {
+                // Silent failure on background checks
+                // Only set not-found if we haven't detected it yet
+                if (ollamaStatus !== 'detected') {
                     setOllamaStatus('not-found');
                 }
             }
         } catch (e) {
-            console.warn("Ollama check failed:", e);
-            if (isInitial && !ollamaRestarted) {
-                handleFixOllama();
-            } else {
+            // console.warn(`Ollama check failed:`, e);
+            if (ollamaStatus !== 'detected') {
                 setOllamaStatus('not-found');
             }
         }

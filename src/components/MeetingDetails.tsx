@@ -18,6 +18,12 @@ const formatDuration = (ms: number) => {
     return `${minutes}:${Number(seconds) < 10 ? '0' : ''}${seconds}`;
 };
 
+const cleanMarkdown = (content: string) => {
+    if (!content) return '';
+    // Ensure code blocks are on new lines to fix rendering issues
+    return content.replace(/([^\n])```/g, '$1\n\n```');
+};
+
 interface Meeting {
     id: string;
     title: string;
@@ -443,7 +449,7 @@ ${meeting.detailedSummary.keyPoints?.map(item => `- ${item}`).join('\n') || 'Non
                                                                 }
                                                             }}
                                                         >
-                                                            {interaction.answer}
+                                                            {cleanMarkdown(interaction.answer || '')}
                                                         </ReactMarkdown>
                                                     </div>
                                                 </div>
