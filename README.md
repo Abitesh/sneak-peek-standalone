@@ -58,12 +58,12 @@ No build steps required.
 >     *(Or point to wherever you installed the app)*
 
 ### What's New in v1.1.6
-- **Expanded Speech Providers:** Support for **Google, Groq, OpenAI, Deepgram, ElevenLabs, Azure, and IBM Watson**.
-- **Custom Key Bindings:** Fully customizable global shortcuts.
+- **Expanded Speech Providers:** First-class support for **Google, Groq, OpenAI, Deepgram, ElevenLabs, Azure, and IBM Watson**.
+- **Custom Key Bindings:** Fully customizable global shortcuts for window actions.
 - **Stealth Mode 2.0:** Enhanced masquerading (Terminal, Activity Monitor) and "undetectable" dock mode.
-- **Markdown Rendering:** Improved formatting for AI responses in the Usage section.
-- **Performance:** Optimized image analysis with `sharp` and faster UI transitions.
-- **UI Polish:** Fixed focus stealing bugs and refined visual details.
+- **Markdown Rendering:** Improved formatting and code highlighting in the Usage View.
+- **Performance:** Optimized image analysis with `sharp` and lower latency interactions.
+- **Models:** Support for **Gemini 3**, **GPT-5.2**, **Groq Llama 3.3**, **Claude 4.5** or any other LLM provider.
 
 ---
 
@@ -146,13 +146,32 @@ You explicitly control:
 - Git
 - Rust (required for native audio capture)
 
-### AI Credentials
-- Google Gemini API Key
-- Google Cloud Service Account (required for speech-to-text)
+### AI Credentials & Speech Providers
+
+**Natively is 100% free to use with your own keys.**  
+Connect **any** speech provider and **any** LLM. No subscriptions, no markups, no hidden fees. All keys are stored locally.
+
+### Supported Speech Providers
+- **Google Cloud Speech-to-Text** (Service Account)
+- **Groq** (API Key)
+- **OpenAI Whisper** (API Key)
+- **Deepgram** (API Key)
+- **ElevenLabs** (API Key)
+- **Azure Speech Services** (API Key + Region)
+- **IBM Watson** (API Key + Region)
+
+### Supported LLM Providers
+- **Google Gemini**
+- **OpenAI**
+- **Anthropic Claude**
+- **Groq**
+- **Ollama (Local)**
+- **Custom OpenAI-compatible Endpoints**
+
+> **Note:** You only need ONE speech provider to get started. We recommend **Groq** or **Deepgram** for the fastest real-time performance.  
 
 ---
-
-## Bring Your Own Google Speech-to-Text (Required)
+#### Bring Your Own Google Speech-to-Text (Required)
 
 **Important:**  
 Natively relies on **Google Speech-to-Text** for real-time transcription.  
@@ -175,7 +194,7 @@ Your credentials:
 3. Create a Service Account  
 4. Assign role: `roles/speech.client`  
 5. Generate and download a JSON key  
-6. Point Natively to the JSON file in settings  
+6. Point Natively to the JSON file in settings 
 
 ---
 
@@ -203,10 +222,21 @@ OPENAI_API_KEY=your_key
 CLAUDE_API_KEY=your_key
 GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/to/service-account.json
 
+# Speech Providers (Optional - only one needed)
+DEEPGRAM_API_KEY=your_key
+ELEVENLABS_API_KEY=your_key
+AZURE_SPEECH_KEY=your_key
+AZURE_SPEECH_REGION=eastus
+IBM_WATSON_API_KEY=your_key
+IBM_WATSON_REGION=us-south
+
 # Local AI (Ollama)
 USE_OLLAMA=true
 OLLAMA_MODEL=llama3.2
 OLLAMA_URL=http://localhost:11434
+
+# Default Model Configuration
+DEFAULT_MODEL=gemini-3-flash-preview
 ```
 
 ### Run (Development)
@@ -297,16 +327,18 @@ npm run dist
 
 ## Comparison
 
-| Feature | Natively | Commercial Tools | Other OSS |
+**Natively is built on a simple promise: Any speech provider, any API key, 100% free to use, and universally compatible.**
+
+| Feature | Natively | Commercial Tools (Cluely, etc.) | Other OSS |
 | :--- | :--- | :--- | :--- |
-| **Price** | **Free** | Paid | Free |
-| **Open Source** | **Yes** | No | Partial |
-| **Local AI** | **Yes** | No | Limited |
-| **Privacy-First** | **Yes** | No | Depends |
-| **Real-Time Focus** | **Yes** | Partial | Rare |
-| **Rolling Context** | **Yes** | Limited | No |
-| **Screenshot Analysis** | **Yes** | Limited | Rare |
-| **Always-On-Top UI** | **Yes** | No | No |
+| **Price** | **Free (BYOK)** | $20 - $50 / month | Free |
+| **Speech Providers** | **Any (Google, Groq, Deepgram, etc.)** | Locked to Vendor | Limited |
+| **LLM Choice** | **Any (Local or Cloud)** | Locked to Vendor | Limited |
+| **Privacy** | **Local-First & Private** | Data stored on servers | Depends |
+| **Latency** | **Real-Time (<500ms)** | Variable | Often Slow |
+| **Universal Mode** | **Works over ANY app** | often limited to browser | No |
+| **Screenshot Analysis** | **Yes (Native)** | Limited | Rare |
+| **Stealth Mode** | **Yes (Undetectable)** | No | No |
 
 ---
 
@@ -327,7 +359,7 @@ No raw audio, screenshots, or transcripts are stored or transmitted unless expli
 - **SQLite** (local storage)
 
 ### Supported Models
-- **Gemini 3.0** (Flash / Pro)
+- **Gemini 3** (Flash / Pro)
 - **OpenAI** (GPT-5.2)
 - **Claude** (Sonnet 4.5)
 - **Ollama** (Llama, Mistral, CodeLlama)
@@ -358,8 +390,6 @@ This project does not encourage misuse or deception.
 ---
 
 ## Known Limitations
-
-- Requires Google Speech-to-Text for live transcription
 - Linux support is limited and looking for maintainers
 
 ---
