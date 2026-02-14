@@ -63,7 +63,7 @@ export const AboutSection: React.FC<AboutSectionProps> = () => {
             <div>
                 <h4 className="text-xs font-bold text-text-tertiary uppercase tracking-wider mb-2 px-1">How Natively Works</h4>
                 <div className="bg-bg-item-surface rounded-xl border border-border-subtle overflow-hidden">
-                    <div className="p-5 border-b border-border-subtle bg-bg-card/50">
+                    <div className="p-3 border-b border-border-subtle bg-bg-card/50">
                         <div className="flex items-start gap-4">
                             <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-400 shrink-0">
                                 <Cpu size={20} />
@@ -71,21 +71,21 @@ export const AboutSection: React.FC<AboutSectionProps> = () => {
                             <div>
                                 <h5 className="text-sm font-bold text-text-primary mb-1">Hybrid Intelligence</h5>
                                 <p className="text-xs text-text-secondary leading-relaxed">
-                                    Natively routes queries between <span className="text-text-primary font-medium">Groq</span> for near-instant responses and <span className="text-text-primary font-medium">Google Gemini</span> for complex reasoning. Audio is processed via Google Speech-to-Text for enterprise-grade accuracy.
+                                    Seamlessly routes queries between ultra-fast models for instant speed and reasoning models (Gemini, OpenAI, Claude) for complex tasks. Powered by enterprise-grade speech recognition from 7+ providers.
                                 </p>
                             </div>
                         </div>
                     </div>
 
-                    <div className="p-5 bg-bg-card/50">
+                    <div className="p-3 bg-bg-card/50">
                         <div className="flex items-start gap-4">
                             <div className="w-10 h-10 rounded-lg bg-purple-500/10 flex items-center justify-center text-purple-400 shrink-0">
                                 <Database size={20} />
                             </div>
                             <div>
-                                <h5 className="text-sm font-bold text-text-primary mb-1">Context Awareness (RAG)</h5>
+                                <h5 className="text-sm font-bold text-text-primary mb-1">Local RAG & Memory</h5>
                                 <p className="text-xs text-text-secondary leading-relaxed">
-                                    A local vector memory system allows Natively to recall details from your past interactions. Context retrieval happens securely on-device where possible to minimize latency.
+                                    A purely local vector memory system allows Natively to recall details from past meetings. Embeddings and retrieval happen on-device via SQLite for maximum privacy.
                                 </p>
                             </div>
                         </div>
@@ -100,9 +100,9 @@ export const AboutSection: React.FC<AboutSectionProps> = () => {
                     <div className="flex items-start gap-3">
                         <Shield size={16} className="text-green-400 mt-0.5" />
                         <div>
-                            <h5 className="text-sm font-medium text-text-primary">Controlled Data Flow</h5>
+                            <h5 className="text-sm font-medium text-text-primary">Stealth & Control</h5>
                             <p className="text-xs text-text-secondary mt-1 leading-relaxed">
-                                Audio and text are transmitted only to processed endpoints (Google Cloud, Groq) and are not stored permanently by Natively's servers.
+                                Features "Undetectable Mode" to hide from the dock and "Masquerading" to disguise as system apps. You control exactly what data leaves your device.
                             </p>
                         </div>
                     </div>
@@ -261,7 +261,7 @@ export const AboutSection: React.FC<AboutSectionProps> = () => {
                 <div>
                     <h4 className="text-xs font-bold text-text-tertiary uppercase tracking-wider mb-3">Core Technology</h4>
                     <div className="flex flex-wrap gap-2">
-                        {['Groq', 'Google Gemini', 'Google Speech-to-Text', 'Electron', 'React', 'Rust', 'Cpal'].map(tech => (
+                        {['Groq', 'Gemini', 'OpenAI', 'Deepgram', 'ElevenLabs', 'Electron', 'React', 'Rust', 'Sharp', 'TypeScript', 'Tailwind CSS', 'Vite', 'Google Cloud', 'SQLite'].map(tech => (
                             <span key={tech} className="px-2.5 py-1 rounded-md bg-bg-input border border-border-subtle text-[11px] font-medium text-text-secondary">
                                 {tech}
                             </span>

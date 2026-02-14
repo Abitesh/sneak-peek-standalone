@@ -20,8 +20,10 @@ Short one-line description of the release.
 - Dependency updates
 - Refactored updater logic  
 
-## macOS Installation (Unsigned Build)
+## ⚠️macOS Installation (Unsigned Build)
+
 Download the correct architecture .zip file for your device (Apple Silicon or Intel) and extract it.
+
 If you see "App is damaged":
 1. Move the app to your Applications folder.
 2. Open Terminal and run: `xattr -cr /Applications/Natively.app`

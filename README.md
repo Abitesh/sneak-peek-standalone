@@ -118,8 +118,6 @@ All while remaining **invisible, fast, and privacy-first**.
 - Global keyboard shortcuts across all applications
 - Local AI support for offline and private use
 
-> **Note:** Real-time transcription requires a Google Speech-to-Text service account. This is a hard dependency.
-
 ---
 
 ## Privacy & Security (Core Design Principle)
@@ -168,7 +166,7 @@ Connect **any** speech provider and **any** LLM. No subscriptions, no markups, n
 - **Ollama (Local)**
 - **Custom OpenAI-compatible Endpoints**
 
-> **Note:** You only need ONE speech provider to get started. We recommend **Groq** or **Deepgram** for the fastest real-time performance.  
+> **Note:** You only need ONE speech provider to get started. We recommend **Google STT** ,**Groq** or **Deepgram** for the fastest real-time performance.  
 
 ---
 #### Bring Your Own Google Speech-to-Text (Required)
@@ -182,13 +180,13 @@ Your credentials:
 - Are not logged, proxied, or stored remotely
 - Are used only locally by the app
 
-### What You Need
+What You Need:
 - Google Cloud account
 - Billing enabled
 - Speech-to-Text API enabled
 - Service Account JSON key
 
-### Setup Summary
+Setup Summary:
 1. Create or select a Google Cloud project  
 2. Enable Speech-to-Text API  
 3. Create a Service Account  
@@ -295,6 +293,12 @@ npm run dist
 - Global activation shortcut
 - Instant answer overlay
 - Upcoming meeting readiness
+
+### Local RAG & Long-Term Memory
+- **Full Offline RAG:** All vector embeddings and retrieval happen locally (SQLite).
+- **Semantic Search:** innovative "Smart Scope" detects if you are asking about the current meeting or a past one.
+- **Global Knowledge:** Ask questions across *all* your past meetings ("What did we decide about the API last month?").
+- **Automatic Indexing:** Meetings are automatically chunked, embedded, and indexed in the background.
 
 ### Advanced Privacy & Stealth
 - **Undetectable Mode:** Instantly hide from dock/taskbar.

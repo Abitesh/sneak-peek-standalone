@@ -64,8 +64,9 @@ export class ReleaseNotesManager {
             const data = JSON.parse(response);
             const body = data.body || "";
             const htmlUrl = data.html_url || "";
+            const tagName = data.tag_name || version; // Use tag_name from API if available
 
-            const parsed = this.parseReleaseNotes(body, version, htmlUrl);
+            const parsed = this.parseReleaseNotes(body, tagName, htmlUrl);
             this.cachedNotes = parsed;
             return parsed;
 

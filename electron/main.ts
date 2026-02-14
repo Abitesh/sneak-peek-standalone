@@ -175,6 +175,14 @@ export class AppState {
     this.setupAutoUpdater()
   }
 
+  private broadcast(channel: string, ...args: any[]): void {
+    BrowserWindow.getAllWindows().forEach(win => {
+      if (!win.isDestroyed()) {
+        win.webContents.send(channel, ...args);
+      }
+    });
+  }
+
   private initializeRAGManager(): void {
     try {
       const db = DatabaseManager.getInstance();
@@ -198,7 +206,7 @@ export class AppState {
 
     autoUpdater.on("checking-for-update", () => {
       console.log("[AutoUpdater] Checking for update...")
-      this.getMainWindow()?.webContents.send("update-checking")
+      this.broadcast("update-checking")
     })
 
     autoUpdater.on("update-available", async (info) => {
@@ -210,7 +218,7 @@ export class AppState {
       const notes = await releaseManager.fetchReleaseNotes(info.version);
 
       // Notify renderer that an update is available with parsed notes if available
-      this.getMainWindow()?.webContents.send("update-available", {
+      this.broadcast("update-available", {
         ...info,
         parsedNotes: notes
       })
@@ -218,12 +226,12 @@ export class AppState {
 
     autoUpdater.on("update-not-available", (info) => {
       console.log("[AutoUpdater] Update not available:", info.version)
-      this.getMainWindow()?.webContents.send("update-not-available", info)
+      this.broadcast("update-not-available", info)
     })
 
     autoUpdater.on("error", (err) => {
       console.error("[AutoUpdater] Error:", err)
-      this.getMainWindow()?.webContents.send("update-error", err.message)
+      this.broadcast("update-error", err.message)
     })
 
     autoUpdater.on("download-progress", (progressObj) => {
@@ -231,24 +239,26 @@ export class AppState {
       log_message = log_message + " - Downloaded " + progressObj.percent + "%"
       log_message = log_message + " (" + progressObj.transferred + "/" + progressObj.total + ")"
       console.log("[AutoUpdater] " + log_message)
-      this.getMainWindow()?.webContents.send("download-progress", progressObj)
+      this.broadcast("download-progress", progressObj)
     })
 
     autoUpdater.on("update-downloaded", (info) => {
       console.log("[AutoUpdater] Update downloaded:", info.version)
       // Notify renderer that update is ready to install
-      this.getMainWindow()?.webContents.send("update-downloaded", info)
+      this.broadcast("update-downloaded", info)
     })
 
-    // Start checking for updates
-    if (process.env.NODE_ENV === "development") {
-      console.log("[AutoUpdater] Development mode: Running manual update check...");
-      this.checkForUpdatesManual();
-    } else {
-      autoUpdater.checkForUpdatesAndNotify().catch(err => {
-        console.error("[AutoUpdater] Failed to check for updates:", err);
-      });
-    }
+    // Start checking for updates with a 10-second delay
+    setTimeout(() => {
+      if (process.env.NODE_ENV === "development") {
+        console.log("[AutoUpdater] Development mode: Running manual update check...");
+        this.checkForUpdatesManual();
+      } else {
+        autoUpdater.checkForUpdatesAndNotify().catch(err => {
+          console.error("[AutoUpdater] Failed to check for updates:", err);
+        });
+      }
+    }, 10000);
   }
 
   private async checkForUpdatesManual(): Promise<void> {
@@ -280,13 +290,13 @@ export class AppState {
           };
 
           // Notify renderer
-          this.getMainWindow()?.webContents.send("update-available", {
+          this.broadcast("update-available", {
             ...info,
             parsedNotes: notes
           });
         } else {
           console.log('[AutoUpdater] Manual Check: App is up to date.');
-          this.getMainWindow()?.webContents.send("update-not-available", { version: currentVersion });
+          this.broadcast("update-not-available", { version: currentVersion });
         }
       }
     } catch (err) {
