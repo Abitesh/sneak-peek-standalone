@@ -164,3 +164,9 @@ target/
 native-module/target/
 native-module/*.node
 
+
+# Rust build artifacts
+native-module/target/
+native-module/*.node
+
+

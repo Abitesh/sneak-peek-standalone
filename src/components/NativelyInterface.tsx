@@ -1282,6 +1282,7 @@ Provide only the answer, nothing else.`;
                     rounded-[24px] 
                     overflow-hidden 
                     flex flex-col
+                    draggable-area
                 ">
 
 

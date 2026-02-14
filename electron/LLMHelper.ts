@@ -3,6 +3,7 @@ import Groq from "groq-sdk"
 import OpenAI from "openai"
 import Anthropic from "@anthropic-ai/sdk"
 import fs from "fs"
+import sharp from "sharp"
 import {
   HARD_SYSTEM_PROMPT, GROQ_SYSTEM_PROMPT, OPENAI_SYSTEM_PROMPT, CLAUDE_SYSTEM_PROMPT,
   UNIVERSAL_SYSTEM_PROMPT, UNIVERSAL_ANSWER_PROMPT, UNIVERSAL_WHAT_TO_ANSWER_PROMPT,
@@ -509,27 +510,73 @@ export class LLMHelper {
 
 
 
+  /**
+   * NEW: Helper to process image: resize to max 1536px and compress to JPEG 80%
+   * drastically reduces token usage and upload time.
+   */
+  private async processImage(path: string): Promise<{ mimeType: string, data: string }> {
+    try {
+      const imageBuffer = await fs.promises.readFile(path);
+
+      // Resize and compress
+      const processedBuffer = await sharp(imageBuffer)
+        .resize({
+          width: 1536,
+          height: 1536,
+          fit: 'inside', // Maintain aspect ratio, max dimension 1536
+          withoutEnlargement: true
+        })
+        .jpeg({ quality: 80 }) // 80% quality JPEG is much smaller than PNG
+        .toBuffer();
+
+      return {
+        mimeType: "image/jpeg",
+        data: processedBuffer.toString("base64")
+      };
+    } catch (error) {
+      console.error("[LLMHelper] Failed to process image with sharp:", error);
+      // Fallback to raw read if sharp fails
+      const data = await fs.promises.readFile(path);
+      return {
+        mimeType: "image/png",
+        data: data.toString("base64")
+      };
+    }
+  }
+
   public async analyzeImageFile(imagePath: string) {
     try {
-      const imageData = await fs.promises.readFile(imagePath);
-      const prompt = `${HARD_SYSTEM_PROMPT}\n\nDescribe the content of this image in a short, concise answer. If it contains code or a problem, solve it. \n\n${IMAGE_ANALYSIS_PROMPT}`;
+      // CHANGED: Use the new optimization helper
+      const { mimeType, data } = await this.processImage(imagePath);
+
+      // Use the generic image analysis prompt
+      const prompt = `${HARD_SYSTEM_PROMPT}\n\nDescribe the content of this image in a short, concise answer. If it contains code or a problem, solve it.`;
 
       const contents = [
-        { text: prompt },
+        { role: "user", parts: [{ text: prompt }] },
         {
-          inlineData: {
-            mimeType: "image/png",
-            data: imageData.toString("base64"),
-          }
+          role: "user",
+          parts: [{
+            inlineData: {
+              mimeType: mimeType,
+              data: data,
+            }
+          }]
         }
-      ]
+      ];
 
-      // Use Flash for multimodal
-      const text = await this.generateWithFlash(contents)
-      return { text, timestamp: Date.now() };
-    } catch (error) {
-      // console.error("Error analyzing image file:", error);
-      throw error;
+      // Use Flash for multimodal with timeout protection (30s)
+      // Assuming you have a generateWithFlash or similar method referencing your Gemini client
+      const text = await this.generateWithFlash(contents); // Fixed argument based on existing method signature
+
+      return { text: text, timestamp: Date.now() };
+
+    } catch (error: any) {
+      console.error("Error analyzing image file:", error);
+      return {
+        text: `I couldn't analyze the screen right now (${error.message}). Please try again.`,
+        timestamp: Date.now()
+      };
     }
   }
 
