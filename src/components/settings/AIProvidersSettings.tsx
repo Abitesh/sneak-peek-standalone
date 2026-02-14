@@ -106,11 +106,15 @@ export const AIProvidersSettings: React.FC = () => {
 
     // --- Default Model ---
     const [defaultModel, setDefaultModel] = useState<string>('gemini-3-flash-preview');
+    const [fastResponseMode, setFastResponseMode] = useState(false);
 
     // Load Initial Data
     useEffect(() => {
         const loadCredentials = async () => {
-            try {
+            try {                // @ts-ignore
+                const fastMode = await window.electronAPI?.invoke('get-groq-fast-text-mode');
+                if (fastMode) setFastResponseMode(fastMode.enabled);
+
                 // @ts-ignore
                 const creds = await window.electronAPI?.getStoredCredentials?.();
                 if (creds) {
@@ -143,6 +147,16 @@ export const AIProvidersSettings: React.FC = () => {
             }
         };
         loadCredentials();
+
+        // Listen for changes from other windows (2-way sync)
+        if (window.electronAPI?.onGroqFastTextChanged) {
+            // @ts-ignore
+            const unsubscribe = window.electronAPI.onGroqFastTextChanged((enabled: boolean) => {
+                setFastResponseMode(enabled);
+                localStorage.setItem('natively_groq_fast_text', String(enabled));
+            });
+            return () => unsubscribe();
+        }
     }, []);
 
     // Poll for Ollama status every 3 seconds requesting smart start on mount
@@ -391,7 +405,7 @@ export const AIProvidersSettings: React.FC = () => {
                     <ModelSelect
                         value={defaultModel}
                         options={[
-                            ...(hasStoredKey.gemini ? [{ id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash' }, { id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro' }] : []),
+                            ...(hasStoredKey.gemini ? [{ id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash' }] : []),
                             ...(hasStoredKey.openai ? [{ id: 'gpt-5.2-chat-latest', name: 'GPT 5.2' }] : []),
                             ...(hasStoredKey.claude ? [{ id: 'claude-sonnet-4-5', name: 'Sonnet 4.5' }] : []),
                             ...(hasStoredKey.groq ? [{ id: 'llama-3.3-70b-versatile', name: 'Groq Llama 3.3' }] : []),
@@ -404,6 +418,29 @@ export const AIProvidersSettings: React.FC = () => {
                             window.electronAPI?.invoke('set-default-model', val).catch(console.error);
                         }}
                     />
+                </div>
+
+                {/* Fast Response Mode */}
+                <div className="bg-bg-item-surface rounded-xl p-5 border border-border-subtle flex items-center justify-between">
+                    <div>
+                        <div className="flex items-center gap-2">
+                            <label className="block text-xs font-medium text-text-primary uppercase tracking-wide mb-0">Fast Response Mode</label>
+                            <span className="bg-orange-500/10 text-orange-500 text-[9px] font-bold px-1.5 py-0.5 rounded border border-orange-500/20">NEW</span>
+                        </div>
+                        <p className="text-[10px] text-text-secondary mt-0.5">Super fast responses using Groq Llama 3 for text. Multimodal requests still use your Default Model.</p>
+                    </div>
+                    <div
+                        onClick={async () => {
+                            const newState = !fastResponseMode;
+                            setFastResponseMode(newState);
+                            localStorage.setItem('natively_groq_fast_text', String(newState));
+                            // @ts-ignore
+                            await window.electronAPI?.invoke('set-groq-fast-text-mode', newState);
+                        }}
+                        className={`w-10 h-6 rounded-full p-1 cursor-pointer transition-colors ${fastResponseMode ? 'bg-orange-500' : 'bg-bg-input border border-border-subtle'}`}
+                    >
+                        <div className={`w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${fastResponseMode ? 'translate-x-4' : 'translate-x-0'}`} />
+                    </div>
                 </div>
             </div>
 

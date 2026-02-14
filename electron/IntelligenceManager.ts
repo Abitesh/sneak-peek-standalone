@@ -28,7 +28,7 @@ import { app } from 'electron';
 
 
 export const GEMINI_FLASH_MODEL = "gemini-3-flash-preview";
-export const GEMINI_PRO_MODEL = "gemini-3-pro-preview";
+
 
 // Refinement intent detection (refined to avoid false positives)
 function detectRefinementIntent(userText: string): { isRefinement: boolean; intent: string } {
@@ -132,7 +132,7 @@ export class IntelligenceManager extends EventEmitter {
     private lastTranscriptTime: number = 0;
     private lastTriggerTime: number = 0;
     private readonly triggerCooldown: number = 3000; // 3 seconds
-    private currentModel: string = GEMINI_FLASH_MODEL;
+
 
 
 
@@ -165,12 +165,7 @@ export class IntelligenceManager extends EventEmitter {
         this.whatToAnswerLLM = new WhatToAnswerLLM(this.llmHelper);
     }
 
-    public setModel(modelName: string): void {
-        console.log(`[IntelligenceManager] Switching model to: ${modelName}`);
-        this.currentModel = modelName;
-        this.initializeLLMs();
-        this.llmHelper.switchToGemini(undefined, modelName);
-    }
+
 
     // ============================================
     // Context Management (mirrors Swift ContextManager)

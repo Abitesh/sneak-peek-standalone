@@ -122,6 +122,7 @@ interface ElectronAPI {
   on: (channel: string, callback: (...args: any[]) => void) => () => void
 
   onUndetectableChanged: (callback: (state: boolean) => void) => () => void
+  onGroqFastTextChanged: (callback: (enabled: boolean) => void) => () => void
   onModelChanged: (callback: (modelId: string) => void) => () => void
 
   // Theme API
@@ -609,6 +610,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on('undetectable-changed', subscription)
     return () => {
       ipcRenderer.removeListener('undetectable-changed', subscription)
+    }
+  },
+
+  onGroqFastTextChanged: (callback: (enabled: boolean) => void) => {
+    const subscription = (_: any, enabled: boolean) => callback(enabled)
+    ipcRenderer.on('groq-fast-text-changed', subscription)
+    return () => {
+      ipcRenderer.removeListener('groq-fast-text-changed', subscription)
     }
   },
 

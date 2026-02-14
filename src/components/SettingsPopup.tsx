@@ -5,8 +5,8 @@ import { useShortcuts } from '../hooks/useShortcuts';
 const SettingsPopup = () => {
     const { shortcuts } = useShortcuts();
     const [isUndetectable, setIsUndetectable] = useState(false);
-    const [useGeminiPro, setUseGeminiPro] = useState(() => {
-        return localStorage.getItem('natively_model_preference') === 'pro';
+    const [useGroqFastText, setUseGroqFastText] = useState(() => {
+        return localStorage.getItem('natively_groq_fast_text') === 'true';
     });
 
     const isFirstRender = React.useRef(true);
@@ -41,22 +41,39 @@ const SettingsPopup = () => {
     }, [isUndetectable]);
 
     useEffect(() => {
+        // Listen for changes from other windows (2-way sync)
+        if (window.electronAPI?.onGroqFastTextChanged) {
+            const unsubscribe = window.electronAPI.onGroqFastTextChanged((enabled: boolean) => {
+                setUseGroqFastText(enabled);
+                localStorage.setItem('natively_groq_fast_text', String(enabled));
+            });
+            return () => unsubscribe();
+        }
+    }, []);
+
+    useEffect(() => {
         // Skip initial render to avoid unnecessary IPC calls
         if (isFirstRender.current) {
             isFirstRender.current = false;
+            // Ensure backend is synced on mount (even if no change)
+            try {
+                // @ts-ignore
+                window.electronAPI?.invoke('set-groq-fast-text-mode', useGroqFastText);
+            } catch (e) {
+                console.error(e);
+            }
             return;
         }
 
-        // Apply model preference
-        const modelType = useGeminiPro ? 'pro' : 'flash';
-        localStorage.setItem('natively_model_preference', modelType);
+        // Apply Groq Text Mode
+        localStorage.setItem('natively_groq_fast_text', String(useGroqFastText));
         try {
             // @ts-ignore - electronAPI not typed in this file yet
-            window.electronAPI?.invoke('set-model-preference', modelType);
+            window.electronAPI?.invoke('set-groq-fast-text-mode', useGroqFastText);
         } catch (e) {
             console.error(e);
         }
-    }, [useGeminiPro]);
+    }, [useGroqFastText]);
 
     const [showTranscript, setShowTranscript] = useState(() => {
         const stored = localStorage.getItem('natively_interviewer_transcript');
@@ -123,20 +140,20 @@ const SettingsPopup = () => {
                 </div>
 
 
-                {/* Gemini 3 Pro Toggle */}
+                {/* Groq (Fast Text) Toggle */}
                 <div className="flex items-center justify-between px-3 py-2 hover:bg-white/5 rounded-lg transition-colors duration-200 group cursor-default">
                     <div className="flex items-center gap-3">
                         <Zap
-                            className="w-4 h-4 text-yellow-500 group-hover:text-yellow-400 transition-colors"
-                            fill={useGeminiPro ? "currentColor" : "none"}
+                            className={`w-4 h-4 transition-colors ${useGroqFastText ? 'text-orange-500' : 'text-slate-500 group-hover:text-slate-300'}`}
+                            fill={useGroqFastText ? "currentColor" : "none"}
                         />
-                        <span className="text-[12px] text-slate-400 group-hover:text-slate-200 font-medium transition-colors">Gemini 3 Pro</span>
+                        <span className={`text-[12px] font-medium transition-colors ${useGroqFastText ? 'text-white' : 'text-slate-400 group-hover:text-slate-200'}`}>Fast Response</span>
                     </div>
                     <button
-                        onClick={() => setUseGeminiPro(!useGeminiPro)}
-                        className={`w-[30px] h-[18px] rounded-full p-[1.5px] transition-all duration-300 ease-spring active:scale-[0.92] ${useGeminiPro ? 'bg-yellow-500 shadow-[0_2px_10px_rgba(234,179,8,0.3)]' : 'bg-white/10'}`}
+                        onClick={() => setUseGroqFastText(!useGroqFastText)}
+                        className={`w-[30px] h-[18px] rounded-full p-[1.5px] transition-all duration-300 ease-spring active:scale-[0.92] ${useGroqFastText ? 'bg-orange-500 shadow-[0_2px_10px_rgba(249,115,22,0.3)]' : 'bg-white/10'}`}
                     >
-                        <div className={`w-[15px] h-[15px] rounded-full bg-black shadow-sm transition-transform duration-300 ease-spring ${useGeminiPro ? 'translate-x-[12px]' : 'translate-x-0'}`} />
+                        <div className={`w-[15px] h-[15px] rounded-full bg-black shadow-sm transition-transform duration-300 ease-spring ${useGroqFastText ? 'translate-x-[12px]' : 'translate-x-0'}`} />
                     </button>
                 </div>
 

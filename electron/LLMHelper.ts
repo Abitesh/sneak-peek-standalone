@@ -50,6 +50,7 @@ export class LLMHelper {
   private geminiModel: string = GEMINI_FLASH_MODEL
   private customProvider: CustomProvider | null = null;
   private activeCurlProvider: CurlProvider | null = null;
+  private groqFastTextMode: boolean = false;
 
   constructor(apiKey?: string, useOllama: boolean = false, ollamaModel?: string, ollamaUrl?: string, groqApiKey?: string, openaiApiKey?: string, claudeApiKey?: string) {
     this.useOllama = useOllama
@@ -119,6 +120,15 @@ export class LLMHelper {
     this.claudeApiKey = apiKey;
     this.claudeClient = new Anthropic({ apiKey });
     console.log("[LLMHelper] Claude API Key updated.");
+  }
+
+  public setGroqFastTextMode(enabled: boolean) {
+    this.groqFastTextMode = enabled;
+    console.log(`[LLMHelper] Groq Fast Text Mode: ${enabled}`);
+  }
+
+  public getGroqFastTextMode(): boolean {
+    return this.groqFastTextMode;
   }
 
   private currentModelId: string = GEMINI_FLASH_MODEL;
@@ -654,6 +664,17 @@ ANSWER DIRECTLY:`;
         groq: alternateGroqMessage || buildMessage(GROQ_SYSTEM_PROMPT),
       };
 
+      // GROQ FAST TEXT OVERRIDE (Text-Only)
+      if (this.groqFastTextMode && !isMultimodal && this.groqClient) {
+        console.log(`[LLMHelper] ⚡️ Groq Fast Text Mode Active. Routing to Groq...`);
+        try {
+          return await this.generateWithGroq(combinedMessages.groq);
+        } catch (e: any) {
+          console.warn("[LLMHelper] Groq Fast Text failed, falling back to standard routing:", e.message);
+          // Fall through to standard routing
+        }
+      }
+
       // System prompts for OpenAI/Claude (skipped if skipSystemPrompt)
       const openaiSystemPrompt = skipSystemPrompt ? undefined : OPENAI_SYSTEM_PROMPT;
       const claudeSystemPrompt = skipSystemPrompt ? undefined : CLAUDE_SYSTEM_PROMPT;
@@ -732,6 +753,9 @@ ANSWER DIRECTLY:`;
         }
       } else {
         // TEXT-ONLY: All providers including Groq
+        if (this.groqClient) {
+          providers.push({ name: `Groq (${GROQ_MODEL})`, execute: () => this.generateWithGroq(combinedMessages.groq) });
+        }
         if (this.client) {
           providers.push({ name: `Gemini Flash`, execute: () => this.tryGenerateResponse(combinedMessages.gemini) });
           providers.push({
@@ -749,9 +773,6 @@ ANSWER DIRECTLY:`;
               }
             }
           });
-        }
-        if (this.groqClient) {
-          providers.push({ name: `Groq (${GROQ_MODEL})`, execute: () => this.generateWithGroq(combinedMessages.groq) });
         }
         if (this.openaiClient) {
           providers.push({ name: `OpenAI (${OPENAI_MODEL})`, execute: () => this.generateWithOpenai(userContent, openaiSystemPrompt) });
@@ -1241,6 +1262,20 @@ ANSWER DIRECTLY:`;
     const userContent = context
       ? `CONTEXT:\n${context}\n\nUSER QUESTION:\n${message}`
       : message;
+
+    // GROQ FAST TEXT OVERRIDE (Text-Only)
+    if (this.groqFastTextMode && !isMultimodal && this.groqClient) {
+      console.log(`[LLMHelper] ⚡️ Groq Fast Text Mode Active (Streaming). Routing to Groq...`);
+      try {
+        const groqSystem = systemPromptOverride || GROQ_SYSTEM_PROMPT;
+        const groqFullMessage = `${groqSystem}\n\n${userContent}`;
+        yield* this.streamWithGroq(groqFullMessage);
+        return;
+      } catch (e: any) {
+        console.warn("[LLMHelper] Groq Fast Text streaming failed, falling back:", e.message);
+        // Fall through
+      }
+    }
 
     // 1. Ollama Streaming
     if (this.useOllama) {

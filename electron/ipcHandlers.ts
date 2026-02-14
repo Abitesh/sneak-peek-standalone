@@ -2,7 +2,7 @@
 
 import { app, ipcMain, shell, dialog, desktopCapturer, systemPreferences, BrowserWindow, screen } from "electron"
 import { AppState } from "./main"
-import { GEMINI_FLASH_MODEL, GEMINI_PRO_MODEL } from "./IntelligenceManager"
+import { GEMINI_FLASH_MODEL } from "./IntelligenceManager"
 import { DatabaseManager } from "./db/DatabaseManager"; // Import Database Manager
 import * as path from "path";
 import * as fs from "fs";
@@ -264,7 +264,7 @@ export function initializeIpcHandlers(appState: AppState): void {
           const autoContext = intelligenceManager.getFormattedContext(100);
           if (autoContext && autoContext.trim().length > 0) {
             context = autoContext;
-            console.log(`[IPC] Auto-injected 100s context for gemini-chat-stream (${context.length} chars)`);
+            console.log(`[IPC] Auto - injected 100s context for gemini - chat - stream(${context.length} chars)`);
           }
         } catch (ctxErr) {
           console.warn("[IPC] Failed to auto-inject context:", ctxErr);
@@ -815,7 +815,7 @@ export function initializeIpcHandlers(appState: AppState): void {
   };
 
   safeHandle("test-stt-connection", async (_, provider: 'groq' | 'openai' | 'deepgram' | 'elevenlabs' | 'azure' | 'ibmwatson', apiKey: string, region?: string) => {
-    console.log(`[IPC] Received test-stt-connection request for provider: ${provider}`);
+    console.log(`[IPC] Received test - stt - connection request for provider: ${provider} `);
     try {
       if (provider === 'deepgram') {
         // Test Deepgram via WebSocket connection
@@ -823,7 +823,7 @@ export function initializeIpcHandlers(appState: AppState): void {
         return await new Promise<{ success: boolean; error?: string }>((resolve) => {
           const url = 'wss://api.deepgram.com/v1/listen?model=nova-2&encoding=linear16&sample_rate=16000&channels=1';
           const ws = new WebSocket(url, {
-            headers: { Authorization: `Token ${apiKey}` },
+            headers: { Authorization: `Token ${apiKey} ` },
           });
 
           const timeout = setTimeout(() => {
@@ -996,11 +996,26 @@ export function initializeIpcHandlers(appState: AppState): void {
     }
   });
 
-  safeHandle("set-model-preference", (_, type: "flash" | "pro") => {
+  safeHandle("get-groq-fast-text-mode", () => {
     try {
-      const im = appState.getIntelligenceManager();
-      const model = type === 'pro' ? GEMINI_PRO_MODEL : GEMINI_FLASH_MODEL;
-      im.setModel(model);
+      const llmHelper = appState.processingHelper.getLLMHelper();
+      return { enabled: llmHelper.getGroqFastTextMode() };
+    } catch (error: any) {
+      return { enabled: false };
+    }
+  });
+
+  // Set Groq Fast Text Mode
+  safeHandle("set-groq-fast-text-mode", (_, enabled: boolean) => {
+    try {
+      const llmHelper = appState.processingHelper.getLLMHelper();
+      llmHelper.setGroqFastTextMode(enabled);
+
+      // Broadcast to all windows
+      BrowserWindow.getAllWindows().forEach(win => {
+        win.webContents.send('groq-fast-text-changed', enabled);
+      });
+
       return { success: true };
     } catch (error: any) {
       return { success: false, error: error.message };
