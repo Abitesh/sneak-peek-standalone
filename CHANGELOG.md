@@ -4,6 +4,8 @@
 
 ### New Features
 - **Speech Providers**: Added support for multiple speech providers including Google, Groq, OpenAI, Deepgram, ElevenLabs, Azure, and IBM Watson.
+- **Fast Response Mode**: Introduced ultra-fast text responses using Groq Llama 3.
+- **Local RAG & Memory**: Full offline vector retrieval for past meetings using SQLite.
 - **Custom Key Bindings**: Added ability to customize global shortcuts for easier control.
 - **Stealth Mode Improvements**: Enhanced disguise modes (Terminal, Settings, Activity Monitor) for better privacy.
 - **Markdown Support**: Improved Markdown rendering in the Usage section for better readability of AI responses.
