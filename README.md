@@ -14,6 +14,8 @@
 
 ---
 
+<div align="center">
+
 > **Natively** is a **free, privacy-first AI Copilot** for **Google Meet, Zoom, and Teams**. It serves as an open-source alternative to Cluely, providing **real-time transcription**, **interview assistance**, and **automated meeting notes** completely locally.
 
 Unlike cloud-only tools, Natively uses **Local RAG (Retrieval Augmented Generation)** to remember past conversations, giving you instant answers during **technical interviews**, **sales calls**, and **daily standups**.
@@ -21,6 +23,9 @@ Unlike cloud-only tools, Natively uses **Local RAG (Retrieval Augmented Generati
 ---
 
 ## Why Natively?
+
+</div>
+
 While other tools focus on being "lightweight" wrappers, Natively is a complete intelligence system.
 
 - **Local Vector Database (RAG):** We embed your meetings locally so you can ask, "What did John say about the API last week?"
@@ -28,7 +33,6 @@ While other tools focus on being "lightweight" wrappers, Natively is a complete 
 - **Rolling Context:** We don't just transcribe; we maintain a "memory window" of the conversation for smarter answers.
 
 ---
-<br>
 
 <div align="center">
 
@@ -88,15 +92,17 @@ This demo shows **a complete live meeting scenario**:
 
 ## Table of Contents
 
-- [What Is Natively?](#what-is-natively)
+- [Why Natively?](#why-natively)
 - [Key Capabilities](#key-capabilities)
 - [Privacy & Security](#privacy--security-core-design-principle)
 - [Quick Start (End Users)](#quick-start-end-users)
 - [Installation (Developers)](#installation-developers--contributors)
 - [AI Providers](#ai-providers)
 - [Key Features](#key-features)
+- [Meeting Intelligence Dashboard](#meeting-intelligence-dashboard)
 - [Use Cases](#use-cases)
 - [Comparison](#comparison)
+- [FAQ](#faq)
 - [Architecture Overview](#architecture-overview)
 - [Technical Details](#technical-details)
 - [Known Limitations](#known-limitations)
@@ -128,13 +134,12 @@ All while remaining **invisible, fast, and privacy-first**.
 
 ## Key Capabilities
 
-- Live answers during meetings and interviews
-- Rolling context memory (understands what was just said)
-- Screenshot and screen content analysis
-- Real-time transcription
-- Context-aware replies and follow-ups
-- Global keyboard shortcuts across all applications
-- Local AI support for offline and private use
+- **Live Assist:** Real-time answers during meetings and interviews.
+- **Memory (RAG):** Understands what was said across current and past meetings.
+- **Multimodal:** Screenshot and screen content analysis for visual understanding.
+- **Low Latency:** Optimized real-time transcription with sub-second feedback.
+- **Global Actions:** Single keyboard shortcut for instant overlays and features.
+- **Local-First:** SQLite database and local LLM (Ollama) support for 100% privacy.
 
 ---
 
@@ -349,22 +354,19 @@ Natively isn't just an overlay; it's a complete meeting management system. Acces
 ## Use Cases
 
 ### Academic & Learning
-- Live class assistance
-- Concept explanations
-- Language translation
-- Problem solving
+- **Live Assistance:** Get explanations for complex lecture topics in real-time.
+- **Translation:** Instant language translation during international classes.
+- **Problem Solving:** Immediate help with coding or mathematical problems.
 
 ### Professional Meetings
-- Interview support
-- Sales calls
-- Client presentations
-- Real-time clarification
+- **Interview Support:** Context-aware prompts to help you navigate technical questions.
+- **Sales & Client Calls:** Real-time clarification of technical specs or previous discussion points.
+- **Meeting Summaries:** Automatically extract action items and core decisions.
 
 ### Development & Technical Work
-- Code explanation
-- Debugging assistance
-- Architecture guidance
-- Documentation lookup
+- **Code Insight:** Explain unfamiliar blocks of code or logic on your screen.
+- **Debugging:** Context-aware assistance for resolving logs or terminal errors.
+- **Architecture:** Guidance on system design and integration patterns.
 
 ---
 
@@ -464,6 +466,27 @@ If you run or modify this software over a network, you must provide the full sou
 ---
 
 **Star this repo if Natively helps you succeed in meetings, interviews, or presentations!**
+
+---
+
+---
+
+## FAQ
+
+#### Is Natively really free?
+Yes. Natively is an open-source project. You only pay for what you use by bringing your own API keys (Gemini, OpenAI, Anthropic, etc.), or use it **100% free** by connecting to a local Ollama instance.
+
+#### Does Natively work with Zoom, Teams, and Google Meet?
+Yes. Natively uses a Rust-based system audio capture that works universally across any desktop application, including Zoom, Microsoft Teams, Google Meet, Slack, and Discord.
+
+#### Is my data safe?
+Natively is built on **Privacy-by-Design**. All transcripts, vector embeddings (Local RAG), and keys are stored locally on your machine. We have no backend and collect zero telemetry.
+
+#### Can I use it for technical interviews?
+Natively is a powerful assistant for any professional situation. However, users are responsible for complying with their company policies and interview guidelines.
+
+#### How do I use local models?
+Simply install **Ollama**, run a model (e.g., `ollama run llama3`), and Natively will automatically detect it. Enable "Ollama" in the AI Providers settings to switch to offline mode.
 
 ---
 
