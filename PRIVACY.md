@@ -1,50 +1,68 @@
-# Privacy Policy for Natively
+# Privacy Policy
 
-**Last Updated:** [Date]
+## Overview
 
-## Introduction
+This privacy policy describes how this open-source application ("Natively") handles your data. Our philosophy is privacy-first: we believe your meeting data belongs to you. We do not operate a central server to store your personal meeting recordings or transcripts.
 
-Welcome to Natively ("we," "our," or "us"). Natively is an open-source project available on GitHub. This Privacy Policy explains how we handle information in relation to the Natively codebase and community.
+## Data Collection
 
-## Open Source Nature
+**We do not collect, store, or transmit your personal data to our own servers.**
 
-Natively is an open-source project. This means:
+The application functions as a local tool on your device.
+*   **Audio & Video:** The application captures audio and screen content only when you explicitly start a recording or session.
+*   **Transcripts & Notes:** All generated transcripts, summaries, and meeting notes are stored locally on your device.
+*   **Telemetry:** This application does not include third-party analytics or tracking SDKs (such as Google Analytics or Mixpanel).
 
-1.  **Code Transparency:** The source code is publicly available for inspection. You can review the code to understand exactly what it does and does not do with your data.
-2.  **Self-Hosted:** If you download and run Natively on your own infrastructure or device, no data is sent to the project maintainers unless you explicitly configure it to do so. You are the controller of your own data instance.
+## Local Processing
 
-## Information We Collect
+The majority of the application's logic runs locally on your machine.
+*   **Database:** Meeting history and notes are stored in a local SQLite database file on your computer.
+*   **Settings:** Configuration preferences are stored locally using `electron-store`.
 
-### From Contributors
-When you contribute to the Natively project (e.g., by submitting code, opening issues, or commenting on pull requests) on platforms like GitHub:
-*   **Public Information:** Your username, profile information, and the content of your contributions (code, comments) become publicly available as part of the project's history.
-*   **Metadata:** Git commit metadata (which may include your name and email address) is permanently recorded in the project's version history.
+## Network Communication
 
-### From Users of the Software
-The default Natively software configuration does not collect personal information from users and send it to the project maintainers. However:
-*   **Third-Party Deployment:** If you use a hosted version of Natively provided by a third party, that third party is responsible for their own privacy practices.
-*   **Optional Telemetry:** If the software includes optional telemetry or crash reporting, it will be disabled by default or clearly opt-in. (Check documentation for specific configuration options).
+The application communicates over the internet only for specific, user-initiated features:
+
+### 1. Artificial Intelligence Services
+To generate summaries and action items, the application sends text (transcripts) to the AI provider you have configured (e.g., OpenAI, Anthropic, Google Gemini, Groq).
+*   **Data Transmitted:** Anonymized text transcripts and prompts.
+*   **Privacy:** This data is subject to the privacy policy of the respective AI provider you have chosen. We encourage using providers that do not train on API data.
+*   **Keys:** Your API keys are stored locally on your device and are never sent to us.
+
+### 2. Software Updates
+The application periodically checks GitHub's servers to see if a new version of the software is available.
+*   **Data Transmitted:** Basic application version information and your operating system type (e.g., macOS, Windows).
+
+## Permissions
+
+To function correctly, the application requires the following permissions on your device:
+*   **Microphone:** Required to record meeting audio for transcription.
+*   **Screen Recording / Accessibility:** Required to capture screen content or system audio if enabled.
+*   **Notifications:** Used to alert you when a summary is ready.
+
+You may revoke these permissions at any time through your operating system settings, though this will limit the application's functionality.
 
 ## Third-Party Services
 
-The Natively project is hosted on GitHub. Please refer to [GitHub's Privacy Statement](https://docs.github.com/en/site-policy/privacy-policies/github-privacy-statement) for information on how they collect and use data from visitors to their platform.
+This project allows integration with third-party Large Language Model (LLM) providers. We do not control how these third parties handle your data once it is sent to them explicitly by the application.
+*   OpenAI
+*   Anthropic
+*   Google (Gemini)
+*   Groq
 
-If you deploy Natively using third-party services (e.g., Vercel, Netlify, AWS), those services may collect logs and usage data according to their own privacy policies.
+**This project does not use third-party tracking or marketing cookies.**
 
-## Cookies and Tracking
+## Data Retention
 
-The core Natively open-source project code does not include tracking cookies or analytics scripts by default.
+Since data is stored locally:
+*   **You are in control:** You can delete meeting logs, transcripts, and the application database at any time from your local file system.
+*   **No Remote Retention:** We cannot delete your data for you because we do not have access to it.
 
-## Security
+## Open Source Transparency
 
-We take security seriously. However, as an open-source project provided "as is," we cannot guarantee absolute security. Vulnerabilities should be reported responsibly (see our Security Policy if available, otherwise open a private inquiry).
+This project is open-source. The full source code is available for inspection on our GitHub repository. You can verify the claims in this policy by auditing the code directly.
 
-## Changes to This Policy
+## Contact
 
-We may update this Privacy Policy from time to time. We will notify you of any changes by posting the new Privacy Policy on this page and updating the "Last Updated" date.
-
-## Contact Us
-
-If you have any questions about this Privacy Policy, please contact the project maintainers via the project's GitHub repository or at:
-
-[Insert Contact Email or GitHub Profile Link]
+If you have any questions or concerns about this privacy policy, please contact us at:
+**natively.contact@gmail.com**

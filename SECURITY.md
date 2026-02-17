@@ -4,41 +4,44 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| Latest  | :white_check_mark: |
-| < 0.x   | :x:                |
+| 1.1.x   | :white_check_mark: |
+| < 1.1.0 | :x:                |
 
 ## Reporting a Vulnerability
 
-We take the security of Natively seriously. If you believe you have found a security vulnerability in Natively, please report it to us as described below.
+We take the security of our software seriously. If you have found a security vulnerability in this open-source interview meeting application, please report it to us as described below.
 
-**Do not report received security vulnerabilities through public GitHub issues.**
-
-Please send an email to **natively.contact@gmail.com**.
-
-You should expect to receive an acknowledgement of your report within **72 hours**.
+**Do not report security vulnerabilities through public GitHub issues.**
 
 ## Disclosure Process
 
-1.  **Report**: You privately report the vulnerability to the email address above.
-2.  **Ack**: We acknowledge receipt of your report within 72 hours.
-3.  **Investigate**: We verify the vulnerability and determine its impact.
-4.  **Fix**: We work on a fix. We may ask you for more information or to verify the fix.
-5.  **Publish**: We release a fix and, if appropriate, publish a security advisory.
+1.  Please email your report to **natively.contact@gmail.com**.
+2.  In your report, please include:
+    *   The type of issue (e.g., buffer overflow, SQL injection, cross-site scripting, etc.).
+    *   Full paths of source file(s) related to the manifestation of the issue.
+    *   The location of the affected source code (tag/branch/commit or direct URL).
+    *   Any special configuration required to reproduce the issue.
+    *   Step-by-step instructions to reproduce the issue.
+    *   Proof-of-concept or exploit code if possible.
+    *   Impact of the issue, including how an attacker might exploit the issue.
+3.  We will acknowledge receipt of your vulnerability report within **72 hours**.
+4.  We will investigate the report and may ask for further information.
+5.  Once the issue is resolved, we will release a patch and publish a security advisory.
 
 ## Scope
 
-We are interested in vulnerabilities that could compromise the confidentiality, integrity, or availability of user data or the application. This includes, but is not limited to:
+The following areas are considered in scope for security reports:
 
-*   Data handling issues (e.g., sensitive data exposure)
-*   Local processing vulnerabilities
-*   Permission escalation
-*   Insecure network communication (if applicable)
+*   **Data Handling:** Issues related to how user data is stored, processed, or transmitted.
+*   **Local Processing:** Vulnerabilities arising from local data processing on the user's machine.
+*   **Permissions:** Incorrect or overly broad permission requests or enforcement.
+*   **Network Communication:** Insecure network connections or data leakage during communication.
 
-**Out of Scope:**
+Out of scope:
+*   Bugs that do not have a security impact.
+*   Reports from automated tools or scans without manual verification.
+*   Attacks requiring physical access to the user's device.
 
-*   Spam or social engineering techniques.
-*   Denial of Service (DoS) attacks that do not prove a vulnerability.
+## Appreciation
 
-## Responsible Disclosure
-
-We appreciate the efforts of security researchers and the community in keeping Natively secure. If you follow this policy, we will not pursue legal action against you.
+We appreciate the efforts of security researchers and the open-source community in helping us improve the security of this project.
