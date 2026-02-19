@@ -6,7 +6,7 @@
   [![License](https://img.shields.io/badge/License-AGPL--3.0-blue?style=flat-square)](LICENSE)
   [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Windows-lightgrey?style=flat-square)](https://github.com/evinjohnn/natively-cluely-ai-assistant/releases)
   [![Downloads](https://img.shields.io/github/downloads/evinjohnn/natively-cluely-ai-assistant/total?style=flat-square&color=success)](https://github.com/evinjohnn/natively-cluely-ai-assistant/releases)
-  ![Repo Views](https://img.shields.io/badge/Views-13.4k-lightgrey?style=flat-square)
+  ![Repo Views](https://img.shields.io/badge/Views-19.4k-lightgrey?style=flat-square)
   [![Stars](https://img.shields.io/github/stars/evinjohnn/natively-cluely-ai-assistant?style=flat-square)](https://github.com/evinjohnn/natively-cluely-ai-assistant)
   ![Status](https://img.shields.io/badge/Status-active-success?style=flat-square)
   [![Website](https://img.shields.io/badge/Website-nativelyai.vercel.app-blue?style=flat-square&logo=google-chrome&logoColor=white)](https://nativelyai.vercel.app/)
