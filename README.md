@@ -63,10 +63,20 @@ This demo shows **a complete live meeting scenario**:
 
 ### Download Natively
 *The privacy-first AI assistant for meetings.*
+<p align="center">
+  <a href="https://nativelyai.vercel.app">
+    <img src="https://img.shields.io/badge/Visit%20Website-nativelyai.vercel.app-0A0A0A?style=for-the-badge&logo=vercel&logoColor=white" />
+  </a>
+</p>
 
-[![Website](https://img.shields.io/badge/Website-nativelyai.vercel.app-blue?style=flat-square&logo=google-chrome&logoColor=white))
-[![Download for macOS](https://img.shields.io/badge/Download_for-macOS-white?style=for-the-badge&logo=apple&logoColor=black)](https://github.com/evinjohnn/natively-cluely-ai-assistant/releases/latest)
-[![Download for Windows](https://img.shields.io/badge/Download_for-Windows-0078D4?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/evinjohnn/natively-cluely-ai-assistant/releases/latest)
+<p align="center">
+  <a href="https://github.com/evinjohnn/natively-cluely-ai-assistant/releases/latest">
+    <img src="https://img.shields.io/badge/Download-macOS-000000?style=for-the-badge&logo=apple&logoColor=white" />
+  </a>
+  <a href="https://github.com/evinjohnn/natively-cluely-ai-assistant/releases/latest">
+    <img src="https://img.shields.io/badge/Download-Windows-0078D4?style=for-the-badge&logo=windows&logoColor=white" />
+  </a>
+</p>
 
 <small>Requires macOS 12+ or Windows 10/11</small>
 </div>
