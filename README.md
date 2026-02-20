@@ -9,7 +9,7 @@
   ![Repo Views](https://img.shields.io/badge/Views-19.4k-lightgrey?style=flat-square)
   [![Stars](https://img.shields.io/github/stars/evinjohnn/natively-cluely-ai-assistant?style=flat-square)](https://github.com/evinjohnn/natively-cluely-ai-assistant)
   ![Status](https://img.shields.io/badge/Status-active-success?style=flat-square)
- 
+  [![Website](https://img.shields.io/badge/Website-nativelyai.vercel.app-blue?style=flat-square&logo=google-chrome&logoColor=white)](https://nativelyai.vercel.app/)
 
 </div>
 

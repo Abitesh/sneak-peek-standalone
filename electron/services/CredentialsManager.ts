@@ -292,11 +292,31 @@ export class CredentialsManager {
     }
 
     public clearAll(): void {
-        this.credentials = {};
+        this.scrubMemory();
         if (fs.existsSync(CREDENTIALS_PATH)) {
             fs.unlinkSync(CREDENTIALS_PATH);
         }
+        const plaintextPath = CREDENTIALS_PATH + '.json';
+        if (fs.existsSync(plaintextPath)) {
+            fs.unlinkSync(plaintextPath);
+        }
         console.log('[CredentialsManager] All credentials cleared');
+    }
+
+    /**
+     * Scrub all API keys from memory to minimize exposure window.
+     * Called on app quit and credential clear.
+     */
+    public scrubMemory(): void {
+        // Overwrite each string field with empty before discarding
+        for (const key of Object.keys(this.credentials) as (keyof StoredCredentials)[]) {
+            const val = this.credentials[key];
+            if (typeof val === 'string') {
+                (this.credentials as any)[key] = '';
+            }
+        }
+        this.credentials = {};
+        console.log('[CredentialsManager] Memory scrubbed');
     }
 
     // =========================================================================

@@ -215,10 +215,8 @@ export class IntelligenceManager extends EventEmitter {
 
             // Add to session transcript
             this.fullTranscript.push(segment);
-            // Cap transcript at 2000 segments to prevent memory leaks
-            if (this.fullTranscript.length > 2000) {
-                this.fullTranscript = this.fullTranscript.slice(-2000);
-            }
+            // Compact transcript with summarization instead of losing early context
+            this.compactTranscriptIfNeeded();
         }
 
         // Check for follow-up intent if user is speaking
@@ -265,10 +263,8 @@ export class IntelligenceManager extends EventEmitter {
             confidence: 1.0
         });
 
-        // Cap transcript
-        if (this.fullTranscript.length > 2000) {
-            this.fullTranscript = this.fullTranscript.slice(-2000);
-        }
+        // Compact transcript with summarization instead of losing early context
+        this.compactTranscriptIfNeeded();
 
         this.lastAssistantMessage = cleanText;
 
@@ -332,13 +328,21 @@ export class IntelligenceManager extends EventEmitter {
      * Get full session context from accumulated transcript (User + Interviewer + Assistant)
      */
     private getFullSessionContext(): string {
-        return this.fullTranscript.map(segment => {
+        const recentTranscript = this.fullTranscript.map(segment => {
             const role = this.mapSpeakerToRole(segment.speaker);
             const label = role === 'interviewer' ? 'INTERVIEWER' :
                 role === 'user' ? 'ME' :
                     'ASSISTANT';
             return `[${label}]: ${segment.text}`;
         }).join('\n');
+
+        // Prepend epoch summaries for full session context preservation
+        if (this.transcriptEpochSummaries.length > 0) {
+            const epochContext = this.transcriptEpochSummaries.join('\n---\n');
+            return `[SESSION HISTORY - EARLIER DISCUSSION]\n${epochContext}\n\n[RECENT TRANSCRIPT]\n${recentTranscript}`;
+        }
+
+        return recentTranscript;
     }
 
     private mapSpeakerToRole(speaker: string): 'interviewer' | 'user' | 'assistant' {
@@ -532,9 +536,7 @@ export class IntelligenceManager extends EventEmitter {
                 answer: fullAnswer
             });
             // Cap usage history
-            if (this.fullUsage.length > 500) {
-                this.fullUsage = this.fullUsage.slice(-500);
-            }
+            this.capUsageArray();
 
             // Emit completion event (legacy consumers + done signal)
             this.emit('suggested_answer', fullAnswer, question || 'What to Answer', confidence);
@@ -612,9 +614,7 @@ export class IntelligenceManager extends EventEmitter {
                     answer: fullRefined
                 });
                 // Cap usage history
-                if (this.fullUsage.length > 500) {
-                    this.fullUsage = this.fullUsage.slice(-500);
-                }
+                this.capUsageArray();
             }
 
             this.setMode('idle');
@@ -668,9 +668,7 @@ export class IntelligenceManager extends EventEmitter {
                     answer: fullSummary
                 });
                 // Cap usage history
-                if (this.fullUsage.length > 500) {
-                    this.fullUsage = this.fullUsage.slice(-500);
-                }
+                this.capUsageArray();
             }
             this.setMode('idle');
             return fullSummary;
@@ -721,9 +719,7 @@ export class IntelligenceManager extends EventEmitter {
                     answer: fullQuestions
                 });
                 // Cap usage history
-                if (this.fullUsage.length > 500) {
-                    this.fullUsage = this.fullUsage.slice(-500);
-                }
+                this.capUsageArray();
             }
             this.setMode('idle');
             return fullQuestions;
@@ -765,9 +761,7 @@ export class IntelligenceManager extends EventEmitter {
                     answer: answer
                 });
                 // Cap usage history
-                if (this.fullUsage.length > 500) {
-                    this.fullUsage = this.fullUsage.slice(-500);
-                }
+                this.capUsageArray();
             }
 
             this.setMode('idle');
@@ -842,6 +836,62 @@ export class IntelligenceManager extends EventEmitter {
     private fullTranscript: TranscriptSegment[] = [];
     private fullUsage: any[] = []; // UsageInteraction
     private sessionStartTime: number = Date.now();
+
+    // Rolling summarization: epoch summaries preserve early context when arrays are compacted
+    private transcriptEpochSummaries: string[] = [];
+    private isCompacting: boolean = false;
+
+    /**
+     * Compact transcript buffer by summarizing oldest entries into an epoch summary.
+     * Called instead of raw slice() to preserve early meeting context.
+     */
+    private async compactTranscriptIfNeeded(): Promise<void> {
+        if (this.fullTranscript.length <= 1800 || this.isCompacting) return;
+
+        this.isCompacting = true;
+        try {
+            // Take the oldest 500 entries to summarize
+            const oldEntries = this.fullTranscript.slice(0, 500);
+            const summaryInput = oldEntries.map(seg => {
+                const role = this.mapSpeakerToRole(seg.speaker);
+                const label = role === 'interviewer' ? 'INTERVIEWER' :
+                    role === 'user' ? 'ME' : 'ASSISTANT';
+                return `[${label}]: ${seg.text}`;
+            }).join('\n');
+
+            // Fire-and-forget LLM summarization (non-blocking)
+            if (this.recapLLM) {
+                try {
+                    const epochSummary = await this.recapLLM.generate(
+                        `Summarize this conversation segment into 3-5 concise bullet points preserving key topics, decisions, and questions:\n\n${summaryInput}`
+                    );
+                    if (epochSummary && epochSummary.trim().length > 0) {
+                        this.transcriptEpochSummaries.push(epochSummary.trim());
+                        console.log(`[IntelligenceManager] Epoch summary created (${this.transcriptEpochSummaries.length} total)`);
+                    }
+                } catch (e) {
+                    // If summarization fails, store a simple marker
+                    const fallback = `[Earlier discussion: ${oldEntries.length} segments, topics: ${oldEntries.slice(0, 3).map(s => s.text.substring(0, 40)).join('; ')}...]`;
+                    this.transcriptEpochSummaries.push(fallback);
+                    console.warn('[IntelligenceManager] Epoch summarization failed, using fallback marker');
+                }
+            }
+
+            // Evict oldest entries, keep recent 1500
+            this.fullTranscript = this.fullTranscript.slice(-1500);
+        } finally {
+            this.isCompacting = false;
+        }
+    }
+
+    /**
+     * Cap usage array with simple eviction (usage doesn't need summarization)
+     */
+    private capUsageArray(): void {
+        if (this.fullUsage.length > 500) {
+            this.fullUsage = this.fullUsage.slice(-500);
+        }
+    }
 
     /**
      * Public method to log usage from external sources (e.g. IPC direct chat)
@@ -1090,6 +1140,7 @@ export class IntelligenceManager extends EventEmitter {
         this.contextItems = [];
         this.fullTranscript = [];
         this.fullUsage = [];
+        this.transcriptEpochSummaries = [];
         this.sessionStartTime = Date.now();
         this.lastAssistantMessage = null;
         this.assistantResponseHistory = []; // Reset temporal RAG history

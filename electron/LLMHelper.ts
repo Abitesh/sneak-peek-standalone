@@ -17,6 +17,7 @@ import { CustomProvider, CurlProvider } from './services/CredentialsManager';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import axios from 'axios';
+import { createProviderRateLimiters, RateLimiter } from './services/RateLimiter';
 const execAsync = promisify(exec);
 
 interface OllamaResponse {
@@ -52,8 +53,14 @@ export class LLMHelper {
   private activeCurlProvider: CurlProvider | null = null;
   private groqFastTextMode: boolean = false;
 
+  // Rate limiters per provider to prevent 429 errors on free tiers
+  private rateLimiters: ReturnType<typeof createProviderRateLimiters>;
+
   constructor(apiKey?: string, useOllama: boolean = false, ollamaModel?: string, ollamaUrl?: string, groqApiKey?: string, openaiApiKey?: string, claudeApiKey?: string) {
     this.useOllama = useOllama
+
+    // Initialize rate limiters
+    this.rateLimiters = createProviderRateLimiters();
 
     // Initialize Groq client if API key provided
     if (groqApiKey) {
@@ -120,6 +127,26 @@ export class LLMHelper {
     this.claudeApiKey = apiKey;
     this.claudeClient = new Anthropic({ apiKey });
     console.log("[LLMHelper] Claude API Key updated.");
+  }
+
+  /**
+   * Scrub all API keys from memory to minimize exposure window.
+   * Called on app quit.
+   */
+  public scrubKeys(): void {
+    this.apiKey = null;
+    this.groqApiKey = null;
+    this.openaiApiKey = null;
+    this.claudeApiKey = null;
+    this.client = null;
+    this.groqClient = null;
+    this.openaiClient = null;
+    this.claudeClient = null;
+    // Destroy rate limiters
+    if (this.rateLimiters) {
+      Object.values(this.rateLimiters).forEach(rl => rl.destroy());
+    }
+    console.log('[LLMHelper] Keys scrubbed from memory');
   }
 
   public setGroqFastTextMode(enabled: boolean) {
@@ -267,6 +294,7 @@ export class LLMHelper {
   public async generateWithPro(contents: any[]): Promise<string> {
     if (!this.client) throw new Error("Gemini client not initialized")
 
+    await this.rateLimiters.gemini.acquire();
     // console.log(`[LLMHelper] Calling ${GEMINI_FLASH_MODEL}...`)
     const response = await this.client.models.generateContent({
       model: GEMINI_FLASH_MODEL,
@@ -286,6 +314,7 @@ export class LLMHelper {
   public async generateWithFlash(contents: any[]): Promise<string> {
     if (!this.client) throw new Error("Gemini client not initialized")
 
+    await this.rateLimiters.gemini.acquire();
     // console.log(`[LLMHelper] Calling ${GEMINI_FLASH_MODEL}...`)
     const response = await this.client.models.generateContent({
       model: GEMINI_FLASH_MODEL,
@@ -834,6 +863,8 @@ ANSWER DIRECTLY:`;
   private async generateWithGroq(fullMessage: string): Promise<string> {
     if (!this.groqClient) throw new Error("Groq client not initialized");
 
+    await this.rateLimiters.groq.acquire();
+
     // Non-streaming Groq call
     const response = await this.groqClient.chat.completions.create({
       model: GROQ_MODEL,
@@ -851,6 +882,8 @@ ANSWER DIRECTLY:`;
    */
   private async generateWithOpenai(userMessage: string, systemPrompt?: string, imagePath?: string): Promise<string> {
     if (!this.openaiClient) throw new Error("OpenAI client not initialized");
+
+    await this.rateLimiters.openai.acquire();
 
     const messages: any[] = [];
     if (systemPrompt) {
@@ -934,6 +967,8 @@ ANSWER DIRECTLY:`;
    */
   private async generateWithClaude(userMessage: string, systemPrompt?: string, imagePath?: string): Promise<string> {
     if (!this.claudeClient) throw new Error("Claude client not initialized");
+
+    await this.rateLimiters.claude.acquire();
 
     const content: any[] = [];
     if (imagePath) {

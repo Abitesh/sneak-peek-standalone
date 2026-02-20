@@ -35,6 +35,28 @@ export class ScreenshotHelper {
     }
   }
 
+  /**
+   * Platform-aware screenshot command builder.
+   * Supports macOS (screencapture), Linux (gnome-screenshot/scrot/import), and Windows (PowerShell).
+   */
+  private getScreenshotCommand(outputPath: string, interactive: boolean): string {
+    const platform = process.platform;
+    if (platform === 'darwin') {
+      return interactive
+        ? `screencapture -i -x "${outputPath}"`
+        : `screencapture -x -C "${outputPath}"`;
+    } else if (platform === 'linux') {
+      return interactive
+        ? `gnome-screenshot -a -f "${outputPath}" 2>/dev/null || scrot -s "${outputPath}" 2>/dev/null || import "${outputPath}"`
+        : `gnome-screenshot -f "${outputPath}" 2>/dev/null || scrot "${outputPath}" 2>/dev/null || import -window root "${outputPath}"`;
+    } else if (platform === 'win32') {
+      // PowerShell full-screen screenshot
+      const psScript = `Add-Type -AssemblyName System.Windows.Forms; $b = [System.Drawing.Bitmap]::new([System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width, [System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Height); $g = [System.Drawing.Graphics]::FromImage($b); $g.CopyFromScreen(0,0,0,0,$b.Size); $b.Save('${outputPath.replace(/'/g, "''")}'); $g.Dispose(); $b.Dispose()`;
+      return `powershell -NoProfile -Command "${psScript}"`;
+    }
+    throw new Error(`Unsupported platform for screenshots: ${platform}`);
+  }
+
   public getView(): "queue" | "solutions" {
     return this.view
   }
@@ -95,7 +117,7 @@ export class ScreenshotHelper {
         // Use native screencapture for reliability on macOS
         // -x: do not play sound
         // -C: capture cursor
-        await exec(`screencapture -x -C "${screenshotPath}"`)
+        await exec(this.getScreenshotCommand(screenshotPath, false))
 
         this.screenshotQueue.push(screenshotPath)
         if (this.screenshotQueue.length > this.MAX_SCREENSHOTS) {
@@ -110,7 +132,7 @@ export class ScreenshotHelper {
         }
       } else {
         screenshotPath = path.join(this.extraScreenshotDir, `${uuidv4()}.png`)
-        await exec(`screencapture -x -C "${screenshotPath}"`)
+        await exec(this.getScreenshotCommand(screenshotPath, false))
 
         this.extraScreenshotQueue.push(screenshotPath)
         if (this.extraScreenshotQueue.length > this.MAX_SCREENSHOTS) {
@@ -154,7 +176,7 @@ export class ScreenshotHelper {
       // -i: interactive mode (selection)
       // -x: do not play sound
       try {
-        await exec(`screencapture -i -x "${screenshotPath}"`)
+        await exec(this.getScreenshotCommand(screenshotPath, true))
       } catch (e: any) {
         // User cancelled selection (exit code 1 usually)
         throw new Error("Selection cancelled")

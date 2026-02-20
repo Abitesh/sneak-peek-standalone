@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import {
     Github, Twitter, Shield, Cpu, Database,
-    Heart, Linkedin, Instagram, Mail, MicOff, Star, Bug
+    Heart, Linkedin, Instagram, Mail, MicOff, Star, Bug, Globe
 } from 'lucide-react';
 import evinProfile from '../assets/evin.png';
 
@@ -126,6 +126,27 @@ export const AboutSection: React.FC<AboutSectionProps> = () => {
             <div>
                 <h4 className="text-xs font-bold text-text-tertiary uppercase tracking-wider mb-2 px-1">Community</h4>
                 <div className="space-y-4">
+                    {/* 0. Official Website */}
+                    <div className="bg-bg-item-surface rounded-xl border border-border-subtle p-5 flex flex-col md:flex-row items-center justify-between gap-4">
+                        <div className="flex items-center gap-4">
+                            <div className="w-10 h-10 rounded-full bg-indigo-500/10 flex items-center justify-center text-indigo-500 shadow-sm shadow-indigo-500/5">
+                                <Globe size={18} className="opacity-80" />
+                            </div>
+                            <div>
+                                <h5 className="text-sm font-bold text-text-primary">Official Website</h5>
+                                <p className="text-xs text-text-secondary mt-0.5">nativelyai.vercel.app</p>
+                            </div>
+                        </div>
+                        <a
+                            href="https://nativelyai.vercel.app"
+                            onClick={(e) => handleOpenLink(e, "https://nativelyai.vercel.app")}
+                            className="whitespace-nowrap px-4 py-2 bg-text-primary hover:bg-white/90 text-bg-main text-xs font-bold rounded-lg transition-all shadow hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0 flex items-center gap-2"
+                        >
+                            <Globe size={14} />
+                            Visit Website
+                        </a>
+                    </div>
+
                     {/* 1. Founder Profile */}
                     <div className="bg-bg-item-surface rounded-xl p-5">
                         <div className="flex flex-col gap-4">

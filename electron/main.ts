@@ -1315,6 +1315,13 @@ export class AppState {
     this.windowHelper.setContentProtection(state)
     this.settingsWindowHelper.setContentProtection(state)
 
+    // Apply or revert disguise based on new state
+    if (state && this.disguiseMode !== 'none') {
+      this._applyDisguise(this.disguiseMode);
+    } else if (!state) {
+      this._applyDisguise('none');
+    }
+
     // Broadcast state change to all relevant windows
     const mainWindow = this.windowHelper.getMainWindow();
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -1623,6 +1630,18 @@ async function initializeApp() {
   app.on("window-all-closed", () => {
     if (process.platform !== "darwin") {
       app.quit()
+    }
+  })
+
+  // Scrub API keys from memory on quit to minimize exposure window
+  app.on("before-quit", () => {
+    try {
+      const { CredentialsManager } = require('./services/CredentialsManager');
+      CredentialsManager.getInstance().scrubMemory();
+      appState.processingHelper.getLLMHelper().scrubKeys();
+      console.log('[Main] Credentials scrubbed from memory on quit');
+    } catch (e) {
+      console.error('[Main] Failed to scrub credentials on quit:', e);
     }
   })
 
