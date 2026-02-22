@@ -50,6 +50,9 @@
       "target": [
         {
           "target": "zip"
+        },
+        {
+          "target": "dmg"
         }
       ],
       "icon": "assets/natively.icns",

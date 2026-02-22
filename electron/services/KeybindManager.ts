@@ -146,8 +146,8 @@ export class KeybindManager {
                     { type: 'separator' },
                     { role: 'services' },
                     { type: 'separator' },
-                    { role: 'hide' },
-                    { role: 'hideOthers' },
+                    { role: 'hide', accelerator: 'CommandOrControl+Option+H' },
+                    { role: 'hideOthers', accelerator: 'CommandOrControl+Option+Shift+H' },
                     { role: 'unhide' },
                     { type: 'separator' },
                     { role: 'quit' }

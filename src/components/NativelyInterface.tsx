@@ -268,6 +268,12 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) =
         return () => unsubscribe();
     }, []);
 
+
+    const handleScreenshotAttach = (data: { path: string; preview: string }) => {
+        setIsExpanded(true);
+        setAttachedContext(data);
+    };
+
     // Connect to Native Audio Backend
     useEffect(() => {
         const cleanups: (() => void)[] = [];
@@ -584,57 +590,12 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) =
                 text: `❌ Error (${data.mode}): ${data.error}`
             }]);
         }));
-
-
-
-
-        // Screenshot taken - auto-analyze
-        cleanups.push(window.electronAPI.onScreenshotTaken(async (data) => {
-            setIsExpanded(true);
-            setIsProcessing(true);
-            analytics.trackCommandExecuted('screenshot_analysis');
-
-            setMessages(prev => [...prev, {
-                id: Date.now().toString(),
-                role: 'user',
-                text: 'Analyzing screenshot...',
-                hasScreenshot: true,
-                screenshotPreview: data.preview
-            }]);
-
-            // Auto-focus input for immediate typing (Robust Retry)
-            // We retry a few times to ensure window focus has settled
-            [100, 300, 600].forEach(delay => {
-                setTimeout(() => {
-                    textInputRef.current?.focus();
-                }, delay);
-            });
-
-            try {
-                const result = await window.electronAPI.invoke('analyze-image-file', data.path);
-                setMessages(prev => [...prev, {
-                    id: Date.now().toString(),
-                    role: 'system',
-                    text: result.text
-                }]);
-            } catch (err) {
-                setMessages(prev => [...prev, {
-                    id: Date.now().toString(),
-                    role: 'system',
-                    text: `Error analyzing screenshot: ${err}`
-                }]);
-            } finally {
-                setIsProcessing(false);
-            }
-        }));
+        // Screenshot taken - attach to chat input instead of auto-analyzing
+        cleanups.push(window.electronAPI.onScreenshotTaken(handleScreenshotAttach));
 
         // Selective Screenshot (Latent Context)
         if (window.electronAPI.onScreenshotAttached) {
-            cleanups.push(window.electronAPI.onScreenshotAttached((data) => {
-                setIsExpanded(true);
-                setAttachedContext(data);
-                // toast/notification could go here
-            }));
+            cleanups.push(window.electronAPI.onScreenshotAttached(handleScreenshotAttach));
         }
 
         return () => cleanups.forEach(fn => fn());
@@ -1340,8 +1301,26 @@ Provide only the answer, nothing else.`;
                 setInputValue('');
             }
         },
-        takeScreenshot: () => window.electronAPI.takeScreenshot(),
-        selectiveScreenshot: () => window.electronAPI.takeSelectiveScreenshot()
+        takeScreenshot: async () => {
+            try {
+                const data = await window.electronAPI.takeScreenshot();
+                if (data && data.path) {
+                    handleScreenshotAttach(data as { path: string; preview: string });
+                }
+            } catch (err) {
+                console.error("Error triggering screenshot:", err);
+            }
+        },
+        selectiveScreenshot: async () => {
+            try {
+                const data = await window.electronAPI.takeSelectiveScreenshot();
+                if (data && !data.cancelled && data.path) {
+                    handleScreenshotAttach(data as { path: string; preview: string });
+                }
+            } catch (err) {
+                console.error("Error triggering selective screenshot:", err);
+            }
+        }
     });
 
     // Update ref
@@ -1358,8 +1337,26 @@ Provide only the answer, nothing else.`;
                 setInputValue('');
             }
         },
-        takeScreenshot: () => window.electronAPI.takeScreenshot(),
-        selectiveScreenshot: () => window.electronAPI.takeSelectiveScreenshot()
+        takeScreenshot: async () => {
+            try {
+                const data = await window.electronAPI.takeScreenshot();
+                if (data && data.path) {
+                    handleScreenshotAttach(data as { path: string; preview: string });
+                }
+            } catch (err) {
+                console.error("Error triggering screenshot:", err);
+            }
+        },
+        selectiveScreenshot: async () => {
+            try {
+                const data = await window.electronAPI.takeSelectiveScreenshot();
+                if (data && !data.cancelled && data.path) {
+                    handleScreenshotAttach(data as { path: string; preview: string });
+                }
+            } catch (err) {
+                console.error("Error triggering selective screenshot:", err);
+            }
+        }
     };
 
     useEffect(() => {

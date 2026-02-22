@@ -851,7 +851,8 @@ export class IntelligenceManager extends EventEmitter {
         this.isCompacting = true;
         try {
             // Take the oldest 500 entries to summarize
-            const oldEntries = this.fullTranscript.slice(0, 500);
+            const summarizeCount = 500;
+            const oldEntries = this.fullTranscript.slice(0, summarizeCount);
             const summaryInput = oldEntries.map(seg => {
                 const role = this.mapSpeakerToRole(seg.speaker);
                 const label = role === 'interviewer' ? 'INTERVIEWER' :
@@ -877,8 +878,8 @@ export class IntelligenceManager extends EventEmitter {
                 }
             }
 
-            // Evict oldest entries, keep recent 1500
-            this.fullTranscript = this.fullTranscript.slice(-1500);
+            // Evict ONLY the exact 500 oldest entries that we just summarized
+            this.fullTranscript = this.fullTranscript.slice(summarizeCount);
         } finally {
             this.isCompacting = false;
         }
