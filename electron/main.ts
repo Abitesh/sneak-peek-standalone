@@ -96,7 +96,7 @@ export class AppState {
   private ragManager: RAGManager | null = null
   private tray: Tray | null = null
   private updateAvailable: boolean = false
-  private disguiseMode: 'terminal' | 'settings' | 'activity' | 'none' = 'none'
+  private disguiseMode: 'terminal' | 'settings' | 'activity' | 'none' = 'terminal'
 
   // View management
   private view: "queue" | "solutions" = "queue"
@@ -1402,8 +1402,10 @@ export class AppState {
     // 1. Update process title (affects Activity Monitor / Task Manager)
     process.title = appName;
 
-    // 2. Update app name (affects macOS Menu / Dock)
+    // 1b. Update app name (critical for macOS Dock / Activity Monitor display)
     app.setName(appName);
+
+    // 2. Update CFBundleName (helps with some macOS API interactions)
     if (process.platform === 'darwin') {
       process.env.CFBundleName = appName.trim();
     }
@@ -1538,9 +1540,20 @@ async function initializeApp() {
   // Initialize IPC handlers before window creation
   initializeIpcHandlers(appState)
 
-  app.whenReady().then(() => {
-    app.setName("Natively"); // Fix App Name in Menu
+  // Set initial app name — apply disguise name early if configured
+  const initialDisguise = appState.getDisguise();
+  const initialAppName = (() => {
+    switch (initialDisguise) {
+      case 'terminal': return 'Terminal ';
+      case 'settings': return 'System Settings ';
+      case 'activity': return 'Activity Monitor ';
+      default: return 'Natively';
+    }
+  })();
+  app.setName(initialAppName);
+  process.title = initialAppName;
 
+  app.whenReady().then(() => {
     CredentialsManager.getInstance().init();
 
     // Anonymous install ping - one-time, non-blocking

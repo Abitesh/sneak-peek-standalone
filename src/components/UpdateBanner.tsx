@@ -48,6 +48,7 @@ const UpdateBanner: React.FC = () => {
     // Demo/Test mode: Press Cmd+I to trigger backend test-fetch
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
+            if (!import.meta.env.DEV) return;
             // The user specifically mentioned Cmd+I should be working
             // Checking: metaKey + i (case insensitive)
             if (e.metaKey && !e.shiftKey && e.key.toLowerCase() === 'i') {

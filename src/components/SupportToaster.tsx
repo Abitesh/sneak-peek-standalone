@@ -43,6 +43,7 @@ export const SupportToaster: React.FC<SupportToasterProps> = ({ className }) => 
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
+            if (!import.meta.env.DEV) return;
             if ((e.metaKey || e.ctrlKey) && e.key === 's') {
                 e.preventDefault();
                 console.log("Debug: Toggling Donation Toaster");

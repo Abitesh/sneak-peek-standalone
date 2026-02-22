@@ -146,7 +146,6 @@ const App: React.FC = () => {
             <NativelyInterface
               onEndMeeting={handleEndMeeting}
             />
-            <UpdateBanner />
             <ToastViewport />
           </ToastProvider>
         </QueryClientProvider>
