@@ -1387,49 +1387,6 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                             </p>
                                         )}
                                     </div>
-
-                                    {/* How It Works - Clean Layout */}
-                                    <div className="pt-2">
-                                        <h4 className="text-xs font-bold text-text-secondary uppercase mb-3 px-1">How it works</h4>
-                                        <div className="space-y-4 px-1">
-                                            <div className="flex items-start gap-4">
-                                                <div className="w-6 h-6 rounded bg-bg-input border border-border-subtle flex items-center justify-center text-text-tertiary shrink-0 mt-0.5">
-                                                    <Upload size={12} />
-                                                </div>
-                                                <div>
-                                                    <h5 className="text-sm font-bold text-text-primary">1. Upload</h5>
-                                                    <p className="text-xs text-text-secondary mt-0.5">Provide a source document detailing your skills and experience.</p>
-                                                </div>
-                                            </div>
-                                            <div className="flex items-start gap-4">
-                                                <div className="w-6 h-6 rounded bg-bg-input border border-border-subtle flex items-center justify-center text-text-tertiary shrink-0 mt-0.5">
-                                                    <FlaskConical size={12} />
-                                                </div>
-                                                <div>
-                                                    <h5 className="text-sm font-bold text-text-primary">2. Process</h5>
-                                                    <p className="text-xs text-text-secondary mt-0.5">The engine parses the file and builds a context graph of your identity.</p>
-                                                </div>
-                                            </div>
-                                            <div className="flex items-start gap-4">
-                                                <div className="w-6 h-6 rounded bg-bg-input border border-border-subtle flex items-center justify-center text-text-tertiary shrink-0 mt-0.5">
-                                                    <Power size={12} />
-                                                </div>
-                                                <div>
-                                                    <h5 className="text-sm font-bold text-text-primary">3. Toggle</h5>
-                                                    <p className="text-xs text-text-secondary mt-0.5">Enable Profile Mode at any time to inject your persona context.</p>
-                                                </div>
-                                            </div>
-                                            <div className="flex items-start gap-4">
-                                                <div className="w-6 h-6 rounded bg-bg-input border border-border-subtle flex items-center justify-center text-text-tertiary shrink-0 mt-0.5">
-                                                    <MessageSquare size={12} />
-                                                </div>
-                                                <div>
-                                                    <h5 className="text-sm font-bold text-text-primary">4. Output</h5>
-                                                    <p className="text-xs text-text-secondary mt-0.5">The AI shapes conversations to reflect your true professional background.</p>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
                                 </div>
                             )}
                             {activeTab === 'ai-providers' && (
