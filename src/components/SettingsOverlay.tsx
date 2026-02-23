@@ -1234,7 +1234,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                             {profileData ? (
                                                 <KnowledgeGraph
                                                     nodeCount={profileData.nodeCount || 50}
-                                                    isDarkMode={document.documentElement.classList.contains('dark')}
+                                                    isDarkMode={document.documentElement.getAttribute('data-theme') !== 'light'}
                                                 />
                                             ) : (
                                                 <div className="absolute inset-0 bg-gradient-to-br from-bg-subtle to-bg-base opacity-50" />

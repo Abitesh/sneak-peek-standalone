@@ -981,9 +981,9 @@ Provide only the answer, nothing else.`;
                                     const lang = match[1] || 'python';
                                     const code = match[2].trim();
                                     return (
-                                        <div key={i} className="my-3 rounded-xl overflow-hidden border border-white/[0.08] shadow-lg bg-black/40 backdrop-blur-md">
+                                        <div key={i} className="my-3 rounded-xl overflow-hidden border border-white/[0.08] shadow-lg bg-zinc-800/60 backdrop-blur-md">
                                             {/* Minimalist Apple Header */}
-                                            <div className="bg-white/[0.02] px-4 py-2 border-b border-white/[0.08]">
+                                            <div className="bg-white/[0.04] px-4 py-2 border-b border-white/[0.08]">
                                                 <span className="text-[10px] uppercase tracking-widest font-semibold text-white/40 font-mono">
                                                     {lang || 'CODE'}
                                                 </span>
@@ -1135,9 +1135,9 @@ Provide only the answer, nothing else.`;
                                     }
 
                                     return (
-                                        <div key={i} className="my-3 rounded-xl overflow-hidden border border-white/[0.08] shadow-lg bg-black/40 backdrop-blur-md">
+                                        <div key={i} className="my-3 rounded-xl overflow-hidden border border-white/[0.08] shadow-lg bg-zinc-800/60 backdrop-blur-md">
                                             {/* Minimalist Apple Header */}
-                                            <div className="bg-white/[0.02] px-4 py-2 border-b border-white/[0.08]">
+                                            <div className="bg-white/[0.04] px-4 py-2 border-b border-white/[0.08]">
                                                 <span className="text-[10px] uppercase tracking-widest font-semibold text-white/40 font-mono">
                                                     {lang || 'CODE'}
                                                 </span>
