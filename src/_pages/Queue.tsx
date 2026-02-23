@@ -364,7 +364,7 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
 
                               return !isInline && match ? (
                                 <div className="my-3 rounded-xl overflow-hidden border border-white/[0.08] shadow-lg bg-zinc-800/60 backdrop-blur-md">
-                                  <div className="bg-white/[0.04] px-4 py-2 border-b border-white/[0.08]">
+                                  <div className="bg-white/[0.04] px-3 py-1.5 border-b border-white/[0.08]">
                                     <span className="text-[10px] uppercase tracking-widest font-semibold text-white/40 font-mono">
                                       {match[1] || 'CODE'}
                                     </span>

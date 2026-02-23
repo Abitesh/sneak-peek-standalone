@@ -983,7 +983,7 @@ Provide only the answer, nothing else.`;
                                     return (
                                         <div key={i} className="my-3 rounded-xl overflow-hidden border border-white/[0.08] shadow-lg bg-zinc-800/60 backdrop-blur-md">
                                             {/* Minimalist Apple Header */}
-                                            <div className="bg-white/[0.04] px-4 py-2 border-b border-white/[0.08]">
+                                            <div className="bg-white/[0.04] px-3 py-1.5 border-b border-white/[0.08]">
                                                 <span className="text-[10px] uppercase tracking-widest font-semibold text-white/40 font-mono">
                                                     {lang || 'CODE'}
                                                 </span>
@@ -1019,7 +1019,7 @@ Provide only the answer, nothing else.`;
                                         remarkPlugins={[remarkGfm, remarkMath]}
                                         rehypePlugins={[rehypeKatex]}
                                         components={{
-                                            p: ({ node, ...props }: any) => <p className="mb-2 last:mb-0" {...props} />,
+                                            p: ({ node, ...props }: any) => <p className="mb-2 last:mb-0 whitespace-pre-wrap" {...props} />,
                                             strong: ({ node, ...props }: any) => <strong className="font-bold text-white" {...props} />,
                                             em: ({ node, ...props }: any) => <em className="italic text-slate-300" {...props} />,
                                             ul: ({ node, ...props }: any) => <ul className="list-disc ml-4 mb-2 space-y-1" {...props} />,
@@ -1028,7 +1028,7 @@ Provide only the answer, nothing else.`;
                                             h1: ({ node, ...props }: any) => <h1 className="text-lg font-bold text-white mb-2 mt-3" {...props} />,
                                             h2: ({ node, ...props }: any) => <h2 className="text-base font-bold text-white mb-2 mt-3" {...props} />,
                                             h3: ({ node, ...props }: any) => <h3 className="text-sm font-bold text-white mb-1 mt-2" {...props} />,
-                                            code: ({ node, ...props }: any) => <code className="bg-slate-700/50 rounded px-1 py-0.5 text-xs font-mono text-purple-200" {...props} />,
+                                            code: ({ node, ...props }: any) => <code className="bg-slate-700/50 rounded px-1 py-0.5 text-xs font-mono text-purple-200 whitespace-pre-wrap" {...props} />,
                                             blockquote: ({ node, ...props }: any) => <blockquote className="border-l-2 border-purple-500/50 pl-3 italic text-slate-400 my-2" {...props} />,
                                             a: ({ node, ...props }: any) => <a className="text-blue-400 hover:text-blue-300 hover:underline" target="_blank" rel="noopener noreferrer" {...props} />,
                                         }}
@@ -1137,7 +1137,7 @@ Provide only the answer, nothing else.`;
                                     return (
                                         <div key={i} className="my-3 rounded-xl overflow-hidden border border-white/[0.08] shadow-lg bg-zinc-800/60 backdrop-blur-md">
                                             {/* Minimalist Apple Header */}
-                                            <div className="bg-white/[0.04] px-4 py-2 border-b border-white/[0.08]">
+                                            <div className="bg-white/[0.04] px-3 py-1.5 border-b border-white/[0.08]">
                                                 <span className="text-[10px] uppercase tracking-widest font-semibold text-white/40 font-mono">
                                                     {lang || 'CODE'}
                                                 </span>

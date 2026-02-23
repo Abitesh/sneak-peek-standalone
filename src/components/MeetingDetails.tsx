@@ -424,7 +424,7 @@ ${meeting.detailedSummary.keyPoints?.map(item => `- ${item}`).join('\n') || 'Non
                                                                 h1: ({ node, ...props }) => <h1 className="text-xl font-bold text-text-primary mt-4 mb-2" {...props} />,
                                                                 h2: ({ node, ...props }) => <h2 className="text-lg font-semibold text-text-primary mt-4 mb-2" {...props} />,
                                                                 h3: ({ node, ...props }) => <h3 className="text-base font-semibold text-text-primary mt-3 mb-1" {...props} />,
-                                                                p: ({ node, ...props }) => <p className="text-sm text-text-secondary leading-relaxed mb-2" {...props} />,
+                                                                p: ({ node, ...props }) => <p className="text-sm text-text-secondary leading-relaxed mb-2 whitespace-pre-wrap" {...props} />,
                                                                 ul: ({ node, ...props }) => <ul className="list-disc ml-4 mb-2 space-y-1" {...props} />,
                                                                 ol: ({ node, ...props }) => <ol className="list-decimal ml-4 mb-2 space-y-1" {...props} />,
                                                                 li: ({ node, ...props }) => <li className="text-sm text-text-secondary" {...props} />,
@@ -437,7 +437,7 @@ ${meeting.detailedSummary.keyPoints?.map(item => `- ${item}`).join('\n') || 'Non
 
                                                                     return !isInline && match ? (
                                                                         <div className="my-3 rounded-xl overflow-hidden border border-white/[0.08] shadow-lg bg-zinc-800/60 backdrop-blur-md">
-                                                                            <div className="bg-white/[0.04] px-4 py-2 border-b border-white/[0.08]">
+                                                                            <div className="bg-white/[0.04] px-3 py-1.5 border-b border-white/[0.08]">
                                                                                 <span className="text-[10px] uppercase tracking-widest font-semibold text-white/40 font-mono">
                                                                                     {match[1] || 'CODE'}
                                                                                 </span>
@@ -465,7 +465,7 @@ ${meeting.detailedSummary.keyPoints?.map(item => `- ${item}`).join('\n') || 'Non
                                                                             </div>
                                                                         </div>
                                                                     ) : (
-                                                                        <code className="bg-bg-tertiary px-1.5 py-0.5 rounded text-[13px] font-mono text-text-primary border border-border-subtle" {...props}>
+                                                                        <code className="bg-bg-tertiary px-1.5 py-0.5 rounded text-[13px] font-mono text-text-primary border border-border-subtle whitespace-pre-wrap" {...props}>
                                                                             {children}
                                                                         </code>
                                                                     );

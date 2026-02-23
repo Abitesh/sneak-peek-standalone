@@ -108,7 +108,7 @@ const AssistantMessage: React.FC<{ content: string; isStreaming?: boolean }> = (
                         remarkPlugins={[remarkGfm, remarkMath]}
                         rehypePlugins={[rehypeKatex]}
                         components={{
-                            p: ({ node, ...props }: any) => <p className="mb-2 last:mb-0" {...props} />,
+                            p: ({ node, ...props }: any) => <p className="mb-2 last:mb-0 whitespace-pre-wrap" {...props} />,
                             a: ({ node, ...props }: any) => <a className="text-blue-500 hover:underline" {...props} />,
                             pre: ({ children }: any) => <div className="not-prose mb-4">{children}</div>,
                             code: ({ node, className, children, ...props }: any) => {
@@ -117,7 +117,7 @@ const AssistantMessage: React.FC<{ content: string; isStreaming?: boolean }> = (
 
                                 return !isInline && match ? (
                                     <div className="my-3 rounded-xl overflow-hidden border border-white/[0.08] shadow-lg bg-zinc-800/60 backdrop-blur-md">
-                                        <div className="bg-white/[0.04] px-4 py-2 border-b border-white/[0.08]">
+                                        <div className="bg-white/[0.04] px-3 py-1.5 border-b border-white/[0.08]">
                                             <span className="text-[10px] uppercase tracking-widest font-semibold text-white/40 font-mono">
                                                 {match[1] || 'CODE'}
                                             </span>
@@ -145,7 +145,7 @@ const AssistantMessage: React.FC<{ content: string; isStreaming?: boolean }> = (
                                         </div>
                                     </div>
                                 ) : (
-                                    <code className="bg-bg-tertiary px-1.5 py-0.5 rounded text-[13px] font-mono text-text-primary border border-border-subtle" {...props}>
+                                    <code className="bg-bg-tertiary px-1.5 py-0.5 rounded text-[13px] font-mono text-text-primary border border-border-subtle whitespace-pre-wrap" {...props}>
                                         {children}
                                     </code>
                                 );

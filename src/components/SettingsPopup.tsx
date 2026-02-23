@@ -16,25 +16,29 @@ const SettingsPopup = () => {
 
     const [hasStoredKey, setHasStoredKey] = useState<Record<string, boolean>>({});
 
-    // Load Initial Data
-    useEffect(() => {
-        const loadCredentials = async () => {
-            try {
-                // @ts-ignore
-                const creds = await window.electronAPI?.getStoredCredentials?.();
-                if (creds) {
-                    setHasStoredKey({
-                        gemini: creds.hasGeminiKey,
-                        groq: creds.hasGroqKey,
-                        openai: creds.hasOpenaiKey,
-                        claude: creds.hasClaudeKey
-                    });
-                }
-            } catch (e) {
-                console.error("Failed to load settings:", e);
+    // Load credentials func
+    const loadCredentials = async () => {
+        try {
+            // @ts-ignore
+            const creds = await window.electronAPI?.getStoredCredentials?.();
+            if (creds) {
+                setHasStoredKey({
+                    gemini: creds.hasGeminiKey,
+                    groq: creds.hasGroqKey,
+                    openai: creds.hasOpenaiKey,
+                    claude: creds.hasClaudeKey
+                });
             }
-        };
+        } catch (e) {
+            console.error("Failed to load settings:", e);
+        }
+    };
+
+    // Load Initial Data and refresh on focus
+    useEffect(() => {
         loadCredentials();
+        const handleFocus = () => loadCredentials();
+        window.addEventListener('focus', handleFocus);
 
         // Load profile status
         const loadProfile = async () => {
@@ -48,21 +52,9 @@ const SettingsPopup = () => {
             } catch (e) { /* ignore */ }
         };
         loadProfile();
-    }, []);
 
-    // Effect to enforce fast mode disabled if no Groq key
-    useEffect(() => {
-        if (!isFirstRender.current && hasStoredKey.groq === false && useGroqFastText) {
-            setUseGroqFastText(false);
-            localStorage.setItem('natively_groq_fast_text', 'false');
-            try {
-                // @ts-ignore
-                window.electronAPI?.invoke('set-groq-fast-text-mode', false);
-            } catch (e) {
-                console.error(e);
-            }
-        }
-    }, [hasStoredKey.groq, useGroqFastText]);
+        return () => window.removeEventListener('focus', handleFocus);
+    }, []);
 
     // Sync with global state changes
     useEffect(() => {

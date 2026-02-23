@@ -13,7 +13,7 @@ import { AIProvidersSettings } from './settings/AIProvidersSettings';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useShortcuts } from '../hooks/useShortcuts';
 import { KeyRecorder } from './ui/KeyRecorder';
-import { KnowledgeGraph } from './profile/KnowledgeGraph';
+import { ProfileVisualizer } from './profile/ProfileVisualizer';
 
 interface CustomSelectProps {
     label: string;
@@ -1228,24 +1228,13 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                     </div>
 
                                     {/* Intelligence Graph Hero Card */}
-                                    <div className="relative rounded-[24px] overflow-hidden border border-border-subtle bg-bg-item-surface shadow-[inset_0_1px_rgba(255,255,255,0.05),0_8px_30px_rgba(0,0,0,0.04)] dark:shadow-[inset_0_1px_rgba(255,255,255,0.05),0_8px_30px_rgba(0,0,0,0.2)]">
-                                        {/* Physical Graph Background */}
-                                        <div className="absolute inset-0 z-0">
-                                            {profileData ? (
-                                                <KnowledgeGraph
-                                                    nodeCount={profileData.nodeCount || 50}
-                                                    isDarkMode={document.documentElement.getAttribute('data-theme') !== 'light'}
-                                                />
-                                            ) : (
-                                                <div className="absolute inset-0 bg-gradient-to-br from-bg-subtle to-bg-base opacity-50" />
-                                            )}
-                                        </div>
+                                    <div className="relative rounded-[24px] overflow-hidden bg-bg-item-surface bg-gradient-to-br from-bg-subtle/50 to-bg-base">
 
                                         {/* Glassmorphic Foreground Content */}
                                         <div className="relative z-10 flex flex-col justify-between min-h-[220px]">
 
                                             {/* Header */}
-                                            <div className="p-6 pb-4 border-b border-white/10 dark:border-white/5 bg-white/40 dark:bg-black/20 backdrop-blur-xl">
+                                            <div className="p-6 pb-4 bg-white/40 dark:bg-black/20 backdrop-blur-xl">
                                                 <div className="flex items-center justify-between">
                                                     <div className="flex items-center gap-4">
                                                         <div className="w-[52px] h-[52px] rounded-full bg-gradient-to-b from-bg-surface to-bg-input border border-border-subtle flex items-center justify-center text-text-primary shadow-[inset_0_1px_rgba(255,255,255,0.5),0_2px_10px_rgba(0,0,0,0.05)] dark:shadow-[inset_0_1px_rgba(255,255,255,0.1),0_2px_10px_rgba(0,0,0,0.2)] hover:scale-105 transition-transform duration-500">
@@ -1418,6 +1407,8 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                             )}
                                         </div>
                                     </div>
+
+                                    <ProfileVisualizer profileData={profileData} />
                                 </div>
                             )}
                             {activeTab === 'ai-providers' && (
