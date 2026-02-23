@@ -1234,7 +1234,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                         <div className="relative z-10 flex flex-col justify-between min-h-[220px]">
 
                                             {/* Header */}
-                                            <div className="p-6 pb-4 bg-white/40 dark:bg-black/20 backdrop-blur-xl">
+                                            <div className="p-6 pb-4">
                                                 <div className="flex items-center justify-between">
                                                     <div className="flex items-center gap-4">
                                                         <div className="w-[52px] h-[52px] rounded-full bg-gradient-to-b from-bg-surface to-bg-input border border-border-subtle flex items-center justify-center text-text-primary shadow-[inset_0_1px_rgba(255,255,255,0.5),0_2px_10px_rgba(0,0,0,0.05)] dark:shadow-[inset_0_1px_rgba(255,255,255,0.1),0_2px_10px_rgba(0,0,0,0.2)] hover:scale-105 transition-transform duration-500">
@@ -1293,7 +1293,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                             </div>
 
                                             {/* Data Metrics & Extracted Skills */}
-                                            <div className="p-6 bg-gradient-to-t from-bg-surface/90 to-bg-surface/40 dark:from-bg-surface/80 dark:to-transparent backdrop-blur-sm border-t border-white/10 dark:border-white/5 mt-auto">
+                                            <div className="p-6 mt-auto">
                                                 <div className="grid grid-cols-3 gap-8">
                                                     <div>
                                                         <div className="text-[11px] font-medium text-text-tertiary uppercase tracking-widest mb-1.5 flex items-center gap-1.5">

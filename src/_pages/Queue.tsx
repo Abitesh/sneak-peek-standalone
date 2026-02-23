@@ -358,20 +358,21 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
                             p: ({ node, ...props }: any) => <p className="mb-2 last:mb-0 whitespace-pre-wrap" {...props} />,
                             a: ({ node, ...props }: any) => <a className="underline hover:opacity-80" target="_blank" rel="noopener noreferrer" {...props} />,
                             pre: ({ children }: any) => <div className="not-prose mb-4">{children}</div>,
-                            code: ({ node, className, children, ...props }: any) => {
+                            code: ({ node, inline, className, children, ...props }: any) => {
                               const match = /language-(\w+)/.exec(className || '');
-                              const isInline = props.inline ?? !match;
+                              const isInline = inline ?? false;
+                              const lang = match ? match[1] : '';
 
-                              return !isInline && match ? (
+                              return !isInline ? (
                                 <div className="my-3 rounded-xl overflow-hidden border border-white/[0.08] shadow-lg bg-zinc-800/60 backdrop-blur-md">
                                   <div className="bg-white/[0.04] px-3 py-1.5 border-b border-white/[0.08]">
                                     <span className="text-[10px] uppercase tracking-widest font-semibold text-white/40 font-mono">
-                                      {match[1] || 'CODE'}
+                                      {lang || 'CODE'}
                                     </span>
                                   </div>
                                   <div className="bg-transparent">
                                     <SyntaxHighlighter
-                                      language={match[1]}
+                                      language={lang || 'text'}
                                       style={vscDarkPlus}
                                       customStyle={{
                                         margin: 0,
