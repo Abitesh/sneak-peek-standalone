@@ -92,10 +92,12 @@ This demo shows **a complete live meeting scenario**:
 >     xattr -cr /Applications/Natively.app
 >     ```
 >     **For .dmg downloads:**
->     ```bash
->     xattr -cr ~/Downloads/Natively-1.1.7-arm64.dmg && \
->     xattr -cr /Applications/Natively.app
->     ```
+>     1. Open Terminal and run: 
+>        ```bash
+>        xattr -cr ~/Downloads/Natively-1.1.7-arm64.dmg
+>        ```
+>     2. Install the natively.dmg
+>     3. Open Terminal and run: `xattr -cr /Applications/Natively.app`
 
 
 ### What's New in v1.1.6

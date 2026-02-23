@@ -79,6 +79,8 @@ import { DeepgramStreamingSTT } from "./audio/DeepgramStreamingSTT"
 import { ThemeManager } from "./ThemeManager"
 import { RAGManager } from "./rag/RAGManager"
 import { DatabaseManager } from "./db/DatabaseManager"
+import { KnowledgeOrchestrator } from "./knowledge/KnowledgeOrchestrator"
+import { KnowledgeDatabaseManager } from "./knowledge/KnowledgeDatabaseManager"
 import { CredentialsManager } from "./services/CredentialsManager"
 import { ReleaseNotesManager } from "./update/ReleaseNotesManager"
 
@@ -94,6 +96,7 @@ export class AppState {
   private intelligenceManager: IntelligenceManager
   private themeManager: ThemeManager
   private ragManager: RAGManager | null = null
+  private knowledgeOrchestrator: KnowledgeOrchestrator | null = null
   private tray: Tray | null = null
   private updateAvailable: boolean = false
   private disguiseMode: 'terminal' | 'settings' | 'activity' | 'none' = 'terminal'
@@ -152,6 +155,40 @@ export class AppState {
       this.updateTrayMenu();
     });
 
+    keybindManager.onShortcutTriggered(async (actionId) => {
+      console.log(`[Main] Global shortcut triggered: ${actionId}`);
+      try {
+        if (actionId === 'general:toggle-visibility') {
+          this.toggleMainWindow();
+        } else if (actionId === 'general:take-screenshot') {
+          const screenshotPath = await this.takeScreenshot();
+          const preview = await this.getImagePreview(screenshotPath);
+          const mainWindow = this.getMainWindow();
+          if (mainWindow) {
+            mainWindow.webContents.send("screenshot-taken", {
+              path: screenshotPath,
+              preview
+            });
+          }
+        } else if (actionId === 'general:selective-screenshot') {
+          const screenshotPath = await this.takeSelectiveScreenshot();
+          const preview = await this.getImagePreview(screenshotPath);
+          const mainWindow = this.getMainWindow();
+          if (mainWindow) {
+            // preload.ts maps 'screenshot-attached' to onScreenshotAttached
+            mainWindow.webContents.send("screenshot-attached", {
+              path: screenshotPath,
+              preview
+            });
+          }
+        }
+      } catch (e: any) {
+        if (e.message !== "Selection cancelled") {
+          console.error(`[Main] Error handling global shortcut ${actionId}:`, e);
+        }
+      }
+    });
+
     // Inject WindowHelper into other helpers
     this.settingsWindowHelper.setWindowHelper(this.windowHelper);
     this.modelSelectorWindowHelper.setWindowHelper(this.windowHelper);
@@ -205,6 +242,56 @@ export class AppState {
       }
     } catch (error) {
       console.error('[AppState] Failed to initialize RAGManager:', error);
+    }
+
+    // Initialize Knowledge Orchestrator
+    try {
+      const db = DatabaseManager.getInstance();
+      const sqliteDb = db.getDb();
+
+      if (sqliteDb) {
+        const knowledgeDb = new KnowledgeDatabaseManager(sqliteDb);
+        this.knowledgeOrchestrator = new KnowledgeOrchestrator(knowledgeDb);
+
+        // Wire up LLM functions
+        const llmHelper = this.processingHelper.getLLMHelper();
+
+        // generateContent function for LLM calls
+        this.knowledgeOrchestrator.setGenerateContentFn(async (contents: any[]) => {
+          return await llmHelper.chatWithGemini(
+            contents[0]?.text || '',
+            undefined,
+            undefined,
+            true // skipSystemPrompt for raw content generation
+          );
+        });
+
+        // Embedding function using Gemini embeddings API
+        const { GoogleGenAI } = require('@google/genai');
+        const { CredentialsManager } = require('./services/CredentialsManager');
+        const cm = CredentialsManager.getInstance();
+        const geminiKey = cm.getGeminiApiKey() || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
+        if (geminiKey) {
+          const genAI = new GoogleGenAI({ apiKey: geminiKey });
+          this.knowledgeOrchestrator.setEmbedFn(async (text: string) => {
+            const result = await genAI.models.embedContent({
+              model: 'models/gemini-embedding-001',
+              contents: [{ parts: [{ text }] }]
+            });
+            if (!result.embeddings || !result.embeddings[0]) {
+              throw new Error('No embedding returned from API');
+            }
+            return result.embeddings[0].values as number[];
+          });
+        }
+
+        // Attach KnowledgeOrchestrator to LLMHelper
+        llmHelper.setKnowledgeOrchestrator(this.knowledgeOrchestrator);
+
+        console.log('[AppState] KnowledgeOrchestrator initialized');
+      }
+    } catch (error) {
+      console.error('[AppState] Failed to initialize KnowledgeOrchestrator:', error);
     }
   }
 
@@ -1011,6 +1098,10 @@ export class AppState {
 
   public getRAGManager(): RAGManager | null {
     return this.ragManager;
+  }
+
+  public getKnowledgeOrchestrator(): KnowledgeOrchestrator | null {
+    return this.knowledgeOrchestrator;
   }
 
   public getView(): "queue" | "solutions" {

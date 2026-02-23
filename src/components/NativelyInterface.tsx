@@ -29,7 +29,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { dracula } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 // import { ModelSelector } from './ui/ModelSelector'; // REMOVED
 import TopPill from './ui/TopPill';
 import RollingTranscript from './ui/RollingTranscript';
@@ -981,35 +981,33 @@ Provide only the answer, nothing else.`;
                                     const lang = match[1] || 'python';
                                     const code = match[2].trim();
                                     return (
-                                        <div key={i} className="my-3 rounded-lg overflow-hidden border border-white/10 shadow-sm bg-[#0f172a]">
-                                            {/* IDE-style Header */}
-                                            <div className="bg-[#1e293b] px-3 py-1.5 flex items-center justify-between border-b border-white/5">
-                                                <div className="flex items-center gap-2 text-[10px] uppercase font-bold text-slate-400 font-mono">
-                                                    <div className="w-2 h-2 rounded-full bg-purple-500/80" />
+                                        <div key={i} className="my-3 rounded-xl overflow-hidden border border-white/[0.08] shadow-lg bg-black/40 backdrop-blur-md">
+                                            {/* Minimalist Apple Header */}
+                                            <div className="bg-white/[0.02] px-4 py-2 border-b border-white/[0.08]">
+                                                <span className="text-[10px] uppercase tracking-widest font-semibold text-white/40 font-mono">
                                                     {lang || 'CODE'}
-                                                </div>
-                                                <div className="flex gap-1.5">
-                                                    <div className="w-2 h-2 rounded-full bg-white/10" />
-                                                    <div className="w-2 h-2 rounded-full bg-white/10" />
-                                                </div>
+                                                </span>
                                             </div>
-                                            <SyntaxHighlighter
-                                                language={lang}
-                                                style={dracula}
-                                                customStyle={{
-                                                    margin: 0,
-                                                    borderRadius: 0,
-                                                    fontSize: '12px',
-                                                    background: 'transparent',
-                                                    padding: '12px',
-                                                    fontFamily: 'JetBrains Mono, Menlo, monospace'
-                                                }}
-                                                wrapLongLines={true}
-                                                showLineNumbers={true}
-                                                lineNumberStyle={{ minWidth: '2em', paddingRight: '1em', color: '#475569', textAlign: 'right' }}
-                                            >
-                                                {code}
-                                            </SyntaxHighlighter>
+                                            <div className="bg-transparent">
+                                                <SyntaxHighlighter
+                                                    language={lang}
+                                                    style={vscDarkPlus}
+                                                    customStyle={{
+                                                        margin: 0,
+                                                        borderRadius: 0,
+                                                        fontSize: '13px',
+                                                        lineHeight: '1.6',
+                                                        background: 'transparent',
+                                                        padding: '16px',
+                                                        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace'
+                                                    }}
+                                                    wrapLongLines={true}
+                                                    showLineNumbers={true}
+                                                    lineNumberStyle={{ minWidth: '2.5em', paddingRight: '1.2em', color: 'rgba(255,255,255,0.2)', textAlign: 'right', fontSize: '11px' }}
+                                                >
+                                                    {code}
+                                                </SyntaxHighlighter>
+                                            </div>
                                         </div>
                                     );
                                 }
@@ -1137,36 +1135,34 @@ Provide only the answer, nothing else.`;
                                     }
 
                                     return (
-                                        <div key={i} className="my-3 rounded-lg overflow-hidden border border-white/10 shadow-sm bg-[#0f172a]">
-                                            {/* IDE-style Header */}
-                                            <div className="bg-[#1e293b] px-3 py-1.5 flex items-center justify-between border-b border-white/5">
-                                                <div className="flex items-center gap-2 text-[10px] uppercase font-bold text-slate-400 font-mono">
-                                                    <div className="w-2 h-2 rounded-full bg-emerald-500/80" />
+                                        <div key={i} className="my-3 rounded-xl overflow-hidden border border-white/[0.08] shadow-lg bg-black/40 backdrop-blur-md">
+                                            {/* Minimalist Apple Header */}
+                                            <div className="bg-white/[0.02] px-4 py-2 border-b border-white/[0.08]">
+                                                <span className="text-[10px] uppercase tracking-widest font-semibold text-white/40 font-mono">
                                                     {lang || 'CODE'}
-                                                </div>
-                                                <div className="flex gap-1.5">
-                                                    <div className="w-2 h-2 rounded-full bg-white/10" />
-                                                    <div className="w-2 h-2 rounded-full bg-white/10" />
-                                                </div>
+                                                </span>
                                             </div>
 
-                                            <SyntaxHighlighter
-                                                language={lang}
-                                                style={dracula}
-                                                customStyle={{
-                                                    margin: 0,
-                                                    borderRadius: 0,
-                                                    fontSize: '12px',
-                                                    background: 'transparent',
-                                                    padding: '12px',
-                                                    fontFamily: 'JetBrains Mono, Menlo, monospace'
-                                                }}
-                                                wrapLongLines={true}
-                                                showLineNumbers={true}
-                                                lineNumberStyle={{ minWidth: '2em', paddingRight: '1em', color: '#475569', textAlign: 'right' }}
-                                            >
-                                                {code}
-                                            </SyntaxHighlighter>
+                                            <div className="bg-transparent">
+                                                <SyntaxHighlighter
+                                                    language={lang}
+                                                    style={vscDarkPlus}
+                                                    customStyle={{
+                                                        margin: 0,
+                                                        borderRadius: 0,
+                                                        fontSize: '13px',
+                                                        lineHeight: '1.6',
+                                                        background: 'transparent',
+                                                        padding: '16px',
+                                                        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace'
+                                                    }}
+                                                    wrapLongLines={true}
+                                                    showLineNumbers={true}
+                                                    lineNumberStyle={{ minWidth: '2.5em', paddingRight: '1.2em', color: 'rgba(255,255,255,0.2)', textAlign: 'right', fontSize: '11px' }}
+                                                >
+                                                    {code}
+                                                </SyntaxHighlighter>
+                                            </div>
                                         </div>
                                     );
                                 }

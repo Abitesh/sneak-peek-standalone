@@ -164,6 +164,14 @@ export interface ElectronAPI {
   setKeybind: (id: string, accelerator: string) => Promise<boolean>
   resetKeybinds: () => Promise<Array<{ id: string; label: string; accelerator: string; isGlobal: boolean; defaultAccelerator: string }>>
   onKeybindsUpdate: (callback: (keybinds: Array<any>) => void) => () => void
+
+  // Profile Engine API
+  profileUploadResume: (filePath: string) => Promise<{ success: boolean; error?: string }>
+  profileGetStatus: () => Promise<{ hasProfile: boolean; profileMode: boolean; name?: string; role?: string; totalExperienceYears?: number }>
+  profileSetMode: (enabled: boolean) => Promise<{ success: boolean; error?: string }>
+  profileDelete: () => Promise<{ success: boolean; error?: string }>
+  profileGetProfile: () => Promise<any>
+  profileSelectFile: () => Promise<{ success?: boolean; cancelled?: boolean; filePath?: string; error?: string }>
 }
 
 declare global {

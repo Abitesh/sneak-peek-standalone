@@ -963,8 +963,9 @@ export function initializeIpcHandlers(appState: AppState): void {
         });
       } else if (provider === 'openai') {
         response = await axios.post('https://api.openai.com/v1/chat/completions', {
-          model: "gpt-3.5-turbo",
-          messages: [{ role: "user", content: "Hello" }]
+          model: "gpt-5.2-chat-latest",
+          messages: [{ role: "user", content: "Hello" }],
+          max_completion_tokens: 10
         }, {
           headers: { Authorization: `Bearer ${apiKey}` }
         });
@@ -1601,5 +1602,101 @@ export function initializeIpcHandlers(appState: AppState): void {
     if (!ragManager) return { success: false };
     await ragManager.retryPendingEmbeddings();
     return { success: true };
+  });
+
+  // ==========================================
+  // Profile Engine IPC Handlers
+  // ==========================================
+
+  safeHandle("profile:upload-resume", async (_, filePath: string) => {
+    try {
+      console.log(`[IPC] profile:upload-resume called with: ${filePath}`);
+      const orchestrator = appState.getKnowledgeOrchestrator();
+      if (!orchestrator) {
+        return { success: false, error: 'Knowledge engine not initialized. Please ensure API keys are configured.' };
+      }
+      const { DocType } = require('./knowledge/types');
+      const result = await orchestrator.ingestDocument(filePath, DocType.RESUME);
+      return result;
+    } catch (error: any) {
+      console.error('[IPC] profile:upload-resume error:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  safeHandle("profile:get-status", async () => {
+    try {
+      const orchestrator = appState.getKnowledgeOrchestrator();
+      if (!orchestrator) {
+        return { hasProfile: false, profileMode: false };
+      }
+      // Map new KnowledgeStatus back to legacy UI shape temporarily
+      const status = orchestrator.getStatus();
+      return {
+        hasProfile: status.hasResume,
+        profileMode: status.activeMode,
+        name: status.resumeSummary?.name,
+        role: status.resumeSummary?.role,
+        totalExperienceYears: status.resumeSummary?.totalExperienceYears
+      };
+    } catch (error: any) {
+      return { hasProfile: false, profileMode: false };
+    }
+  });
+
+  safeHandle("profile:set-mode", async (_, enabled: boolean) => {
+    try {
+      const orchestrator = appState.getKnowledgeOrchestrator();
+      if (!orchestrator) {
+        return { success: false, error: 'Knowledge engine not initialized' };
+      }
+      orchestrator.setKnowledgeMode(enabled);
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  safeHandle("profile:delete", async () => {
+    try {
+      const orchestrator = appState.getKnowledgeOrchestrator();
+      if (!orchestrator) {
+        return { success: false, error: 'Knowledge engine not initialized' };
+      }
+      const { DocType } = require('./knowledge/types');
+      orchestrator.deleteDocumentsByType(DocType.RESUME);
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  safeHandle("profile:get-profile", async () => {
+    try {
+      const orchestrator = appState.getKnowledgeOrchestrator();
+      if (!orchestrator) return null;
+      return orchestrator.getProfileData();
+    } catch (error: any) {
+      return null;
+    }
+  });
+
+  safeHandle("profile:select-file", async () => {
+    try {
+      const result: any = await dialog.showOpenDialog({
+        properties: ['openFile'],
+        filters: [
+          { name: 'Resume Files', extensions: ['pdf', 'docx', 'txt'] }
+        ]
+      });
+
+      if (result.canceled || result.filePaths.length === 0) {
+        return { cancelled: true };
+      }
+
+      return { success: true, filePath: result.filePaths[0] };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
   });
 }

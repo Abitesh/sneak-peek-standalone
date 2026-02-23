@@ -12,6 +12,7 @@ import {
   CUSTOM_RECAP_PROMPT, CUSTOM_FOLLOWUP_PROMPT, CUSTOM_FOLLOW_UP_QUESTIONS_PROMPT, CUSTOM_ASSIST_PROMPT
 } from "./llm/prompts"
 import { deepVariableReplacer, getByPath } from './utils/curlUtils';
+import { KnowledgeOrchestrator } from './knowledge/KnowledgeOrchestrator';
 import curl2Json from "@bany/curl-to-json";
 import { CustomProvider, CurlProvider } from './services/CredentialsManager';
 import { exec } from 'child_process';
@@ -52,6 +53,7 @@ export class LLMHelper {
   private customProvider: CustomProvider | null = null;
   private activeCurlProvider: CurlProvider | null = null;
   private groqFastTextMode: boolean = false;
+  private knowledgeOrchestrator: KnowledgeOrchestrator | null = null;
 
   // Rate limiters per provider to prevent 429 errors on free tiers
   private rateLimiters: ReturnType<typeof createProviderRateLimiters>;
@@ -665,9 +667,51 @@ ANSWER DIRECTLY:`;
     }
   }
 
+  /**
+   * Set the KnowledgeOrchestrator for knowledge mode integration.
+   */
+  public setKnowledgeOrchestrator(orchestrator: KnowledgeOrchestrator): void {
+    this.knowledgeOrchestrator = orchestrator;
+    console.log('[LLMHelper] KnowledgeOrchestrator attached');
+  }
+
+  public getKnowledgeOrchestrator(): KnowledgeOrchestrator | null {
+    return this.knowledgeOrchestrator;
+  }
+
   public async chatWithGemini(message: string, imagePath?: string, context?: string, skipSystemPrompt: boolean = false, alternateGroqMessage?: string): Promise<string> {
     try {
       console.log(`[LLMHelper] chatWithGemini called with message:`, message.substring(0, 50))
+
+      // ============================================================
+      // KNOWLEDGE MODE INTERCEPT
+      // If knowledge mode is active, check for intro questions and
+      // inject system prompt + relevant context
+      // ============================================================
+      if (this.knowledgeOrchestrator?.isKnowledgeMode()) {
+        try {
+          const knowledgeResult = await this.knowledgeOrchestrator.processQuestion(message);
+          if (knowledgeResult) {
+            // Intro question shortcut — return generated response directly
+            if (knowledgeResult.isIntroQuestion && knowledgeResult.introResponse) {
+              console.log('[LLMHelper] Knowledge mode: returning generated intro response');
+              return knowledgeResult.introResponse;
+            }
+            // Inject knowledge system prompt and context
+            if (!skipSystemPrompt && knowledgeResult.systemPromptInjection) {
+              skipSystemPrompt = false; // ensure we use the knowledge prompt
+              // Prepend knowledge context to existing context
+              if (knowledgeResult.contextBlock) {
+                context = context
+                  ? `${knowledgeResult.contextBlock}\n\n${context}`
+                  : knowledgeResult.contextBlock;
+              }
+            }
+          }
+        } catch (knowledgeError: any) {
+          console.warn('[LLMHelper] Knowledge mode processing failed, falling back to normal:', knowledgeError.message);
+        }
+      }
 
       const isMultimodal = !!imagePath;
 
@@ -870,7 +914,7 @@ ANSWER DIRECTLY:`;
       model: GROQ_MODEL,
       messages: [{ role: "user", content: fullMessage }],
       temperature: 0.4,
-      max_tokens: 8192,
+      max_tokens: 32768,
       stream: false
     });
 
@@ -908,7 +952,7 @@ ANSWER DIRECTLY:`;
       model: OPENAI_MODEL,
       messages,
       temperature: 0.4,
-      max_tokens: 8192,
+      max_completion_tokens: MAX_OUTPUT_TOKENS,
     });
 
     return response.choices[0]?.message?.content || "";
@@ -987,7 +1031,7 @@ ANSWER DIRECTLY:`;
 
     const response = await this.claudeClient.messages.create({
       model: CLAUDE_MODEL,
-      max_tokens: 8192,
+      max_tokens: MAX_OUTPUT_TOKENS,
       ...(systemPrompt ? { system: systemPrompt } : {}),
       messages: [{ role: "user", content }],
     });
@@ -1286,6 +1330,35 @@ ANSWER DIRECTLY:`;
     systemPromptOverride?: string // Optional override (defaults to HARD_SYSTEM_PROMPT)
   ): AsyncGenerator<string, void, unknown> {
 
+    // ============================================================
+    // KNOWLEDGE MODE INTERCEPT (Streaming)
+    // ============================================================
+    if (this.knowledgeOrchestrator?.isKnowledgeMode()) {
+      try {
+        const knowledgeResult = await this.knowledgeOrchestrator.processQuestion(message);
+        if (knowledgeResult) {
+          // Intro question shortcut — yield generated response directly
+          if (knowledgeResult.isIntroQuestion && knowledgeResult.introResponse) {
+            console.log('[LLMHelper] Knowledge mode (stream): returning generated intro response');
+            yield knowledgeResult.introResponse;
+            return;
+          }
+          // Inject knowledge system prompt
+          if (knowledgeResult.systemPromptInjection) {
+            systemPromptOverride = knowledgeResult.systemPromptInjection;
+          }
+          // Inject knowledge context
+          if (knowledgeResult.contextBlock) {
+            context = context
+              ? `${knowledgeResult.contextBlock}\n\n${context}`
+              : knowledgeResult.contextBlock;
+          }
+        }
+      } catch (knowledgeError: any) {
+        console.warn('[LLMHelper] Knowledge mode (stream) processing failed, falling back:', knowledgeError.message);
+      }
+    }
+
     // Preparation
     const isMultimodal = !!imagePath;
 
@@ -1391,7 +1464,7 @@ ANSWER DIRECTLY:`;
       messages: [{ role: "user", content: fullMessage }],
       stream: true,
       temperature: 0.4,
-      max_tokens: 8192,
+      max_tokens: 32768,
     });
 
     for await (const chunk of stream) {
@@ -1419,7 +1492,7 @@ ANSWER DIRECTLY:`;
       messages,
       stream: true,
       temperature: 0.4,
-      max_tokens: 8192,
+      max_completion_tokens: MAX_OUTPUT_TOKENS,
     });
 
     for await (const chunk of stream) {
@@ -1438,7 +1511,7 @@ ANSWER DIRECTLY:`;
 
     const stream = await this.claudeClient.messages.stream({
       model: CLAUDE_MODEL,
-      max_tokens: 8192,
+      max_tokens: MAX_OUTPUT_TOKENS,
       ...(systemPrompt ? { system: systemPrompt } : {}),
       messages: [{ role: "user", content: userMessage }],
     });
@@ -1476,7 +1549,7 @@ ANSWER DIRECTLY:`;
       messages,
       stream: true,
       temperature: 0.4,
-      max_tokens: 8192,
+      max_completion_tokens: MAX_OUTPUT_TOKENS,
     });
 
     for await (const chunk of stream) {
@@ -1498,7 +1571,7 @@ ANSWER DIRECTLY:`;
 
     const stream = await this.claudeClient.messages.stream({
       model: CLAUDE_MODEL,
-      max_tokens: 8192,
+      max_tokens: MAX_OUTPUT_TOKENS,
       ...(systemPrompt ? { system: systemPrompt } : {}),
       messages: [{
         role: "user",
@@ -2145,7 +2218,7 @@ ANSWER DIRECTLY:`;
               { role: "user", content: `Context:\n${context}` }
             ],
             temperature: 0.3,
-            max_tokens: 8192,
+            max_tokens: 32768,
             stream: false
           }),
           45000,

@@ -13,6 +13,7 @@ import { AIProvidersSettings } from './settings/AIProvidersSettings';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useShortcuts } from '../hooks/useShortcuts';
 import { KeyRecorder } from './ui/KeyRecorder';
+import { KnowledgeGraph } from './profile/KnowledgeGraph';
 
 interface CustomSelectProps {
     label: string;
@@ -1215,177 +1216,207 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                             {activeTab === 'profile' && (
                                 <div className="space-y-6 animated fadeIn">
                                     {/* Introduction */}
-                                    <div>
-                                        <h3 className="text-lg font-bold text-text-primary mb-1 flex items-center gap-2">
-                                            Resume Profile Engine
-                                            <span className="px-2 py-0.5 rounded-full bg-accent-primary/10 text-accent-primary text-[10px] uppercase tracking-wider font-bold">Beta</span>
+                                    {/* Introduction */}
+                                    <div className="mb-8">
+                                        <h3 className="text-[22px] font-semibold text-text-primary tracking-tight mb-2 flex items-center gap-3">
+                                            Professional Identity
+                                            <span className="px-2 py-[2px] rounded-full bg-accent-primary/10 text-accent-primary text-[10px] uppercase tracking-[0.05em] font-medium border border-accent-primary/20 shadow-[inset_0_1px_rgba(255,255,255,0.1)]">Beta</span>
                                         </h3>
-                                        <p className="text-xs text-text-secondary leading-relaxed max-w-2xl">
-                                            Upload your resume to enable persona-aware AI responses. When Profile Mode is enabled, the AI responds in the first person using your documented experience.
+                                        <p className="text-[14px] text-text-secondary leading-relaxed max-w-2xl font-normal">
+                                            This engine constructs an intelligent representation of your career history. When activated, the AI grounds its logic exclusively in your mapped experience.
                                         </p>
                                     </div>
 
-                                    {/* Profile Mode Toggle */}
-                                    <div className="bg-bg-item-surface border border-border-subtle rounded-xl p-5">
-                                        <div className="flex items-center justify-between">
-                                            <div className="flex items-center gap-4">
-                                                <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-bg-input border border-border-subtle text-text-primary">
-                                                    <User size={18} />
-                                                </div>
-                                                <div>
-                                                    <h3 className="text-sm font-bold text-text-primary">Profile Mode</h3>
-                                                    <p className="text-xs mt-0.5 text-text-secondary">
-                                                        {profileStatus.hasProfile
-                                                            ? (profileStatus.profileMode ? 'Active: AI is answering using your persona.' : 'Enable to have AI answer using your persona.')
-                                                            : 'Upload a resume first to unlock persona capabilities.'
-                                                        }
-                                                    </p>
-                                                </div>
-                                            </div>
-                                            <div
-                                                onClick={async () => {
-                                                    if (!profileStatus.hasProfile) return;
-                                                    const newState = !profileStatus.profileMode;
-                                                    try {
-                                                        await window.electronAPI?.profileSetMode?.(newState);
-                                                        setProfileStatus(prev => ({ ...prev, profileMode: newState }));
-                                                    } catch (e) {
-                                                        console.error('Failed to toggle profile mode:', e);
-                                                    }
-                                                }}
-                                                className={`w-11 h-6 rounded-full relative transition-colors duration-200 shrink-0 ${!profileStatus.hasProfile ? 'bg-bg-input border border-border-muted cursor-not-allowed opacity-50' : profileStatus.profileMode ? 'bg-accent-primary cursor-pointer' : 'bg-bg-toggle-switch border border-border-muted cursor-pointer hover:bg-bg-elevated'}`}
-                                            >
-                                                <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform duration-200 shadow-sm ${profileStatus.profileMode ? 'translate-x-5' : 'translate-x-0'}`} />
-                                            </div>
+                                    {/* Intelligence Graph Hero Card */}
+                                    <div className="relative rounded-[24px] overflow-hidden border border-border-subtle bg-bg-item-surface shadow-[inset_0_1px_rgba(255,255,255,0.05),0_8px_30px_rgba(0,0,0,0.04)] dark:shadow-[inset_0_1px_rgba(255,255,255,0.05),0_8px_30px_rgba(0,0,0,0.2)]">
+                                        {/* Physical Graph Background */}
+                                        <div className="absolute inset-0 z-0">
+                                            {profileData ? (
+                                                <KnowledgeGraph
+                                                    nodeCount={profileData.nodeCount || 50}
+                                                    isDarkMode={document.documentElement.classList.contains('dark')}
+                                                />
+                                            ) : (
+                                                <div className="absolute inset-0 bg-gradient-to-br from-bg-subtle to-bg-base opacity-50" />
+                                            )}
                                         </div>
-                                    </div>
 
-                                    {/* Profile Data Display */}
-                                    {profileStatus.hasProfile && profileData && (
-                                        <div className="bg-bg-item-surface rounded-xl border border-border-subtle overflow-hidden relative">
+                                        {/* Glassmorphic Foreground Content */}
+                                        <div className="relative z-10 flex flex-col justify-between min-h-[220px]">
 
                                             {/* Header */}
-                                            <div className="px-5 py-4 border-b border-border-subtle flex items-center justify-between">
-                                                <div className="flex items-center gap-4">
-                                                    <div className="w-12 h-12 rounded-full bg-bg-component border border-border-subtle flex items-center justify-center text-text-primary">
-                                                        <span className="font-bold text-lg">
-                                                            {(profileData.identity?.name || 'U').charAt(0).toUpperCase()}
-                                                        </span>
+                                            <div className="p-6 pb-4 border-b border-white/10 dark:border-white/5 bg-white/40 dark:bg-black/20 backdrop-blur-xl">
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex items-center gap-4">
+                                                        <div className="w-[52px] h-[52px] rounded-full bg-gradient-to-b from-bg-surface to-bg-input border border-border-subtle flex items-center justify-center text-text-primary shadow-[inset_0_1px_rgba(255,255,255,0.5),0_2px_10px_rgba(0,0,0,0.05)] dark:shadow-[inset_0_1px_rgba(255,255,255,0.1),0_2px_10px_rgba(0,0,0,0.2)] hover:scale-105 transition-transform duration-500">
+                                                            <span className="font-semibold text-[20px] tracking-tight">
+                                                                {profileData?.identity?.name ? profileData.identity.name.charAt(0).toUpperCase() : 'U'}
+                                                            </span>
+                                                        </div>
+                                                        <div>
+                                                            <h4 className="text-[15px] font-semibold text-text-primary tracking-tight">
+                                                                {profileData?.identity?.name || 'Identity Node Inactive'}
+                                                            </h4>
+                                                            <p className="text-[12px] text-text-secondary mt-0.5 tracking-wide">
+                                                                {profileData?.identity?.email || 'Upload a resume to begin mapping.'}
+                                                            </p>
+                                                        </div>
                                                     </div>
-                                                    <div>
-                                                        <h4 className="text-sm font-bold text-text-primary">{profileData.identity?.name || 'Profile Loaded'}</h4>
-                                                        {profileData.identity?.email && (
-                                                            <p className="text-xs text-text-secondary">{profileData.identity.email}</p>
+
+                                                    <div className="flex items-center gap-3">
+                                                        {profileStatus.hasProfile && (
+                                                            <button
+                                                                onClick={async () => {
+                                                                    if (!confirm('Are you sure you want to delete your mapped persona? This will destroy all structured timeline data.')) return;
+                                                                    try {
+                                                                        await window.electronAPI?.profileDelete?.();
+                                                                        setProfileStatus({ hasProfile: false, profileMode: false });
+                                                                        setProfileData(null);
+                                                                    } catch (e) { console.error('Failed to delete profile:', e); }
+                                                                }}
+                                                                className="text-[12px] font-medium text-text-tertiary hover:text-red-500 transition-colors px-3 py-1.5 rounded-full hover:bg-red-500/10"
+                                                            >
+                                                                Disconnect
+                                                            </button>
                                                         )}
+
+                                                        {/* High-fidelity Toggle */}
+                                                        <div className="flex items-center gap-3 bg-bg-surface/50 dark:bg-black/30 backdrop-blur-md px-4 py-2 rounded-full border border-border-subtle shadow-sm">
+                                                            <span className="text-[12px] font-medium text-text-secondary">Persona Engine</span>
+                                                            <button
+                                                                onClick={async () => {
+                                                                    if (!profileStatus.hasProfile) return;
+                                                                    const newState = !profileStatus.profileMode;
+                                                                    try {
+                                                                        await window.electronAPI?.profileSetMode?.(newState);
+                                                                        setProfileStatus(prev => ({ ...prev, profileMode: newState }));
+                                                                    } catch (e) {
+                                                                        console.error('Failed to toggle profile mode:', e);
+                                                                    }
+                                                                }}
+                                                                className={`w-[36px] h-[20px] rounded-full p-[2px] transition-colors duration-300 shrink-0 ${!profileStatus.hasProfile ? 'bg-bg-input opacity-40 cursor-not-allowed' : profileStatus.profileMode ? 'bg-accent-primary cursor-pointer' : 'bg-bg-input hover:bg-border-subtle cursor-pointer shadow-[inset_0_1px_rgba(0,0,0,0.1)] dark:shadow-[inset_0_1px_rgba(0,0,0,0.3)]'}`}
+                                                            >
+                                                                <div className={`w-[16px] h-[16px] rounded-full bg-white shadow-[0_2px_4px_rgba(0,0,0,0.2)] transition-transform duration-300 ease-in-out ${profileStatus.profileMode ? 'translate-x-[16px]' : 'translate-x-0'}`} />
+                                                            </button>
+                                                        </div>
                                                     </div>
                                                 </div>
-                                                <button
-                                                    onClick={async () => {
-                                                        if (!confirm('Delete your profile? This will remove all parsed resume data.')) return;
-                                                        try {
-                                                            await window.electronAPI?.profileDelete?.();
-                                                            setProfileStatus({ hasProfile: false, profileMode: false });
-                                                            setProfileData(null);
-                                                        } catch (e) { console.error('Failed to delete profile:', e); }
-                                                    }}
-                                                    className="p-2 text-text-tertiary hover:text-red-500 transition-colors"
-                                                    title="Delete Profile"
-                                                >
-                                                    <Trash2 size={16} />
-                                                </button>
                                             </div>
 
-                                            {/* Stats & Skills */}
-                                            <div className="px-5 py-5 pb-6">
-                                                <div className="grid grid-cols-3 gap-3 mb-6">
-                                                    <div className="p-3 bg-bg-input rounded-lg border border-border-subtle">
-                                                        <div className="text-xs text-text-secondary font-medium mb-1">Experience</div>
-                                                        <div className="text-lg font-bold text-text-primary">{profileData.experienceCount} entries</div>
+                                            {/* Data Metrics & Extracted Skills */}
+                                            <div className="p-6 bg-gradient-to-t from-bg-surface/90 to-bg-surface/40 dark:from-bg-surface/80 dark:to-transparent backdrop-blur-sm border-t border-white/10 dark:border-white/5 mt-auto">
+                                                <div className="grid grid-cols-3 gap-8">
+                                                    <div>
+                                                        <div className="text-[11px] font-medium text-text-tertiary uppercase tracking-widest mb-1.5 flex items-center gap-1.5">
+                                                            Experience <div className="w-1.5 h-1.5 rounded-full bg-green-500/80" />
+                                                        </div>
+                                                        <div className="text-[20px] font-medium tracking-tight text-text-primary">
+                                                            {profileData?.experienceCount || 0}
+                                                        </div>
                                                     </div>
-                                                    <div className="p-3 bg-bg-input rounded-lg border border-border-subtle">
-                                                        <div className="text-xs text-text-secondary font-medium mb-1">Projects</div>
-                                                        <div className="text-lg font-bold text-text-primary">{profileData.projectCount} entries</div>
+                                                    <div>
+                                                        <div className="text-[11px] font-medium text-text-tertiary uppercase tracking-widest mb-1.5 flex items-center gap-1.5">
+                                                            Projects <div className="w-1.5 h-1.5 rounded-full bg-blue-500/80" />
+                                                        </div>
+                                                        <div className="text-[20px] font-medium tracking-tight text-text-primary">
+                                                            {profileData?.projectCount || 0}
+                                                        </div>
                                                     </div>
-                                                    <div className="p-3 bg-bg-input rounded-lg border border-border-subtle">
-                                                        <div className="text-xs text-text-secondary font-medium mb-1">Extracted Nodes</div>
-                                                        <div className="text-lg font-bold text-text-primary">{profileData.nodeCount} total</div>
+                                                    <div>
+                                                        <div className="text-[11px] font-medium text-text-tertiary uppercase tracking-widest mb-1.5 flex items-center gap-1.5">
+                                                            Computed Nodes <div className="w-1.5 h-1.5 rounded-full bg-purple-500/80" />
+                                                        </div>
+                                                        <div className="text-[20px] font-medium tracking-tight text-text-primary">
+                                                            {profileData?.nodeCount || 0}
+                                                        </div>
                                                     </div>
                                                 </div>
 
-                                                {profileData.skills && profileData.skills.length > 0 && (
-                                                    <div>
-                                                        <h5 className="text-xs font-bold text-text-secondary mb-3">Extracted Skills</h5>
+                                                {profileData?.skills && profileData.skills.length > 0 && (
+                                                    <div className="mt-8">
+                                                        <div className="text-[11px] font-medium text-text-tertiary uppercase tracking-widest mb-3">
+                                                            Dominant Vectors
+                                                        </div>
                                                         <div className="flex flex-wrap gap-2">
                                                             {profileData.skills.slice(0, 15).map((skill: string, i: number) => (
-                                                                <span key={i} className="text-[11px] bg-bg-input text-text-primary px-2.5 py-1 rounded-md border border-border-subtle">
+                                                                <span key={i} className="text-[12px] text-text-secondary px-3 py-1.5 rounded-md border border-border-subtle bg-bg-surface/50 dark:bg-black/20 backdrop-blur-md">
                                                                     {skill}
                                                                 </span>
                                                             ))}
-                                                            {profileData.skills.length > 15 && (
-                                                                <span className="text-[11px] bg-bg-input text-text-tertiary px-2.5 py-1 rounded-md border border-border-subtle">
-                                                                    +{profileData.skills.length - 15} more
-                                                                </span>
-                                                            )}
                                                         </div>
                                                     </div>
                                                 )}
                                             </div>
                                         </div>
-                                    )}
+                                    </div>
 
-                                    {/* Upload Area */}
-                                    <div className="bg-bg-item-surface rounded-xl border border-border-subtle p-6 text-center">
-                                        <div className="w-12 h-12 rounded-lg bg-bg-input border border-border-muted flex items-center justify-center text-text-tertiary mx-auto mb-3">
-                                            {profileUploading ? <RefreshCw size={20} className="animate-spin text-accent-primary" /> : <Upload size={20} />}
-                                        </div>
+                                    {/* Upload Area - Deep Material */}
+                                    <div className="mt-6">
+                                        <div className={`relative rounded-[20px] overflow-hidden transition-all duration-300 border ${profileUploading ? 'border-accent-primary/50 shadow-[0_0_0_4px_rgba(var(--color-accent-primary),0.1)]' : 'border-border-subtle bg-bg-item-surface'}`}>
+                                            <div className="absolute inset-0 bg-gradient-to-b from-white/40 to-white/10 dark:from-white/5 dark:to-transparent pointer-events-none" />
 
-                                        <h4 className="text-sm font-bold text-text-primary mb-1">
-                                            {profileStatus.hasProfile ? 'Update Resume Source' : 'Upload Resume Document'}
-                                        </h4>
-                                        <p className="text-xs text-text-secondary mb-5">
-                                            Supports PDF, DOCX, or TXT formats.
-                                        </p>
+                                            <div className="relative z-10 p-8 flex items-center justify-between">
+                                                <div className="flex items-center gap-5">
+                                                    <div className="w-[48px] h-[48px] rounded-2xl bg-bg-input border border-border-subtle flex items-center justify-center text-text-tertiary shadow-[inset_0_1px_rgba(255,255,255,0.5)] dark:shadow-[inset_0_1px_rgba(255,255,255,0.05)]">
+                                                        {profileUploading ? <RefreshCw size={22} className="animate-spin text-accent-primary" /> : <Upload size={22} strokeWidth={1.5} />}
+                                                    </div>
+                                                    <div>
+                                                        <h4 className="text-[14px] font-semibold text-text-primary tracking-tight mb-1">
+                                                            {profileStatus.hasProfile ? 'Overwrite Source Document' : 'Initialize Knowledge Base'}
+                                                        </h4>
+                                                        {profileUploading ? (
+                                                            <div className="flex items-center gap-2">
+                                                                <div className="h-[4px] w-[100px] bg-bg-input rounded-full overflow-hidden">
+                                                                    <div className="h-full bg-accent-primary rounded-full animate-pulse" style={{ width: '50%' }} />
+                                                                </div>
+                                                                <span className="text-[11px] text-text-secondary tracking-wide">Processing structural semantics...</span>
+                                                            </div>
+                                                        ) : (
+                                                            <p className="text-[12px] text-text-secondary">
+                                                                Provide a structured PDF or DOCX file to seed the intelligence engine.
+                                                            </p>
+                                                        )}
+                                                    </div>
+                                                </div>
 
-                                        {profileError && (
-                                            <div className="text-xs text-red-500 mb-4 flex items-center justify-center gap-1.5">
-                                                <X size={12} /> {profileError}
+                                                <button
+                                                    onClick={async () => {
+                                                        setProfileError('');
+                                                        try {
+                                                            const fileResult = await window.electronAPI?.profileSelectFile?.();
+                                                            if (fileResult?.cancelled || !fileResult?.filePath) return;
+
+                                                            setProfileUploading(true);
+                                                            const result = await window.electronAPI?.profileUploadResume?.(fileResult.filePath);
+                                                            if (result?.success) {
+                                                                const status = await window.electronAPI?.profileGetStatus?.();
+                                                                if (status) setProfileStatus(status);
+                                                                const data = await window.electronAPI?.profileGetProfile?.();
+                                                                if (data) setProfileData(data);
+                                                            } else {
+                                                                setProfileError(result?.error || 'Upload failed');
+                                                            }
+                                                        } catch (e: any) {
+                                                            setProfileError(e.message || 'Upload failed');
+                                                        } finally {
+                                                            setProfileUploading(false);
+                                                        }
+                                                    }}
+                                                    disabled={profileUploading}
+                                                    className={`px-5 py-2.5 rounded-full text-[13px] font-medium transition-all duration-300 shadow-sm border border-transparent active:scale-95 ${profileUploading ? 'bg-bg-input text-text-tertiary cursor-wait border-border-subtle' : 'bg-black text-white dark:bg-white dark:text-black hover:bg-gray-800 dark:hover:bg-gray-200 shadow-[0_4px_14px_rgba(0,0,0,0.1)] dark:shadow-[0_4px_14px_rgba(255,255,255,0.1)]'}`}
+                                                >
+                                                    {profileUploading ? 'Ingesting...' : 'Select File'}
+                                                </button>
                                             </div>
-                                        )}
 
-                                        <button
-                                            onClick={async () => {
-                                                setProfileError('');
-                                                try {
-                                                    const fileResult = await window.electronAPI?.profileSelectFile?.();
-                                                    if (fileResult?.cancelled || !fileResult?.filePath) return;
-
-                                                    setProfileUploading(true);
-                                                    const result = await window.electronAPI?.profileUploadResume?.(fileResult.filePath);
-                                                    if (result?.success) {
-                                                        const status = await window.electronAPI?.profileGetStatus?.();
-                                                        if (status) setProfileStatus(status);
-                                                        const data = await window.electronAPI?.profileGetProfile?.();
-                                                        if (data) setProfileData(data);
-                                                    } else {
-                                                        setProfileError(result?.error || 'Upload failed');
-                                                    }
-                                                } catch (e: any) {
-                                                    setProfileError(e.message || 'Upload failed');
-                                                } finally {
-                                                    setProfileUploading(false);
-                                                }
-                                            }}
-                                            disabled={profileUploading}
-                                            className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors mx-auto ${profileUploading ? 'bg-bg-input text-text-tertiary cursor-wait' : 'bg-bg-component border border-border-subtle hover:bg-bg-elevated text-text-primary'}`}
-                                        >
-                                            {profileUploading ? 'Processing Document...' : 'Select File'}
-                                        </button>
-
-                                        {profileUploading && (
-                                            <p className="text-[11px] text-text-tertiary mt-3 animate-pulse">
-                                                Analyzing structure and synthesizing nodes. This may take a moment.
-                                            </p>
-                                        )}
+                                            {profileError && (
+                                                <div className="px-8 pb-5">
+                                                    <div className="px-4 py-2 bg-red-500/10 border border-red-500/20 rounded-lg flex items-center gap-2 text-[12px] text-red-500/90 font-medium">
+                                                        <X size={14} /> {profileError}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
                             )}
