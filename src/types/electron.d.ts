@@ -172,6 +172,12 @@ export interface ElectronAPI {
   profileDelete: () => Promise<{ success: boolean; error?: string }>
   profileGetProfile: () => Promise<any>
   profileSelectFile: () => Promise<{ success?: boolean; cancelled?: boolean; filePath?: string; error?: string }>
+
+  // JD & Research API
+  profileUploadJD: (filePath: string) => Promise<{ success: boolean; error?: string }>
+  profileDeleteJD: () => Promise<{ success: boolean; error?: string }>
+  profileResearchCompany: (companyName: string) => Promise<{ success: boolean; dossier?: any; error?: string }>
+  profileGenerateNegotiation: () => Promise<{ success: boolean; dossier?: any; profileData?: any; error?: string }>
 }
 
 declare global {

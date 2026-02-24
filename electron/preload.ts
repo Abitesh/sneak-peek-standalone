@@ -178,6 +178,12 @@ interface ElectronAPI {
   profileDelete: () => Promise<{ success: boolean; error?: string }>;
   profileGetProfile: () => Promise<any>;
   profileSelectFile: () => Promise<{ success?: boolean; cancelled?: boolean; filePath?: string; error?: string }>;
+
+  // JD & Research API
+  profileUploadJD: (filePath: string) => Promise<{ success: boolean; error?: string }>;
+  profileDeleteJD: () => Promise<{ success: boolean; error?: string }>;
+  profileResearchCompany: (companyName: string) => Promise<{ success: boolean; dossier?: any; error?: string }>;
+  profileGenerateNegotiation: () => Promise<{ success: boolean; dossier?: any; profileData?: any; error?: string }>;
 }
 
 export const PROCESSING_EVENTS = {
@@ -757,4 +763,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
   profileDelete: () => ipcRenderer.invoke('profile:delete'),
   profileGetProfile: () => ipcRenderer.invoke('profile:get-profile'),
   profileSelectFile: () => ipcRenderer.invoke('profile:select-file'),
+
+  // JD & Research API
+  profileUploadJD: (filePath: string) => ipcRenderer.invoke('profile:upload-jd', filePath),
+  profileDeleteJD: () => ipcRenderer.invoke('profile:delete-jd'),
+  profileResearchCompany: (companyName: string) => ipcRenderer.invoke('profile:research-company', companyName),
+  profileGenerateNegotiation: () => ipcRenderer.invoke('profile:generate-negotiation'),
 } as ElectronAPI)

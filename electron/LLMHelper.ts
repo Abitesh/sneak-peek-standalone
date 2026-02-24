@@ -951,7 +951,6 @@ ANSWER DIRECTLY:`;
     const response = await this.openaiClient.chat.completions.create({
       model: OPENAI_MODEL,
       messages,
-      temperature: 0.4,
       max_completion_tokens: MAX_OUTPUT_TOKENS,
     });
 
@@ -1491,7 +1490,6 @@ ANSWER DIRECTLY:`;
       model: OPENAI_MODEL,
       messages,
       stream: true,
-      temperature: 0.4,
       max_completion_tokens: MAX_OUTPUT_TOKENS,
     });
 
@@ -1548,7 +1546,6 @@ ANSWER DIRECTLY:`;
       model: OPENAI_MODEL,
       messages,
       stream: true,
-      temperature: 0.4,
       max_completion_tokens: MAX_OUTPUT_TOKENS,
     });
 
