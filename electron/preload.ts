@@ -184,6 +184,10 @@ interface ElectronAPI {
   profileDeleteJD: () => Promise<{ success: boolean; error?: string }>;
   profileResearchCompany: (companyName: string) => Promise<{ success: boolean; dossier?: any; error?: string }>;
   profileGenerateNegotiation: () => Promise<{ success: boolean; dossier?: any; profileData?: any; error?: string }>;
+
+  // Google Search API
+  setGoogleSearchApiKey: (apiKey: string) => Promise<{ success: boolean; error?: string }>;
+  setGoogleSearchCseId: (cseId: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 export const PROCESSING_EVENTS = {
@@ -769,4 +773,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   profileDeleteJD: () => ipcRenderer.invoke('profile:delete-jd'),
   profileResearchCompany: (companyName: string) => ipcRenderer.invoke('profile:research-company', companyName),
   profileGenerateNegotiation: () => ipcRenderer.invoke('profile:generate-negotiation'),
+
+  // Google Search API
+  setGoogleSearchApiKey: (apiKey: string) => ipcRenderer.invoke('set-google-search-api-key', apiKey),
+  setGoogleSearchCseId: (cseId: string) => ipcRenderer.invoke('set-google-search-cse-id', cseId),
 } as ElectronAPI)

@@ -678,9 +678,11 @@ export function initializeIpcHandlers(appState: AppState): void {
         azureRegion: creds.azureRegion || 'eastus',
         hasIbmWatsonKey: hasKey(creds.ibmWatsonApiKey),
         ibmWatsonRegion: creds.ibmWatsonRegion || 'us-south',
+        hasGoogleSearchKey: hasKey(creds.googleSearchApiKey),
+        hasGoogleSearchCseId: hasKey(creds.googleSearchCseId),
       };
     } catch (error: any) {
-      return { hasGeminiKey: false, hasGroqKey: false, hasOpenaiKey: false, hasClaudeKey: false, googleServiceAccountPath: null, sttProvider: 'google', groqSttModel: 'whisper-large-v3-turbo', hasSttGroqKey: false, hasSttOpenaiKey: false, hasDeepgramKey: false, hasElevenLabsKey: false, hasAzureKey: false, azureRegion: 'eastus', hasIbmWatsonKey: false, ibmWatsonRegion: 'us-south' };
+      return { hasGeminiKey: false, hasGroqKey: false, hasOpenaiKey: false, hasClaudeKey: false, googleServiceAccountPath: null, sttProvider: 'google', groqSttModel: 'whisper-large-v3-turbo', hasSttGroqKey: false, hasSttOpenaiKey: false, hasDeepgramKey: false, hasElevenLabsKey: false, hasAzureKey: false, azureRegion: 'eastus', hasIbmWatsonKey: false, ibmWatsonRegion: 'us-south', hasGoogleSearchKey: false, hasGoogleSearchCseId: false };
     }
   });
 
@@ -1741,6 +1743,17 @@ export function initializeIpcHandlers(appState: AppState): void {
         return { success: false, error: 'Knowledge engine not initialized' };
       }
       const engine = orchestrator.getCompanyResearchEngine();
+
+      // Wire Google Custom Search provider if keys are configured
+      const { CredentialsManager } = require('./services/CredentialsManager');
+      const cm = CredentialsManager.getInstance();
+      const googleSearchKey = cm.getGoogleSearchApiKey();
+      const googleSearchCseId = cm.getGoogleSearchCseId();
+      if (googleSearchKey && googleSearchCseId) {
+        const { GoogleCustomSearchProvider } = require('./knowledge/GoogleCustomSearchProvider');
+        engine.setSearchProvider(new GoogleCustomSearchProvider(googleSearchKey, googleSearchCseId));
+      }
+
       const dossier = await engine.researchCompany(companyName);
       return { success: true, dossier };
     } catch (error: any) {
@@ -1779,6 +1792,30 @@ export function initializeIpcHandlers(appState: AppState): void {
       return { success: true, dossier, profileData };
     } catch (error: any) {
       console.error('[IPC] profile:generate-negotiation error:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // ==========================================
+  // Google Search API Credentials
+  // ==========================================
+
+  safeHandle("set-google-search-api-key", async (_, apiKey: string) => {
+    try {
+      const { CredentialsManager } = require('./services/CredentialsManager');
+      CredentialsManager.getInstance().setGoogleSearchApiKey(apiKey);
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  safeHandle("set-google-search-cse-id", async (_, cseId: string) => {
+    try {
+      const { CredentialsManager } = require('./services/CredentialsManager');
+      CredentialsManager.getInstance().setGoogleSearchCseId(cseId);
+      return { success: true };
+    } catch (error: any) {
       return { success: false, error: error.message };
     }
   });

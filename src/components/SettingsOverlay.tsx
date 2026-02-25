@@ -248,6 +248,11 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
     const [jdError, setJdError] = useState('');
     const [companyResearching, setCompanyResearching] = useState(false);
     const [companyDossier, setCompanyDossier] = useState<any>(null);
+    const [googleSearchApiKey, setGoogleSearchApiKey] = useState('');
+    const [googleSearchCseId, setGoogleSearchCseId] = useState('');
+    const [hasStoredGoogleSearchKey, setHasStoredGoogleSearchKey] = useState(false);
+    const [hasStoredGoogleSearchCseId, setHasStoredGoogleSearchCseId] = useState(false);
+    const [googleSearchSaving, setGoogleSearchSaving] = useState(false);
 
     // Close dropdown when clicking outside
     // Sync with global state changes
@@ -471,6 +476,8 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                     setHasStoredAzureKey(creds.hasAzureKey);
                     if (creds.azureRegion) setSttAzureRegion(creds.azureRegion);
                     setHasStoredIbmWatsonKey(creds.hasIbmWatsonKey);
+                    setHasStoredGoogleSearchKey(creds.hasGoogleSearchKey || false);
+                    setHasStoredGoogleSearchCseId(creds.hasGoogleSearchCseId || false);
                 }
             } catch (e) {
                 console.error('Failed to load STT settings:', e);
@@ -1499,6 +1506,86 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                                     </div>
                                                 </div>
                                             )}
+                                        </div>
+                                    </div>
+
+                                    {/* Google Search API Card */}
+                                    <div className="mt-5">
+                                        <div className="bg-bg-item-surface rounded-xl border border-border-subtle">
+                                            <div className="p-5">
+                                                <div className="flex items-center gap-4 mb-4">
+                                                    <div className="w-10 h-10 rounded-lg bg-bg-input border border-border-subtle flex items-center justify-center text-emerald-500 shrink-0">
+                                                        <Globe size={20} />
+                                                    </div>
+                                                    <div>
+                                                        <div className="flex items-center gap-2">
+                                                            <h4 className="text-sm font-bold text-text-primary">Google Search API</h4>
+                                                            {hasStoredGoogleSearchKey && hasStoredGoogleSearchCseId && (
+                                                                <span className="text-[9px] font-bold text-emerald-500 px-1.5 py-0.5 bg-emerald-500/10 rounded-full border border-emerald-500/20 uppercase tracking-wide">Connected</span>
+                                                            )}
+                                                        </div>
+                                                        <p className="text-[11px] text-text-secondary mt-0.5">
+                                                            Powers live web search for company research.
+                                                        </p>
+                                                    </div>
+                                                </div>
+
+                                                <div className="space-y-3">
+                                                    <div>
+                                                        <label className="text-[10px] font-semibold text-text-secondary uppercase tracking-wide mb-1.5 block">API Key</label>
+                                                        <input
+                                                            type="password"
+                                                            value={googleSearchApiKey}
+                                                            onChange={(e) => setGoogleSearchApiKey(e.target.value)}
+                                                            placeholder={hasStoredGoogleSearchKey ? '••••••••••••' : 'Enter Google API key'}
+                                                            className="w-full bg-bg-input border border-border-subtle rounded-lg px-3 py-2 text-xs text-text-primary placeholder-text-tertiary focus:outline-none focus:border-accent-primary/50 focus:ring-1 focus:ring-accent-primary/20 transition-all"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-[10px] font-semibold text-text-secondary uppercase tracking-wide mb-1.5 block">Custom Search Engine ID</label>
+                                                        <input
+                                                            type="text"
+                                                            value={googleSearchCseId}
+                                                            onChange={(e) => setGoogleSearchCseId(e.target.value)}
+                                                            placeholder={hasStoredGoogleSearchCseId ? '••••••••••••' : 'Enter CSE ID (cx)'}
+                                                            className="w-full bg-bg-input border border-border-subtle rounded-lg px-3 py-2 text-xs text-text-primary placeholder-text-tertiary focus:outline-none focus:border-accent-primary/50 focus:ring-1 focus:ring-accent-primary/20 transition-all"
+                                                        />
+                                                    </div>
+                                                    <button
+                                                        onClick={async () => {
+                                                            if (!googleSearchApiKey.trim() && !googleSearchCseId.trim()) return;
+                                                            setGoogleSearchSaving(true);
+                                                            try {
+                                                                if (googleSearchApiKey.trim()) {
+                                                                    await window.electronAPI?.setGoogleSearchApiKey?.(googleSearchApiKey.trim());
+                                                                    setHasStoredGoogleSearchKey(true);
+                                                                    setGoogleSearchApiKey('');
+                                                                }
+                                                                if (googleSearchCseId.trim()) {
+                                                                    await window.electronAPI?.setGoogleSearchCseId?.(googleSearchCseId.trim());
+                                                                    setHasStoredGoogleSearchCseId(true);
+                                                                    setGoogleSearchCseId('');
+                                                                }
+                                                            } catch (e) {
+                                                                console.error('Failed to save Google Search keys:', e);
+                                                            } finally {
+                                                                setGoogleSearchSaving(false);
+                                                            }
+                                                        }}
+                                                        disabled={googleSearchSaving || (!googleSearchApiKey.trim() && !googleSearchCseId.trim())}
+                                                        className={`w-full px-4 py-2 rounded-lg text-xs font-medium transition-all ${googleSearchSaving ? 'bg-bg-input text-text-tertiary cursor-wait' : (!googleSearchApiKey.trim() && !googleSearchCseId.trim()) ? 'bg-bg-input text-text-tertiary cursor-not-allowed' : 'bg-emerald-600 text-white hover:bg-emerald-500 shadow-sm'}`}
+                                                    >
+                                                        {googleSearchSaving ? 'Saving...' : 'Save Credentials'}
+                                                    </button>
+                                                </div>
+
+                                                <div className="mt-3 flex items-start gap-2 px-3 py-2.5 bg-bg-input/50 rounded-lg border border-border-subtle/50">
+                                                    <Info size={12} className="text-text-tertiary shrink-0 mt-0.5" />
+                                                    <p className="text-[10px] text-text-tertiary leading-relaxed">
+                                                        If not provided, LLM general knowledge is used for company research, which may be outdated. Get your API key from the <span className="text-emerald-500/80 hover:text-emerald-400 cursor-pointer underline underline-offset-2" onClick={() => window.electronAPI?.openExternal?.('https://console.cloud.google.com/apis/credentials')}>Google Cloud Console</span> and create a Custom Search Engine at <span className="text-emerald-500/80 hover:text-emerald-400 cursor-pointer underline underline-offset-2" onClick={() => window.electronAPI?.openExternal?.('https://cse.google.com/cse/create/new')}>cse.google.com</span>.
+                                                    </p>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
 

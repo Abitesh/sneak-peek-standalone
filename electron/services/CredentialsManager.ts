@@ -42,6 +42,9 @@ export interface StoredCredentials {
     azureRegion?: string;
     ibmWatsonApiKey?: string;
     ibmWatsonRegion?: string;
+    // Google Custom Search
+    googleSearchApiKey?: string;
+    googleSearchCseId?: string;
 }
 
 export class CredentialsManager {
@@ -134,6 +137,14 @@ export class CredentialsManager {
 
     public getIbmWatsonRegion(): string {
         return this.credentials.ibmWatsonRegion || 'us-south';
+    }
+
+    public getGoogleSearchApiKey(): string | undefined {
+        return this.credentials.googleSearchApiKey;
+    }
+
+    public getGoogleSearchCseId(): string | undefined {
+        return this.credentials.googleSearchCseId;
     }
 
     public getDefaultModel(): string {
@@ -236,6 +247,18 @@ export class CredentialsManager {
         this.credentials.ibmWatsonRegion = region;
         this.saveCredentials();
         console.log(`[CredentialsManager] IBM Watson Region set to: ${region}`);
+    }
+
+    public setGoogleSearchApiKey(key: string): void {
+        this.credentials.googleSearchApiKey = key;
+        this.saveCredentials();
+        console.log('[CredentialsManager] Google Search API Key updated');
+    }
+
+    public setGoogleSearchCseId(cseId: string): void {
+        this.credentials.googleSearchCseId = cseId;
+        this.saveCredentials();
+        console.log('[CredentialsManager] Google Search CSE ID updated');
     }
 
     public setDefaultModel(model: string): void {

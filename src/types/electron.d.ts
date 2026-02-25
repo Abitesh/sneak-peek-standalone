@@ -178,6 +178,10 @@ export interface ElectronAPI {
   profileDeleteJD: () => Promise<{ success: boolean; error?: string }>
   profileResearchCompany: (companyName: string) => Promise<{ success: boolean; dossier?: any; error?: string }>
   profileGenerateNegotiation: () => Promise<{ success: boolean; dossier?: any; profileData?: any; error?: string }>
+
+  // Google Search API
+  setGoogleSearchApiKey: (apiKey: string) => Promise<{ success: boolean; error?: string }>
+  setGoogleSearchCseId: (cseId: string) => Promise<{ success: boolean; error?: string }>
 }
 
 declare global {
