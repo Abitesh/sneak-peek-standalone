@@ -5,7 +5,7 @@ import {
     ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
     Camera, RotateCcw, Eye, Layout, MessageSquare, Crop,
     ChevronDown, Check, BadgeCheck, Power, Palette, Calendar, Ghost, Sun, Moon, RefreshCw, Info, Globe, FlaskConical, Terminal, Settings, Activity, ExternalLink, Trash2,
-    Sparkles, Pencil, Briefcase, Building2, Search
+    Sparkles, Pencil, Briefcase, Building2, Search, MapPin
 } from 'lucide-react';
 import { analytics } from '../lib/analytics/analytics.service';
 import { AboutSection } from './AboutSection';
@@ -14,6 +14,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useShortcuts } from '../hooks/useShortcuts';
 import { KeyRecorder } from './ui/KeyRecorder';
 import { ProfileVisualizer } from './profile/ProfileVisualizer';
+import { PremiumUpgradeModal } from './premium/PremiumUpgradeModal';
 
 interface CustomSelectProps {
     label: string;
@@ -230,8 +231,10 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
     const [openOnLogin, setOpenOnLogin] = useState(false);
     const [themeMode, setThemeMode] = useState<'system' | 'light' | 'dark'>('system');
     const [isThemeDropdownOpen, setIsThemeDropdownOpen] = useState(false);
+    const [isAiLangDropdownOpen, setIsAiLangDropdownOpen] = useState(false);
     const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'available' | 'uptodate' | 'error'>('idle');
     const themeDropdownRef = React.useRef<HTMLDivElement>(null);
+    const aiLangDropdownRef = React.useRef<HTMLDivElement>(null);
 
     // Profile Engine State
     const [profileStatus, setProfileStatus] = useState<{
@@ -244,6 +247,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
     const [profileUploading, setProfileUploading] = useState(false);
     const [profileError, setProfileError] = useState('');
     const [profileData, setProfileData] = useState<any>(null);
+    const [isPremiumModalOpen, setIsPremiumModalOpen] = useState(false);
     const [jdUploading, setJdUploading] = useState(false);
     const [jdError, setJdError] = useState('');
     const [companyResearching, setCompanyResearching] = useState(false);
@@ -279,16 +283,19 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
             if (themeDropdownRef.current && !themeDropdownRef.current.contains(event.target as Node)) {
                 setIsThemeDropdownOpen(false);
             }
+            if (aiLangDropdownRef.current && !aiLangDropdownRef.current.contains(event.target as Node)) {
+                setIsAiLangDropdownOpen(false);
+            }
         };
 
-        if (isThemeDropdownOpen) {
+        if (isThemeDropdownOpen || isAiLangDropdownOpen) {
             document.addEventListener('mousedown', handleClickOutside);
         }
 
         return () => {
             document.removeEventListener('mousedown', handleClickOutside);
         };
-    }, [isThemeDropdownOpen]);
+    }, [isThemeDropdownOpen, isAiLangDropdownOpen]);
 
     const [showTranscript, setShowTranscript] = useState(() => {
         const stored = localStorage.getItem('natively_interviewer_transcript');
@@ -297,8 +304,13 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
 
     // Recognition Language
     const [recognitionLanguage, setRecognitionLanguage] = useState('');
+    const [selectedSttGroup, setSelectedSttGroup] = useState('');
     const [availableLanguages, setAvailableLanguages] = useState<Record<string, any>>({});
     const [languageOptions, setLanguageOptions] = useState<any[]>([]);
+
+    // AI Response Language
+    const [aiResponseLanguage, setAiResponseLanguage] = useState('English');
+    const [availableAiLanguages, setAvailableAiLanguages] = useState<any[]>([]);
 
     useEffect(() => {
         const loadLanguages = async () => {
@@ -306,92 +318,97 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                 const langs = await window.electronAPI.getRecognitionLanguages();
                 setAvailableLanguages(langs);
 
-                // Define the specific order and labels requested by user
-                const desiredOrder = [
-                    { key: 'english-india', label: 'English (India)' },
-                    { key: 'english-us', label: 'English (United States)' },
-                    { key: 'english-uk', label: 'English (United Kingdom)' },
-                    { key: 'english-au', label: 'English (Australia)' },
-                    { key: 'english-ca', label: 'English (Canada)' },
-                ];
+                // Load stored preference or auto-detect
+                const storedStt = await window.electronAPI.getSttLanguage();
+                let currentLangKey = storedStt;
 
-                // Create options list starting with Auto
-                const options = [
-                    {
-                        deviceId: 'auto',
-                        label: 'Auto (Recommended)',
-                        kind: 'audioinput' as MediaDeviceKind,
-                        groupId: '',
-                        toJSON: () => ({})
+                if (!currentLangKey) {
+                    const systemLocale = navigator.language;
+                    // Try to find exact match or primary match
+                    const match = Object.entries(langs).find(([_, config]: [string, any]) =>
+                        config.bcp47 === systemLocale ||
+                        config.iso639 === systemLocale ||
+                        (config.alternates && config.alternates.includes(systemLocale))
+                    );
+
+                    currentLangKey = match ? match[0] : 'english-us';
+
+                    // Save the auto-detected default
+                    if (window.electronAPI?.setRecognitionLanguage) {
+                        window.electronAPI.setRecognitionLanguage(currentLangKey);
                     }
-                ];
-
-                // Add the rest if they exist in backend response
-                desiredOrder.forEach(({ key, label }) => {
-                    if (langs[key]) {
-                        options.push({
-                            deviceId: key,
-                            label: label, // Use requested label
-                            kind: 'audioinput' as MediaDeviceKind,
-                            groupId: '',
-                            toJSON: () => ({})
-                        });
-                    }
-                });
-
-                setLanguageOptions(options);
-
-                // Load stored preference
-                const stored = localStorage.getItem('natively_recognition_language');
-
-                // If stored is 'auto' or not set, default to 'auto'
-                if (!stored || stored === 'auto') {
-                    setRecognitionLanguage('auto');
-                    // We still need to set the actual backend language based on system locale
-                    // But for UI, we show 'auto'
-                    applyAutoLanguage(langs);
-                } else if (langs[stored]) {
-                    setRecognitionLanguage(stored);
-                } else {
-                    // Fallback if stored key no longer exists
-                    setRecognitionLanguage('auto');
-                    applyAutoLanguage(langs);
                 }
+
+                setRecognitionLanguage(currentLangKey);
+
+                // Initialize Group based on current language
+                if (langs[currentLangKey]) {
+                    setSelectedSttGroup(langs[currentLangKey].group);
+                } else {
+                    setSelectedSttGroup('English');
+                }
+            }
+
+            if (window.electronAPI?.getAiResponseLanguages) {
+                const aiLangs = await window.electronAPI.getAiResponseLanguages();
+                // Sort: English first, then alphabetical
+                const sortedAiLangs = [...aiLangs].sort((a, b) => {
+                    if (a.label === 'English') return -1;
+                    if (b.label === 'English') return 1;
+                    return a.label.localeCompare(b.label);
+                });
+                setAvailableAiLanguages(sortedAiLangs);
+
+                const storedAi = await window.electronAPI.getAiResponseLanguage();
+                setAiResponseLanguage(storedAi || 'English');
             }
         };
         loadLanguages();
     }, []);
 
-    const applyAutoLanguage = (langs: any) => {
-        const systemLocale = navigator.language;
-        let match = 'english-us';
-
-        // Logic to find best match from available langs
-        for (const [key, config] of Object.entries(langs)) {
-            if ((config as any).primary === systemLocale || (config as any).alternates.includes(systemLocale)) {
-                match = key;
-                break;
-            }
+    const handleLanguageChange = async (key: string) => {
+        setRecognitionLanguage(key);
+        if (availableLanguages[key]) {
+            setSelectedSttGroup(availableLanguages[key].group);
         }
-        if (systemLocale === 'en-IN') match = 'english-india';
-
-        // Send actual code to backend, but keep UI as 'auto' (handled by separating state if needed, 
-        // but here 'recognitionLanguage' state tracks the dropdown value)
         if (window.electronAPI?.setRecognitionLanguage) {
-            window.electronAPI.setRecognitionLanguage(match);
+            await window.electronAPI.setRecognitionLanguage(key);
         }
     };
 
-    const handleLanguageChange = (key: string) => {
-        setRecognitionLanguage(key);
-        localStorage.setItem('natively_recognition_language', key);
+    const handleGroupChange = (group: string) => {
+        setSelectedSttGroup(group);
+        // Find default variant for this group (first one)
+        const firstVariant = Object.entries(availableLanguages).find(([_, lang]) => lang.group === group);
+        if (firstVariant) {
+            handleLanguageChange(firstVariant[0]);
+        }
+    };
 
-        if (key === 'auto') {
-            applyAutoLanguage(availableLanguages);
-        } else {
-            if (window.electronAPI?.setRecognitionLanguage) {
-                window.electronAPI.setRecognitionLanguage(key);
-            }
+    // Helper to get unique groups
+    const languageGroups = Array.from(new Set(Object.values(availableLanguages).map((l: any) => l.group)))
+        .sort((a, b) => {
+            if (a === 'English') return -1;
+            if (b === 'English') return 1;
+            return a.localeCompare(b);
+        });
+
+    // Helper to get variants for current group
+    const currentGroupVariants = Object.entries(availableLanguages)
+
+        .filter(([_, lang]) => lang.group === selectedSttGroup)
+        .map(([key, lang]) => ({
+            deviceId: key,
+            label: lang.label,
+            kind: 'audioinput' as MediaDeviceKind,
+            groupId: '',
+            toJSON: () => ({})
+        }));
+
+    const handleAiLanguageChange = async (key: string) => {
+        setAiResponseLanguage(key);
+        if (window.electronAPI?.setAiResponseLanguage) {
+            await window.electronAPI.setAiResponseLanguage(key);
         }
     };
 
@@ -423,7 +440,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
     const [useLegacyAudio, setUseLegacyAudio] = useState(false);
 
     // STT Provider settings
-    const [sttProvider, setSttProvider] = useState<'google' | 'groq' | 'openai' | 'deepgram' | 'elevenlabs' | 'azure' | 'ibmwatson'>('google');
+    const [sttProvider, setSttProvider] = useState<'google' | 'groq' | 'openai' | 'deepgram' | 'elevenlabs' | 'azure' | 'ibmwatson' | 'soniox'>('google');
     const [groqSttModel, setGroqSttModel] = useState('whisper-large-v3-turbo');
     const [sttGroqKey, setSttGroqKey] = useState('');
     const [sttOpenaiKey, setSttOpenaiKey] = useState('');
@@ -443,6 +460,8 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
     const [hasStoredElevenLabsKey, setHasStoredElevenLabsKey] = useState(false);
     const [hasStoredAzureKey, setHasStoredAzureKey] = useState(false);
     const [hasStoredIbmWatsonKey, setHasStoredIbmWatsonKey] = useState(false);
+    const [sttSonioxKey, setSttSonioxKey] = useState('');
+    const [hasStoredSonioxKey, setHasStoredSonioxKey] = useState(false);
     const [isSttDropdownOpen, setIsSttDropdownOpen] = useState(false);
     const sttDropdownRef = React.useRef<HTMLDivElement>(null);
 
@@ -476,6 +495,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                     setHasStoredAzureKey(creds.hasAzureKey);
                     if (creds.azureRegion) setSttAzureRegion(creds.azureRegion);
                     setHasStoredIbmWatsonKey(creds.hasIbmWatsonKey);
+                    setHasStoredSonioxKey(creds.hasSonioxKey || false);
                     setHasStoredGoogleSearchKey(creds.hasGoogleSearchKey || false);
                     setHasStoredGoogleSearchCseId(creds.hasGoogleSearchCseId || false);
                 }
@@ -486,7 +506,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
         if (isOpen) loadSttSettings();
     }, [isOpen]);
 
-    const handleSttProviderChange = async (provider: 'google' | 'groq' | 'openai' | 'deepgram' | 'elevenlabs' | 'azure' | 'ibmwatson') => {
+    const handleSttProviderChange = async (provider: 'google' | 'groq' | 'openai' | 'deepgram' | 'elevenlabs' | 'azure' | 'ibmwatson' | 'soniox') => {
         setSttProvider(provider);
         setIsSttDropdownOpen(false);
         setSttTestStatus('idle');
@@ -499,7 +519,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
         }
     };
 
-    const handleSttKeySubmit = async (provider: 'groq' | 'openai' | 'deepgram' | 'elevenlabs' | 'azure' | 'ibmwatson', key: string) => {
+    const handleSttKeySubmit = async (provider: 'groq' | 'openai' | 'deepgram' | 'elevenlabs' | 'azure' | 'ibmwatson' | 'soniox', key: string) => {
         if (!key.trim()) return;
 
         // Auto-test before saving
@@ -541,6 +561,9 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
             } else if (provider === 'ibmwatson') {
                 // @ts-ignore
                 await window.electronAPI?.setIbmWatsonApiKey?.(key.trim());
+            } else if (provider === 'soniox') {
+                // @ts-ignore
+                await window.electronAPI?.setSonioxApiKey?.(key.trim());
             } else {
                 // @ts-ignore
                 await window.electronAPI?.setDeepgramApiKey?.(key.trim());
@@ -550,6 +573,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
             else if (provider === 'elevenlabs') setHasStoredElevenLabsKey(true);
             else if (provider === 'azure') setHasStoredAzureKey(true);
             else if (provider === 'ibmwatson') setHasStoredIbmWatsonKey(true);
+            else if (provider === 'soniox') setHasStoredSonioxKey(true);
             else setHasStoredDeepgramKey(true);
 
             setSttSaved(true);
@@ -563,7 +587,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
         }
     };
 
-    const handleRemoveSttKey = async (provider: 'groq' | 'openai' | 'deepgram' | 'elevenlabs' | 'azure' | 'ibmwatson') => {
+    const handleRemoveSttKey = async (provider: 'groq' | 'openai' | 'deepgram' | 'elevenlabs' | 'azure' | 'ibmwatson' | 'soniox') => {
         if (!confirm(`Are you sure you want to remove the ${provider === 'ibmwatson' ? 'IBM Watson' : provider.charAt(0).toUpperCase() + provider.slice(1)} API key?`)) return;
 
         try {
@@ -598,6 +622,13 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                 setSttDeepgramKey('');
                 setHasStoredDeepgramKey(false);
             }
+
+            if (provider === 'soniox') {
+                // @ts-ignore
+                await window.electronAPI?.setSonioxApiKey?.('');
+                setSttSonioxKey('');
+                setHasStoredSonioxKey(false);
+            }
         } catch (e) {
             console.error(`Failed to remove ${provider} STT key:`, e);
         }
@@ -608,6 +639,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
         const keyMap: Record<string, string> = {
             groq: sttGroqKey, openai: sttOpenaiKey, deepgram: sttDeepgramKey,
             elevenlabs: sttElevenLabsKey, azure: sttAzureKey, ibmwatson: sttIbmKey,
+            soniox: sttSonioxKey,
         };
         const keyToTest = keyMap[sttProvider] || '';
         if (!keyToTest.trim()) {
@@ -1106,6 +1138,49 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                                     </div>
                                                 </div>
 
+                                                {/* AI Response Language */}
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex items-center gap-4">
+                                                        <div className="w-10 h-10 bg-bg-item-surface rounded-lg border border-border-subtle flex items-center justify-center text-text-tertiary">
+                                                            <Globe size={20} />
+                                                        </div>
+                                                        <div>
+                                                            <h3 className="text-sm font-bold text-text-primary">AI Response Language</h3>
+                                                            <p className="text-xs text-text-secondary mt-0.5">Language for AI suggestions and notes</p>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="relative" ref={aiLangDropdownRef}>
+                                                        <button
+                                                            onClick={() => setIsAiLangDropdownOpen(!isAiLangDropdownOpen)}
+                                                            className="bg-bg-component hover:bg-bg-elevated border border-border-subtle text-text-primary px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-2 min-w-[140px] justify-between"
+                                                        >
+                                                            <span className="capitalize text-ellipsis overflow-hidden whitespace-nowrap">
+                                                                {aiResponseLanguage}
+                                                            </span>
+                                                            <ChevronDown size={12} className={`shrink-0 transition-transform ${isAiLangDropdownOpen ? 'rotate-180' : ''}`} />
+                                                        </button>
+
+                                                        {/* Dropdown Menu */}
+                                                        {isAiLangDropdownOpen && (
+                                                            <div className="absolute right-0 top-full mt-1 w-full min-w-[160px] bg-bg-elevated border border-border-subtle rounded-lg shadow-xl overflow-hidden z-20 p-1 animated fadeIn select-none max-h-60 overflow-y-auto custom-scrollbar">
+                                                                {availableAiLanguages.map((option) => (
+                                                                    <button
+                                                                        key={option.code}
+                                                                        onClick={() => {
+                                                                            handleAiLanguageChange(option.code);
+                                                                            setIsAiLangDropdownOpen(false);
+                                                                        }}
+                                                                        className={`w-full text-left px-2 py-1.5 rounded-md text-xs flex items-center gap-2 transition-colors ${aiResponseLanguage === option.code ? 'text-text-primary bg-bg-item-active/50' : 'text-text-secondary hover:bg-bg-input hover:text-text-primary'}`}
+                                                                    >
+                                                                        <span className="font-medium">{option.label}</span>
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+
                                                 {/* Version */}
                                                 <div className="flex items-start justify-between gap-4">
                                                     <div className="flex items-start gap-4">
@@ -1227,11 +1302,19 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                             {activeTab === 'profile' && (
                                 <div className="space-y-6 animated fadeIn">
                                     {/* Introduction */}
-                                    {/* Introduction */}
                                     <div className="mb-5">
-                                        <div className="flex items-center gap-2 mb-1">
-                                            <h3 className="text-sm font-bold text-text-primary">Professional Identity</h3>
-                                            <span className="bg-yellow-500/10 text-yellow-500 text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide">BETA</span>
+                                        <div className="flex items-center justify-between mb-1">
+                                            <div className="flex items-center gap-2">
+                                                <h3 className="text-sm font-bold text-text-primary">Professional Identity</h3>
+                                                <span className="bg-yellow-500/10 text-yellow-500 text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide">BETA</span>
+                                            </div>
+                                            <button
+                                                onClick={() => setIsPremiumModalOpen(true)}
+                                                className="text-[11px] font-semibold text-black hover:bg-[#FDE047] active:scale-[0.98] border border-transparent bg-[#FACC15] px-2.5 py-1 rounded-full flex items-center gap-1.5 transition-all duration-200 shadow-[0_0_10px_rgba(250,204,21,0.2)] hover:shadow-[0_0_15px_rgba(250,204,21,0.3)]"
+                                            >
+                                                <Sparkles size={12} className="text-black/80" />
+                                                Unlock Pro
+                                            </button>
                                         </div>
                                         <p className="text-xs text-text-secondary mb-2">
                                             This engine constructs an intelligent representation of your career history.
@@ -1635,22 +1718,22 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                                     <div className="space-y-4 border-t border-border-subtle pt-4 mt-2">
                                                         {companyDossier.hiring_strategy && (
                                                             <div>
-                                                                <div className="text-[10px] font-bold text-text-primary uppercase tracking-wide mb-1 flex items-center gap-1.5"><Sparkles size={12} className="text-purple-400" /> Hiring Strategy</div>
-                                                                <p className="text-xs text-text-secondary leading-relaxed bg-bg-input/50 p-3 rounded-lg border border-border-subtle/50">{companyDossier.hiring_strategy}</p>
+                                                                <div className="text-[10px] font-bold text-text-primary uppercase tracking-wide mb-1">Hiring Strategy</div>
+                                                                <p className="text-xs text-text-secondary leading-relaxed bg-bg-input p-3 rounded-lg">{companyDossier.hiring_strategy}</p>
                                                             </div>
                                                         )}
 
                                                         {companyDossier.interview_focus && (
                                                             <div>
-                                                                <div className="text-[10px] font-bold text-text-primary uppercase tracking-wide mb-1 flex items-center gap-1.5"><MessageSquare size={12} className="text-purple-400" /> Interview Focus</div>
-                                                                <p className="text-xs text-text-secondary leading-relaxed bg-bg-input/50 p-3 rounded-lg border border-border-subtle/50">{companyDossier.interview_focus}</p>
+                                                                <div className="text-[10px] font-bold text-text-primary uppercase tracking-wide mb-1">Interview Focus</div>
+                                                                <p className="text-xs text-text-secondary leading-relaxed bg-bg-input p-3 rounded-lg">{companyDossier.interview_focus}</p>
                                                             </div>
                                                         )}
 
                                                         {companyDossier.salary_estimates?.length > 0 && (
                                                             <div>
                                                                 <div className="text-[10px] font-bold text-text-primary uppercase tracking-wide mb-1">Salary Estimates</div>
-                                                                <div className="space-y-2 bg-bg-input/50 p-3 rounded-lg border border-border-subtle/50">
+                                                                <div className="space-y-2 bg-bg-input p-3 rounded-lg">
                                                                     {companyDossier.salary_estimates.map((s: any, i: number) => (
                                                                         <div key={i} className="flex items-center justify-between pb-2 mb-2 border-b border-border-subtle last:border-0 last:pb-0 last:mb-0">
                                                                             <span className="text-xs text-text-primary font-medium">{s.title} <span className="text-text-tertiary">({s.location})</span></span>
@@ -1673,7 +1756,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                                                 <div className="text-[10px] font-bold text-text-primary uppercase tracking-wide mb-2">Competitors</div>
                                                                 <div className="flex flex-wrap gap-2">
                                                                     {companyDossier.competitors.map((c: string, i: number) => (
-                                                                        <span key={i} className="text-[11px] text-text-secondary px-2.5 py-1 rounded bg-bg-input border border-border-subtle flex items-center gap-1.5">
+                                                                        <span key={i} className="text-[11px] text-text-secondary px-2.5 py-1 rounded-full bg-bg-input flex items-center gap-1.5">
                                                                             <Building2 size={10} className="text-text-tertiary" /> {c}
                                                                         </span>
                                                                     ))}
@@ -1691,8 +1774,18 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                             </div>
                                         </div>
                                     )}
-
                                     <ProfileVisualizer profileData={profileData} />
+
+                                    {isPremiumModalOpen && (
+                                        <PremiumUpgradeModal
+                                            isOpen={isPremiumModalOpen}
+                                            onClose={() => setIsPremiumModalOpen(false)}
+                                            onActivated={async () => {
+                                                const status = await window.electronAPI?.profileGetStatus?.();
+                                                if (status) setProfileStatus(status);
+                                            }}
+                                        />
+                                    )}
                                 </div>
                             )}
                             {activeTab === 'ai-providers' && (
@@ -1850,6 +1943,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                                             { id: 'elevenlabs', label: 'ElevenLabs Scribe', badge: hasStoredElevenLabsKey ? 'Saved' : null, desc: 'High-quality Scribe v1 API', color: 'teal', icon: <Mic size={14} /> },
                                                             { id: 'azure', label: 'Azure Speech', badge: hasStoredAzureKey ? 'Saved' : null, desc: 'Microsoft Cognitive Services STT', color: 'cyan', icon: <Mic size={14} /> },
                                                             { id: 'ibmwatson', label: 'IBM Watson', badge: hasStoredIbmWatsonKey ? 'Saved' : null, desc: 'IBM Watson cloud STT service', color: 'indigo', icon: <Mic size={14} /> },
+                                                            { id: 'soniox', label: 'Soniox', badge: hasStoredSonioxKey ? 'Saved' : null, recommended: true, desc: '60+ languages, multilingual, domain context', color: 'cyan', icon: <Mic size={14} /> },
                                                         ]}
                                                     />
                                                 </div>
@@ -1922,7 +2016,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                             {sttProvider !== 'google' && (
                                                 <div className="bg-bg-card rounded-xl border border-border-subtle p-4 space-y-3">
                                                     <label className="text-xs font-medium text-text-secondary block">
-                                                        {sttProvider === 'groq' ? 'Groq' : sttProvider === 'openai' ? 'OpenAI STT' : sttProvider === 'elevenlabs' ? 'ElevenLabs' : sttProvider === 'azure' ? 'Azure' : sttProvider === 'ibmwatson' ? 'IBM Watson' : 'Deepgram'} API Key
+                                                        {sttProvider === 'groq' ? 'Groq' : sttProvider === 'openai' ? 'OpenAI STT' : sttProvider === 'elevenlabs' ? 'ElevenLabs' : sttProvider === 'azure' ? 'Azure' : sttProvider === 'ibmwatson' ? 'IBM Watson' : sttProvider === 'soniox' ? 'Soniox' : 'Deepgram'} API Key
                                                     </label>
                                                     {sttProvider === 'openai' && (
                                                         <p className="text-[10px] text-text-tertiary mb-1.5">
@@ -1938,7 +2032,8 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                                                         : sttProvider === 'elevenlabs' ? sttElevenLabsKey
                                                                             : sttProvider === 'azure' ? sttAzureKey
                                                                                 : sttProvider === 'ibmwatson' ? sttIbmKey
-                                                                                    : sttDeepgramKey
+                                                                                    : sttProvider === 'soniox' ? sttSonioxKey
+                                                                                        : sttDeepgramKey
                                                             }
                                                             onChange={(e) => {
                                                                 if (sttProvider === 'groq') setSttGroqKey(e.target.value);
@@ -1946,6 +2041,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                                                 else if (sttProvider === 'elevenlabs') setSttElevenLabsKey(e.target.value);
                                                                 else if (sttProvider === 'azure') setSttAzureKey(e.target.value);
                                                                 else if (sttProvider === 'ibmwatson') setSttIbmKey(e.target.value);
+                                                                else if (sttProvider === 'soniox') setSttSonioxKey(e.target.value);
                                                                 else setSttDeepgramKey(e.target.value);
                                                             }}
                                                             placeholder={
@@ -1959,7 +2055,9 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                                                                 ? (hasStoredAzureKey ? '••••••••••••' : 'Enter Azure API key')
                                                                                 : sttProvider === 'ibmwatson'
                                                                                     ? (hasStoredIbmWatsonKey ? '••••••••••••' : 'Enter IBM Watson API key')
-                                                                                    : (hasStoredDeepgramKey ? '••••••••••••' : 'Enter Deepgram API key')
+                                                                                    : sttProvider === 'soniox'
+                                                                                        ? (hasStoredSonioxKey ? '••••••••••••' : 'Enter Soniox API key')
+                                                                                        : (hasStoredDeepgramKey ? '••••••••••••' : 'Enter Deepgram API key')
                                                             }
                                                             className="flex-1 bg-bg-input border border-border-subtle rounded-lg px-3 py-2 text-sm text-text-primary placeholder-text-tertiary focus:outline-none focus:border-accent-primary transition-colors"
                                                         />
@@ -1975,6 +2073,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                                                 const keyMap: Record<string, string> = {
                                                                     groq: sttGroqKey, openai: sttOpenaiKey, deepgram: sttDeepgramKey,
                                                                     elevenlabs: sttElevenLabsKey, azure: sttAzureKey, ibmwatson: sttIbmKey,
+                                                                    soniox: sttSonioxKey,
                                                                 };
                                                                 return (keyMap[sttProvider] || '').trim();
                                                             })()}
@@ -1993,6 +2092,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                                                 elevenlabs: hasStoredElevenLabsKey,
                                                                 azure: hasStoredAzureKey,
                                                                 ibmwatson: hasStoredIbmWatsonKey,
+                                                                soniox: hasStoredSonioxKey,
                                                             };
                                                             return hasKeyMap[sttProvider] ? (
                                                                 <button
@@ -2077,19 +2177,40 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                                 </div>
                                             )}
 
-                                            {/* Accent Preference */}
+                                            {/* Recognition Language Family */}
                                             <CustomSelect
-                                                label="Preferred English Accent"
-                                                icon={null}
-                                                value={recognitionLanguage}
-                                                options={languageOptions}
-                                                onChange={handleLanguageChange}
-                                                placeholder="Select Accent"
+                                                label="Language"
+                                                icon={<Globe size={14} />}
+                                                value={selectedSttGroup}
+                                                options={languageGroups.map(g => ({
+                                                    deviceId: g,
+                                                    label: g,
+                                                    kind: 'audioinput' as MediaDeviceKind,
+                                                    groupId: '',
+                                                    toJSON: () => ({})
+                                                }))}
+                                                onChange={handleGroupChange}
+                                                placeholder="Select Language"
                                             />
-                                            <div className="flex gap-2 items-center -mt-2 px-1">
+
+                                            {/* Variant/Accent Selector (Conditional) */}
+                                            {currentGroupVariants.length > 1 && (
+                                                <div className="mt-3 animated fadeIn">
+                                                    <CustomSelect
+                                                        label="Accent / Region"
+                                                        icon={<MapPin size={14} />}
+                                                        value={recognitionLanguage}
+                                                        options={currentGroupVariants}
+                                                        onChange={handleLanguageChange}
+                                                        placeholder="Select Region"
+                                                    />
+                                                </div>
+                                            )}
+
+                                            <div className="flex gap-2 items-center mt-2 px-1">
                                                 <Info size={14} className="text-text-secondary shrink-0" />
-                                                <p className="text-xs text-text-secondary whitespace-nowrap">
-                                                    Improves accuracy by prioritizing your accent. Other English accents are still supported.
+                                                <p className="text-xs text-text-secondary">
+                                                    Select the primary language being spoken in the meeting.
                                                 </p>
                                             </div>
                                         </div>

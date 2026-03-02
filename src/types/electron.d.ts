@@ -64,6 +64,10 @@ export interface ElectronAPI {
   getOutputDevices: () => Promise<Array<{ id: string; name: string }>>
   setRecognitionLanguage: (key: string) => Promise<{ success: boolean; error?: string }>
   getRecognitionLanguages: () => Promise<Record<string, any>>
+  getAiResponseLanguages: () => Promise<Array<{ label: string; code: string }>>
+  setAiResponseLanguage: (language: string) => Promise<{ success: boolean; error?: string }>
+  getSttLanguage: () => Promise<string>
+  getAiResponseLanguage: () => Promise<string>
 
   getNativeAudioStatus: () => Promise<{ connected: boolean }>
 
@@ -182,6 +186,12 @@ export interface ElectronAPI {
   // Google Search API
   setGoogleSearchApiKey: (apiKey: string) => Promise<{ success: boolean; error?: string }>
   setGoogleSearchCseId: (cseId: string) => Promise<{ success: boolean; error?: string }>
+
+  // License Management
+  licenseActivate: (key: string) => Promise<{ success: boolean; error?: string }>
+  licenseCheckPremium: () => Promise<boolean>
+  licenseDeactivate: () => Promise<void>
+  licenseGetHardwareId: () => Promise<string>
 }
 
 declare global {
