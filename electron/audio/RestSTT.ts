@@ -31,8 +31,8 @@ interface RestSttProviderConfig {
 type ProviderConfigFactory = (apiKey: string, region?: string, languageKey?: string) => RestSttProviderConfig;
 
 const PROVIDER_CONFIGS: Record<RestSttProvider, ProviderConfigFactory> = {
-    groq: (apiKey, region, languageKey = 'english-us') => {
-        const lang = RECOGNITION_LANGUAGES[languageKey]?.iso639 || 'en';
+    groq: (apiKey, region, languageKey) => {
+        const lang = languageKey ? RECOGNITION_LANGUAGES[languageKey]?.iso639 : undefined;
         return {
             endpoint: 'https://api.groq.com/openai/v1/audio/transcriptions',
             model: 'whisper-large-v3-turbo',
@@ -41,7 +41,7 @@ const PROVIDER_CONFIGS: Record<RestSttProvider, ProviderConfigFactory> = {
             extraFormFields: {
                 temperature: '0',
                 response_format: 'json',
-                language: lang,
+                ...(lang ? { language: lang } : {})
             },
             extractTranscript: (data: any) => {
                 if (typeof data === 'string') return data;
@@ -49,15 +49,15 @@ const PROVIDER_CONFIGS: Record<RestSttProvider, ProviderConfigFactory> = {
             },
         };
     },
-    openai: (apiKey, region, languageKey = 'english-us') => {
-        const lang = RECOGNITION_LANGUAGES[languageKey]?.iso639 || 'en';
+    openai: (apiKey, region, languageKey) => {
+        const lang = languageKey ? RECOGNITION_LANGUAGES[languageKey]?.iso639 : undefined;
         return {
             endpoint: 'https://api.openai.com/v1/audio/transcriptions',
             model: 'whisper-1',
             authHeader: { Authorization: `Bearer ${apiKey}` },
             uploadType: 'multipart',
             extraFormFields: {
-                language: lang,
+                ...(lang ? { language: lang } : {})
             },
             extractTranscript: (data: any) => {
                 if (typeof data === 'string') return data;
@@ -75,10 +75,11 @@ const PROVIDER_CONFIGS: Record<RestSttProvider, ProviderConfigFactory> = {
             return data?.text ?? '';
         },
     }),
-    azure: (apiKey, region = 'eastus', languageKey = 'english-us') => {
-        const lang = RECOGNITION_LANGUAGES[languageKey]?.bcp47 || 'en-US';
+    azure: (apiKey, region = 'eastus', languageKey) => {
+        const lang = languageKey ? RECOGNITION_LANGUAGES[languageKey]?.bcp47 : undefined;
+        const finalLang = lang || 'en-US';
         return {
-            endpoint: `https://${region}.stt.speech.microsoft.com/speech/recognition/conversation/cognitiveservices/v1?language=${lang}`,
+            endpoint: `https://${region}.stt.speech.microsoft.com/speech/recognition/conversation/cognitiveservices/v1?language=${finalLang}`,
             model: '',
             authHeader: { 'Ocp-Apim-Subscription-Key': apiKey },
             uploadType: 'binary',
@@ -87,10 +88,11 @@ const PROVIDER_CONFIGS: Record<RestSttProvider, ProviderConfigFactory> = {
             },
         };
     },
-    ibmwatson: (apiKey, region = 'us-south', languageKey = 'english-us') => {
-        const lang = RECOGNITION_LANGUAGES[languageKey]?.bcp47 || 'en-US';
+    ibmwatson: (apiKey, region = 'us-south', languageKey) => {
+        const lang = languageKey ? RECOGNITION_LANGUAGES[languageKey]?.bcp47 : undefined;
+        const finalLang = lang || 'en-US';
         return {
-            endpoint: `https://api.${region}.speech-to-text.watson.cloud.ibm.com/v1/recognize?language=${lang}`,
+            endpoint: `https://api.${region}.speech-to-text.watson.cloud.ibm.com/v1/recognize?language=${finalLang}`,
             model: '',
             authHeader: { Authorization: `Basic ${Buffer.from(`apikey:${apiKey}`).toString('base64')}` },
             uploadType: 'binary',

@@ -188,8 +188,10 @@ export interface ElectronAPI {
   setGoogleSearchCseId: (cseId: string) => Promise<{ success: boolean; error?: string }>
 
   // License Management
-  licenseGetHardwareId: () => Promise<string>
   licenseActivate: (key: string) => Promise<{ success: boolean; error?: string }>
+  licenseCheckPremium: () => Promise<boolean>
+  licenseDeactivate: () => Promise<void>
+  licenseGetHardwareId: () => Promise<string>
 }
 
 declare global {

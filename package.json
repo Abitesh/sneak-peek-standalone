@@ -16,20 +16,20 @@
     "watch": "tsc -p electron/tsconfig.json --watch",
     "start": "npm run app:dev",
     "dist": "npm run app:build",
-    "build:native": "napi build --platform --release native-module"
+    "build:native": "cd native-module && npx napi build --platform --release"
   },
   "build": {
     "appId": "com.electron.meeting-notes",
     "afterPack": "./scripts/ad-hoc-sign.js",
     "productName": "Natively",
     "files": [
-      "dist/**/*",
-      "dist-electron/**/*",
+      "dist",
+      "dist-electron",
       "package.json",
-      "node_modules/**/*",
-      "!**/native-module/target/**",
-      "!**/native-module/src/**",
-      "!**/native-module/.cargo/**"
+      "node_modules",
+      "!**/native-module/target",
+      "!**/native-module/src",
+      "!**/native-module/.cargo"
     ],
     "directories": {
       "output": "release",
