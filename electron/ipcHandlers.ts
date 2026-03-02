@@ -1754,7 +1754,20 @@ export function initializeIpcHandlers(appState: AppState): void {
         engine.setSearchProvider(new GoogleCustomSearchProvider(googleSearchKey, googleSearchCseId));
       }
 
-      const dossier = await engine.researchCompany(companyName);
+      // Build full JD context so the dossier is tailored to the exact role
+      const profileData = orchestrator.getProfileData();
+      const activeJD = profileData?.activeJD;
+      const jdCtx = activeJD ? {
+        title: activeJD.title,
+        location: activeJD.location,
+        level: activeJD.level,
+        technologies: activeJD.technologies,
+        requirements: activeJD.requirements,
+        keywords: activeJD.keywords,
+        compensation_hint: activeJD.compensation_hint,
+        min_years_experience: activeJD.min_years_experience,
+      } : {};
+      const dossier = await engine.researchCompany(companyName, jdCtx, true);
       return { success: true, dossier };
     } catch (error: any) {
       console.error('[IPC] profile:research-company error:', error);
