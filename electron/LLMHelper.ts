@@ -76,7 +76,7 @@ export class LLMHelper {
     // Initialize OpenAI client if API key provided
     if (openaiApiKey) {
       this.openaiApiKey = openaiApiKey
-      this.openaiClient = new OpenAI({ apiKey: openaiApiKey, dangerouslyAllowBrowser: true })
+      this.openaiClient = new OpenAI({ apiKey: openaiApiKey })
       console.log(`[LLMHelper] OpenAI client initialized with model: ${OPENAI_MODEL}`)
     }
 
@@ -117,13 +117,13 @@ export class LLMHelper {
   }
 
   public setGroqApiKey(apiKey: string) {
-    this.groqClient = new Groq({ apiKey, dangerouslyAllowBrowser: true });
+    this.groqClient = new Groq({ apiKey });
     console.log("[LLMHelper] Groq API Key updated.");
   }
 
   public setOpenaiApiKey(apiKey: string) {
     this.openaiApiKey = apiKey;
-    this.openaiClient = new OpenAI({ apiKey, dangerouslyAllowBrowser: true });
+    this.openaiClient = new OpenAI({ apiKey });
     console.log("[LLMHelper] OpenAI API Key updated.");
   }
 
@@ -301,7 +301,7 @@ export class LLMHelper {
     await this.rateLimiters.gemini.acquire();
     // console.log(`[LLMHelper] Calling ${GEMINI_FLASH_MODEL}...`)
     const response = await this.client.models.generateContent({
-      model: GEMINI_FLASH_MODEL,
+      model: GEMINI_PRO_MODEL,
       contents: contents,
       config: {
         maxOutputTokens: MAX_OUTPUT_TOKENS,
@@ -709,6 +709,10 @@ ANSWER DIRECTLY:`;
       // ============================================================
       if (this.knowledgeOrchestrator?.isKnowledgeMode()) {
         try {
+          // Feed the interviewer's utterance to the Technical Depth Scorer
+          // so tone adapts dynamically (HR buzzwords → high-level, technical terms → deep technical)
+          this.knowledgeOrchestrator.feedInterviewerUtterance(message);
+
           const knowledgeResult = await this.knowledgeOrchestrator.processQuestion(message);
           if (knowledgeResult) {
             // Intro question shortcut — return generated response directly
@@ -751,15 +755,12 @@ ANSWER DIRECTLY:`;
         ? `CONTEXT:\n${context}\n\nUSER QUESTION:\n${message}`
         : message;
 
-      const baseGeminiPrompt = skipSystemPrompt ? HARD_SYSTEM_PROMPT : HARD_SYSTEM_PROMPT;
-      const baseGroqPrompt = skipSystemPrompt ? GROQ_SYSTEM_PROMPT : GROQ_SYSTEM_PROMPT;
-      
-      const finalGeminiPrompt = skipSystemPrompt ? HARD_SYSTEM_PROMPT : this.injectLanguageInstruction(HARD_SYSTEM_PROMPT);
-      const finalGroqPrompt = alternateGroqMessage || (skipSystemPrompt ? GROQ_SYSTEM_PROMPT : this.injectLanguageInstruction(GROQ_SYSTEM_PROMPT));
+      const finalGeminiPrompt = this.injectLanguageInstruction(HARD_SYSTEM_PROMPT);
+      const finalGroqPrompt = alternateGroqMessage || this.injectLanguageInstruction(GROQ_SYSTEM_PROMPT);
 
       const combinedMessages = {
-        gemini: context ? `${finalGeminiPrompt}\n\nCONTEXT:\n${context}\n\nUSER QUESTION:\n${message}` : `${finalGeminiPrompt}\n\n${message}`,
-        groq: finalGroqPrompt,
+        gemini: buildMessage(finalGeminiPrompt),
+        groq: buildMessage(finalGroqPrompt),
       };
 
       // GROQ FAST TEXT OVERRIDE (Text-Only)
@@ -1420,7 +1421,14 @@ ANSWER DIRECTLY:`;
 
     // 2. Custom Provider Streaming (via cURL - Non-streaming fallback for now)
     if (this.activeCurlProvider) {
-      const response = await this.chatWithCurl(message, finalSystemPrompt);
+      const response = await this.executeCustomProvider(
+        this.activeCurlProvider.curlCommand,
+        userContent,
+        finalSystemPrompt,
+        message,
+        context || "",
+        imagePath
+      );
       yield response;
       return;
     }
@@ -2126,7 +2134,6 @@ ANSWER DIRECTLY:`;
    * 5. If that fails, throw error.
    */
   private async generateWithFallback(client: GoogleGenAI, args: any): Promise<any> {
-    const GEMINI_PRO_MODEL = "gemini-3-pro-preview";
     const originalModel = args.model;
 
     // Helper to check for valid content

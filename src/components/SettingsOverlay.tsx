@@ -248,6 +248,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
     const [profileError, setProfileError] = useState('');
     const [profileData, setProfileData] = useState<any>(null);
     const [isPremiumModalOpen, setIsPremiumModalOpen] = useState(false);
+    const [isPremium, setIsPremium] = useState(false);
     const [jdUploading, setJdUploading] = useState(false);
     const [jdError, setJdError] = useState('');
     const [companyResearching, setCompanyResearching] = useState(false);
@@ -261,13 +262,17 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
     // Close dropdown when clicking outside
     // Sync with global state changes
     useEffect(() => {
+        if (isOpen) {
+            window.electronAPI?.licenseCheckPremium?.().then(setIsPremium).catch(() => { });
+        }
+
         if (window.electronAPI?.onUndetectableChanged) {
             const unsubscribe = window.electronAPI.onUndetectableChanged((newState: boolean) => {
                 setIsUndetectable(newState);
             });
             return () => unsubscribe();
         }
-    }, []);
+    }, [isOpen]);
 
     useEffect(() => {
         if (window.electronAPI?.onDisguiseChanged) {
@@ -721,6 +726,8 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
 
         return () => unsubs.forEach(unsub => unsub());
     }, [isOpen, onClose]);
+
+
 
     useEffect(() => {
         if (isOpen) {
@@ -1308,13 +1315,15 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                                 <h3 className="text-sm font-bold text-text-primary">Professional Identity</h3>
                                                 <span className="bg-yellow-500/10 text-yellow-500 text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide">BETA</span>
                                             </div>
-                                            <button
-                                                onClick={() => setIsPremiumModalOpen(true)}
-                                                className="text-[11px] font-semibold text-black hover:bg-[#FDE047] active:scale-[0.98] border border-transparent bg-[#FACC15] px-2.5 py-1 rounded-full flex items-center gap-1.5 transition-all duration-200 shadow-[0_0_10px_rgba(250,204,21,0.2)] hover:shadow-[0_0_15px_rgba(250,204,21,0.3)]"
-                                            >
-                                                <Sparkles size={12} className="text-black/80" />
-                                                Unlock Pro
-                                            </button>
+                                            {!isPremium && (
+                                                <button
+                                                    onClick={() => setIsPremiumModalOpen(true)}
+                                                    className="text-[11px] font-semibold text-black hover:bg-[#FDE047] active:scale-[0.98] border border-transparent bg-[#FACC15] px-2.5 py-1 rounded-full flex items-center gap-1.5 transition-all duration-200 shadow-[0_0_10px_rgba(250,204,21,0.2)] hover:shadow-[0_0_15px_rgba(250,204,21,0.3)]"
+                                                >
+                                                    <Sparkles size={12} className="text-black/80" />
+                                                    Unlock Pro
+                                                </button>
+                                            )}
                                         </div>
                                         <p className="text-xs text-text-secondary mb-2">
                                             This engine constructs an intelligent representation of your career history.

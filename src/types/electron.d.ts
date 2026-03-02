@@ -4,10 +4,17 @@ export interface ElectronAPI {
     height: number
   }) => Promise<void>
   onToggleExpand: (callback: () => void) => () => void
+  getRecognitionLanguages: () => Promise<Record<string, any>>
   getScreenshots: () => Promise<Array<{ path: string; preview: string }>>
-  deleteScreenshot: (path: string) => Promise<{ success: boolean; error?: string }>
-  onScreenshotTaken: (callback: (data: { path: string; preview: string }) => void) => () => void
-  onScreenshotAttached: (callback: (data: { path: string; preview: string }) => void) => () => void
+  deleteScreenshot: (
+    path: string
+  ) => Promise<{ success: boolean; error?: string }>
+  onScreenshotTaken: (
+    callback: (data: { path: string; preview: string }) => void
+  ) => () => void
+  onScreenshotAttached: (
+    callback: (data: { path: string; preview: string }) => void
+  ) => () => void
   onSolutionsReady: (callback: (solutions: string) => void) => () => void
   onResetView: (callback: () => void) => () => void
   onSolutionStart: (callback: () => void) => () => void
@@ -26,6 +33,7 @@ export interface ElectronAPI {
   moveWindowUp: () => Promise<void>
   moveWindowDown: () => Promise<void>
 
+  analyzeImageFile: (path: string) => Promise<void>
   quitApp: () => Promise<void>
   toggleWindow: () => Promise<void>
   showWindow: () => Promise<void>
@@ -48,8 +56,29 @@ export interface ElectronAPI {
   getAvailableOllamaModels: () => Promise<string[]>
   switchToOllama: (model?: string, url?: string) => Promise<{ success: boolean; error?: string }>
   switchToGemini: (apiKey?: string, modelId?: string) => Promise<{ success: boolean; error?: string }>
-  testLlmConnection: () => Promise<{ success: boolean; error?: string }>
+  testLlmConnection: (provider: 'gemini' | 'groq' | 'openai' | 'claude', apiKey?: string) => Promise<{ success: boolean; error?: string }>
   selectServiceAccount: () => Promise<{ success: boolean; path?: string; cancelled?: boolean; error?: string }>
+
+  // API Key Management
+  setGeminiApiKey: (apiKey: string) => Promise<{ success: boolean; error?: string }>
+  setGroqApiKey: (apiKey: string) => Promise<{ success: boolean; error?: string }>
+  setOpenaiApiKey: (apiKey: string) => Promise<{ success: boolean; error?: string }>
+  setClaudeApiKey: (apiKey: string) => Promise<{ success: boolean; error?: string }>
+  getStoredCredentials: () => Promise<{ hasGeminiKey: boolean; hasGroqKey: boolean; hasOpenaiKey: boolean; hasClaudeKey: boolean; googleServiceAccountPath: string | null; sttProvider: 'google' | 'groq' | 'openai' | 'deepgram' | 'elevenlabs' | 'azure' | 'ibmwatson' | 'soniox'; hasSttGroqKey: boolean; hasSttOpenaiKey: boolean; hasDeepgramKey: boolean; hasElevenLabsKey: boolean; hasAzureKey: boolean; azureRegion: string; hasIbmWatsonKey: boolean; ibmWatsonRegion: string; groqSttModel?: string; hasSonioxKey?: boolean; hasGoogleSearchKey?: boolean; hasGoogleSearchCseId?: boolean }>
+
+  // STT Provider Management
+  setSttProvider: (provider: 'google' | 'groq' | 'openai' | 'deepgram' | 'elevenlabs' | 'azure' | 'ibmwatson' | 'soniox') => Promise<{ success: boolean; error?: string }>
+  getSttProvider: () => Promise<string>
+  setGroqSttApiKey: (apiKey: string) => Promise<{ success: boolean; error?: string }>
+  setOpenAiSttApiKey: (apiKey: string) => Promise<{ success: boolean; error?: string }>
+  setDeepgramApiKey: (apiKey: string) => Promise<{ success: boolean; error?: string }>
+  setElevenLabsApiKey: (apiKey: string) => Promise<{ success: boolean; error?: string }>
+  setAzureApiKey: (apiKey: string) => Promise<{ success: boolean; error?: string }>
+  setAzureRegion: (region: string) => Promise<{ success: boolean; error?: string }>
+  setIbmWatsonApiKey: (apiKey: string) => Promise<{ success: boolean; error?: string }>
+  setGroqSttModel: (model: string) => Promise<{ success: boolean; error?: string }>
+  setSonioxApiKey: (apiKey: string) => Promise<{ success: boolean; error?: string }>
+  testSttConnection: (provider: 'groq' | 'openai' | 'deepgram' | 'elevenlabs' | 'azure' | 'ibmwatson' | 'soniox', apiKey: string, region?: string) => Promise<{ success: boolean; error?: string }>
 
   // Native Audio Service Events
   onNativeAudioTranscript: (callback: (transcript: { speaker: string; text: string; final: boolean }) => void) => () => void
@@ -63,7 +92,6 @@ export interface ElectronAPI {
   getInputDevices: () => Promise<Array<{ id: string; name: string }>>
   getOutputDevices: () => Promise<Array<{ id: string; name: string }>>
   setRecognitionLanguage: (key: string) => Promise<{ success: boolean; error?: string }>
-  getRecognitionLanguages: () => Promise<Record<string, any>>
   getAiResponseLanguages: () => Promise<Array<{ label: string; code: string }>>
   setAiResponseLanguage: (language: string) => Promise<{ success: boolean; error?: string }>
   getSttLanguage: () => Promise<string>
@@ -114,6 +142,7 @@ export interface ElectronAPI {
   onGeminiStreamDone: (callback: () => void) => () => void
   onGeminiStreamError: (callback: (error: string) => void) => () => void;
   on: (channel: string, callback: (...args: any[]) => void) => () => void;
+  invoke: (channel: string, ...args: any[]) => Promise<any>
 
   onUndetectableChanged: (callback: (state: boolean) => void) => () => void;
   onGroqFastTextChanged: (callback: (enabled: boolean) => void) => () => void;
@@ -132,8 +161,6 @@ export interface ElectronAPI {
   getCalendarStatus: () => Promise<{ connected: boolean; email?: string }>
   getUpcomingEvents: () => Promise<Array<{ id: string; title: string; startTime: string; endTime: string; link?: string; source: 'google' }>>
   calendarRefresh: () => Promise<{ success: boolean; error?: string }>
-
-  invoke: (channel: string, ...args: any[]) => Promise<any>
 
   // Auto-Update
   onUpdateAvailable: (callback: (info: any) => void) => () => void
@@ -198,4 +225,4 @@ declare global {
   interface Window {
     electronAPI: ElectronAPI
   }
-} 
+}

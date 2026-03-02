@@ -21,6 +21,7 @@ pub mod silence_suppression;
 
 // Keep old resampler module for compatibility
 pub mod resampler;
+pub mod license;
 
 use crate::streaming_resampler::StreamingResampler;
 use crate::audio_config::{FRAME_SAMPLES, DSP_POLL_MS};

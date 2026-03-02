@@ -1047,9 +1047,11 @@ export function initializeIpcHandlers(appState: AppState): void {
       let response;
 
       if (provider === 'gemini') {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent`;
         response = await axios.post(url, {
           contents: [{ parts: [{ text: "Hello" }] }]
+        }, {
+          headers: { 'x-goog-api-key': apiKey }
         });
       } else if (provider === 'groq') {
         response = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
@@ -1206,16 +1208,7 @@ export function initializeIpcHandlers(appState: AppState): void {
     appState.modelSelectorWindowHelper.toggleWindow(coords.x, coords.y);
   });
 
-  safeHandle("test-llm-connection", async () => {
-    try {
-      const llmHelper = appState.processingHelper.getLLMHelper();
-      const result = await llmHelper.testConnection();
-      return result;
-    } catch (error: any) {
-      // console.error("Error testing LLM connection:", error);
-      return { success: false, error: error.message };
-    }
-  });
+
 
   // Native Audio Service Handlers
   // Native Audio handlers removed as part of migration to driverless architecture

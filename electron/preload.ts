@@ -274,11 +274,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
   },
 
   onDebugSuccess: (callback: (data: any) => void) => {
-    ipcRenderer.on("debug-success", (_event, data) => callback(data))
+    const subscription = (_: any, data: any) => callback(data)
+    ipcRenderer.on("debug-success", subscription)
     return () => {
-      ipcRenderer.removeListener("debug-success", (_event, data) =>
-        callback(data)
-      )
+      ipcRenderer.removeListener("debug-success", subscription)
     }
   },
   onDebugError: (callback: (error: string) => void) => {
@@ -787,4 +786,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Google Search API
   setGoogleSearchApiKey: (apiKey: string) => ipcRenderer.invoke('set-google-search-api-key', apiKey),
   setGoogleSearchCseId: (cseId: string) => ipcRenderer.invoke('set-google-search-cse-id', cseId),
+
+  // License Management
+  licenseActivate: (key: string) => ipcRenderer.invoke('license:activate', key),
+  licenseCheckPremium: () => ipcRenderer.invoke('license:check-premium'),
+  licenseDeactivate: () => ipcRenderer.invoke('license:deactivate'),
+  licenseGetHardwareId: () => ipcRenderer.invoke('license:get-hardware-id'),
 } as ElectronAPI)

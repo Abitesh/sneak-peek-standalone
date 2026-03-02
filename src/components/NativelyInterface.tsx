@@ -281,15 +281,12 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) =
         // Connection Status
         window.electronAPI.getNativeAudioStatus().then((status) => {
             setIsConnected(status.connected);
-            setIsConnected(status.connected);
         }).catch(() => setIsConnected(false));
 
         cleanups.push(window.electronAPI.onNativeAudioConnected(() => {
             setIsConnected(true);
-            setIsConnected(true);
         }));
         cleanups.push(window.electronAPI.onNativeAudioDisconnected(() => {
-            setIsConnected(false);
             setIsConnected(false);
         }));
 
