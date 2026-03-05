@@ -9,6 +9,7 @@ import { chunkTranscript } from './SemanticChunker';
 import { VectorStore } from './VectorStore';
 import { EmbeddingPipeline } from './EmbeddingPipeline';
 import { RAGRetriever } from './RAGRetriever';
+import { LiveRAGIndexer } from './LiveRAGIndexer';
 import { buildRAGPrompt, NO_CONTEXT_FALLBACK, NO_GLOBAL_CONTEXT_FALLBACK } from './prompts';
 
 export interface RAGManagerConfig {
@@ -30,12 +31,14 @@ export class RAGManager {
     private embeddingPipeline: EmbeddingPipeline;
     private retriever: RAGRetriever;
     private llmHelper: LLMHelper | null = null;
+    private liveIndexer: LiveRAGIndexer;
 
     constructor(config: RAGManagerConfig) {
         this.db = config.db;
         this.vectorStore = new VectorStore(config.db);
         this.embeddingPipeline = new EmbeddingPipeline(config.db, this.vectorStore);
         this.retriever = new RAGRetriever(this.vectorStore, this.embeddingPipeline);
+        this.liveIndexer = new LiveRAGIndexer(this.vectorStore, this.embeddingPipeline);
 
         if (config.apiKey) {
             this.embeddingPipeline.initialize(config.apiKey);
@@ -118,12 +121,19 @@ export class RAGManager {
             throw new Error('LLM helper not initialized');
         }
 
-        // Check if meeting has embeddings
+        // Check if meeting has embeddings (post-meeting RAG)
         const hasEmbeddings = this.vectorStore.hasEmbeddings(meetingId);
 
         if (!hasEmbeddings) {
-            // Fallback: no embeddings available yet - trigger wrapper fallback
-            throw new Error('NO_MEETING_EMBEDDINGS');
+            // JIT RAG: Check if live indexer has chunks for this meeting
+            const isLiveMeeting = this.liveIndexer.getActiveMeetingId() === meetingId;
+            if (isLiveMeeting && this.liveIndexer.hasIndexedChunks()) {
+                console.log(`[RAGManager] Using JIT RAG for live meeting ${meetingId} (${this.liveIndexer.getIndexedChunkCount()} chunks)`);
+                // Fall through to retrieval — VectorStore already has the JIT chunks
+            } else {
+                // No embeddings at all — trigger wrapper fallback
+                throw new Error('NO_MEETING_EMBEDDINGS');
+            }
         }
 
         // Retrieve relevant context
@@ -213,6 +223,48 @@ export class RAGManager {
      */
     isMeetingProcessed(meetingId: string): boolean {
         return this.vectorStore.hasEmbeddings(meetingId);
+    }
+
+    // ─── JIT RAG: Live Meeting Indexing ──────────────────────────────
+
+    /**
+     * Start JIT indexing for a live meeting.
+     * Call when a meeting session begins.
+     */
+    startLiveIndexing(meetingId: string): void {
+        if (!this.embeddingPipeline.isReady()) {
+            console.log('[RAGManager] Embedding pipeline not ready, skipping live indexing');
+            return;
+        }
+        this.liveIndexer.start(meetingId);
+    }
+
+    /**
+     * Feed new transcript segments to the live indexer.
+     * Call whenever new transcript arrives during the meeting.
+     */
+    feedLiveTranscript(segments: RawSegment[]): void {
+        this.liveIndexer.feedSegments(segments);
+    }
+
+    /**
+     * Stop JIT indexing (flushes remaining segments).
+     * Call when the meeting session ends.
+     * NOTE: The post-meeting processMeeting() will later replace JIT chunks
+     * with the complete, properly indexed version.
+     */
+    async stopLiveIndexing(): Promise<void> {
+        await this.liveIndexer.stop();
+    }
+
+    /**
+     * Check if JIT indexing is active for a meeting.
+     */
+    isLiveIndexingActive(meetingId?: string): boolean {
+        if (meetingId) {
+            return this.liveIndexer.getActiveMeetingId() === meetingId;
+        }
+        return this.liveIndexer.isRunning();
     }
 
     /**

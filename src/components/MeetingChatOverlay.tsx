@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useStreamBuffer } from '../hooks/useStreamBuffer';
 import { X, Copy, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import nativelyIcon from './icon.png';
@@ -194,6 +195,7 @@ const MeetingChatOverlay: React.FC<MeetingChatOverlayProps> = ({
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const chatWindowRef = useRef<HTMLDivElement>(null);
+    const streamBuffer = useStreamBuffer();
 
     // Auto-scroll to bottom on new messages
     useEffect(() => {
@@ -305,23 +307,29 @@ const MeetingChatOverlay: React.FC<MeetingChatOverlayProps> = ({
                 isStreaming: true
             }]);
 
-            // Set up RAG streaming listeners
+            // Set up RAG streaming listeners (RAF-batched to avoid per-token re-renders)
+            streamBuffer.reset();
             const tokenCleanup = window.electronAPI?.onRAGStreamChunk((data: { chunk: string }) => {
                 setChatState('streaming_response');
-                setMessages(prev => prev.map(msg =>
-                    msg.id === assistantMessageId
-                        ? { ...msg, content: msg.content + data.chunk }
-                        : msg
-                ));
+                streamBuffer.appendToken(data.chunk, (content) => {
+                    setMessages(prev => prev.map(msg =>
+                        msg.id === assistantMessageId
+                            ? { ...msg, content }
+                            : msg
+                    ));
+                });
             });
 
             const doneCleanup = window.electronAPI?.onRAGStreamComplete(() => {
+                // Final commit — flush any remaining buffered content
+                const finalContent = streamBuffer.getBufferedContent();
                 setMessages(prev => prev.map(msg =>
                     msg.id === assistantMessageId
-                        ? { ...msg, isStreaming: false }
+                        ? { ...msg, content: finalContent, isStreaming: false }
                         : msg
                 ));
                 setChatState('idle');
+                streamBuffer.reset();
                 tokenCleanup?.();
                 doneCleanup?.();
                 errorCleanup?.();
@@ -332,6 +340,7 @@ const MeetingChatOverlay: React.FC<MeetingChatOverlayProps> = ({
                 setMessages(prev => prev.filter(msg => msg.id !== assistantMessageId));
                 setErrorMessage("Couldn't get a response. Please try again.");
                 setChatState('error');
+                streamBuffer.reset();
                 tokenCleanup?.();
                 doneCleanup?.();
                 errorCleanup?.();
@@ -358,21 +367,26 @@ const MeetingChatOverlay: React.FC<MeetingChatOverlayProps> = ({
 
 ${contextString}`;
 
+                    streamBuffer.reset();
                     const oldTokenCleanup = window.electronAPI?.onGeminiStreamToken((token: string) => {
                         setChatState('streaming_response');
-                        setMessages(prev => prev.map(msg =>
-                            msg.id === assistantMessageId
-                                ? { ...msg, content: msg.content + token }
-                                : msg
-                        ));
+                        streamBuffer.appendToken(token, (content) => {
+                            setMessages(prev => prev.map(msg =>
+                                msg.id === assistantMessageId
+                                    ? { ...msg, content }
+                                    : msg
+                            ));
+                        });
                     });
 
                     const oldDoneCleanup = window.electronAPI?.onGeminiStreamDone(() => {
+                        const finalContent = streamBuffer.getBufferedContent();
                         setMessages(prev => prev.map(msg =>
                             msg.id === assistantMessageId
-                                ? { ...msg, isStreaming: false }
+                                ? { ...msg, content: finalContent, isStreaming: false }
                                 : msg
                         ));
+                        streamBuffer.reset();
                         oldTokenCleanup?.();
                         oldDoneCleanup?.();
                         oldErrorCleanup?.();
@@ -383,6 +397,7 @@ ${contextString}`;
                         setMessages(prev => prev.filter(msg => msg.id !== assistantMessageId));
                         setErrorMessage("Couldn't get a response. Please check your settings.");
                         setChatState('error');
+                        streamBuffer.reset();
                         oldTokenCleanup?.();
                         oldDoneCleanup?.();
                         oldErrorCleanup?.();
@@ -402,23 +417,28 @@ ${contextString}`;
 
 ${contextString}`;
 
-                // Switch to Gemini streaming
+                // Switch to Gemini streaming (RAF-batched)
+                streamBuffer.reset();
                 const oldTokenCleanup = window.electronAPI?.onGeminiStreamToken((token: string) => {
                     setChatState('streaming_response');
-                    setMessages(prev => prev.map(msg =>
-                        msg.id === assistantMessageId
-                            ? { ...msg, content: msg.content + token }
-                            : msg
-                    ));
+                    streamBuffer.appendToken(token, (content) => {
+                        setMessages(prev => prev.map(msg =>
+                            msg.id === assistantMessageId
+                                ? { ...msg, content }
+                                : msg
+                        ));
+                    });
                 });
 
                 const oldDoneCleanup = window.electronAPI?.onGeminiStreamDone(() => {
+                    const finalContent = streamBuffer.getBufferedContent();
                     setMessages(prev => prev.map(msg =>
                         msg.id === assistantMessageId
-                            ? { ...msg, isStreaming: false }
+                            ? { ...msg, content: finalContent, isStreaming: false }
                             : msg
                     ));
                     setChatState('idle');
+                    streamBuffer.reset();
                     oldTokenCleanup?.();
                     oldDoneCleanup?.();
                     oldErrorCleanup?.();
@@ -429,6 +449,7 @@ ${contextString}`;
                     setMessages(prev => prev.filter(msg => msg.id !== assistantMessageId));
                     setErrorMessage("Couldn't get a response. Please check your settings.");
                     setChatState('error');
+                    streamBuffer.reset();
                     oldTokenCleanup?.();
                     oldDoneCleanup?.();
                     oldErrorCleanup?.();

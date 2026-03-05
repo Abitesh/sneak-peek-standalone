@@ -537,6 +537,15 @@ export class AppState {
         confidence: segment.confidence
       });
 
+      // Feed final transcript to JIT RAG indexer
+      if (segment.isFinal && this.ragManager) {
+        this.ragManager.feedLiveTranscript([{
+          speaker: speaker,
+          text: segment.text,
+          timestamp: Date.now()
+        }]);
+      }
+
       const helper = this.getWindowHelper();
       const payload = {
         speaker: speaker,
@@ -812,6 +821,11 @@ export class AppState {
     // 4. Start Microphone
     this.microphoneCapture?.start();
     this.googleSTT_User?.start();
+
+    // 5. Start JIT RAG live indexing
+    if (this.ragManager) {
+      this.ragManager.startLiveIndexing('live-meeting-current');
+    }
   }
 
   public async endMeeting(): Promise<void> {
@@ -825,6 +839,11 @@ export class AppState {
     // 4. Stop Microphone
     this.microphoneCapture?.stop();
     this.googleSTT_User?.stop();
+
+    // 4b. Stop JIT RAG live indexing (flush remaining segments)
+    if (this.ragManager) {
+      await this.ragManager.stopLiveIndexing();
+    }
 
     // 4. Reset Intelligence Context & Save
     await this.intelligenceManager.stopMeeting();
@@ -854,6 +873,11 @@ export class AppState {
 
     // 6. Process meeting for RAG (embeddings)
     await this.processCompletedMeetingForRAG();
+
+    // 7. Clean up JIT RAG provisional chunks (post-meeting RAG replaces them)
+    if (this.ragManager) {
+      this.ragManager.deleteMeetingData('live-meeting-current');
+    }
   }
 
   private async processCompletedMeetingForRAG(): Promise<void> {

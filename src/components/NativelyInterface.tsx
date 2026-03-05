@@ -113,13 +113,13 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) =
     useEffect(() => {
         // Load the persisted default model (not the runtime model)
         // Each new meeting starts with the default from settings
-        if (window.electronAPI?.invoke) {
-            window.electronAPI.invoke('get-default-model')
+        if (window.electronAPI?.getDefaultModel) {
+            window.electronAPI.getDefaultModel()
                 .then((result: any) => {
                     if (result && result.model) {
                         setCurrentModel(result.model);
                         // Also set the runtime model to the default
-                        window.electronAPI.invoke('set-model', result.model).catch(() => { });
+                        window.electronAPI.setModel(result.model).catch(() => { });
                     }
                 })
                 .catch((err: any) => console.error("Failed to fetch default model:", err));
@@ -129,7 +129,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) =
     const handleModelSelect = (modelId: string) => {
         setCurrentModel(modelId);
         // Session-only: update runtime but don't persist as default
-        window.electronAPI.invoke('set-model', modelId)
+        window.electronAPI.setModel(modelId)
             .catch((err: any) => console.error("Failed to set model:", err));
     };
 
@@ -777,10 +777,65 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) =
             });
         }));
 
+        // JIT RAG Stream listeners (for live meeting RAG responses)
+        if (window.electronAPI.onRAGStreamChunk) {
+            cleanups.push(window.electronAPI.onRAGStreamChunk((data: { chunk: string }) => {
+                setMessages(prev => {
+                    const lastMsg = prev[prev.length - 1];
+                    if (lastMsg && lastMsg.isStreaming && lastMsg.role === 'system') {
+                        const updated = [...prev];
+                        updated[prev.length - 1] = {
+                            ...lastMsg,
+                            text: lastMsg.text + data.chunk,
+                            isCode: (lastMsg.text + data.chunk).includes('```')
+                        };
+                        return updated;
+                    }
+                    return prev;
+                });
+            }));
+        }
+
+        if (window.electronAPI.onRAGStreamComplete) {
+            cleanups.push(window.electronAPI.onRAGStreamComplete(() => {
+                setIsProcessing(false);
+                requestStartTimeRef.current = null;
+                setMessages(prev => {
+                    const lastMsg = prev[prev.length - 1];
+                    if (lastMsg && lastMsg.isStreaming) {
+                        const updated = [...prev];
+                        updated[prev.length - 1] = { ...lastMsg, isStreaming: false };
+                        return updated;
+                    }
+                    return prev;
+                });
+            }));
+        }
+
+        if (window.electronAPI.onRAGStreamError) {
+            cleanups.push(window.electronAPI.onRAGStreamError((data: { error: string }) => {
+                setIsProcessing(false);
+                requestStartTimeRef.current = null;
+                setMessages(prev => {
+                    const lastMsg = prev[prev.length - 1];
+                    if (lastMsg && lastMsg.isStreaming) {
+                        const updated = [...prev];
+                        updated[prev.length - 1] = {
+                            ...lastMsg,
+                            isStreaming: false,
+                            text: lastMsg.text + `\n\n[RAG Error: ${data.error}]`
+                        };
+                        return updated;
+                    }
+                    return prev;
+                });
+            }));
+        }
+
         return () => cleanups.forEach(fn => fn());
     }, [currentModel]); // Ensure tracking captures correct model
 
-    // MODE 5: Manual Answer - Toggle recording for voice-to-answer
+
     const handleAnswerNow = async () => {
         if (isManualRecording) {
             // Stop recording - send accumulated voice input to Gemini
@@ -837,8 +892,14 @@ Instructions:
 2. Provide a direct, helpful answer.
 3. Be concise.`;
                 } else {
-                    // Voice Only (Smart Extract)
-                    // We pass the instructions as CONTEXT so the backend logs the user question cleanly
+                    // JIT RAG pre-flight: try to use indexed meeting context first
+                    const ragResult = await window.electronAPI.ragQueryLive?.(question);
+                    if (ragResult?.success) {
+                        // JIT RAG handled it — response streamed via rag:stream-chunk events
+                        return;
+                    }
+
+                    // Voice Only (Smart Extract) — fallback
                     prompt = `You are a real-time interview assistant. The user just repeated or paraphrased a question from their interviewer.
 Instructions:
 1. Extract the core question being asked
@@ -923,6 +984,15 @@ Provide only the answer, nothing else.`;
         setIsProcessing(true);
 
         try {
+            // JIT RAG pre-flight: try to use indexed meeting context first
+            if (!currentAttachment) {
+                const ragResult = await window.electronAPI.ragQueryLive?.(userText || '');
+                if (ragResult?.success) {
+                    // JIT RAG handled it — response streamed via rag:stream-chunk events
+                    return;
+                }
+            }
+
             // Pass imagePath if attached, AND conversation context
             requestStartTimeRef.current = Date.now();
             await window.electronAPI.streamGeminiChat(
@@ -1626,7 +1696,7 @@ Provide only the answer, nothing else.`;
                                                 const x = window.screenX + buttonRect.left;
                                                 const y = window.screenY + contentRect.bottom + GAP;
 
-                                                window.electronAPI.invoke('toggle-model-selector', { x, y });
+                                                window.electronAPI.toggleModelSelector({ x, y });
                                             }}
                                             className={`
                                                 flex items-center gap-2 px-3 py-1.5 
@@ -1660,7 +1730,7 @@ Provide only the answer, nothing else.`;
                                                     if (isSettingsOpen) {
                                                         // If open, just close it (toggle will handle logic but we can be explicit or just toggle)
                                                         // Actually toggle-settings-window handles hiding if visible, so logic is same.
-                                                        window.electronAPI.invoke('toggle-settings-window');
+                                                        window.electronAPI.toggleSettingsWindow();
                                                         return;
                                                     }
 
@@ -1677,7 +1747,7 @@ Provide only the answer, nothing else.`;
                                                     // Y: Below the main content + gap
                                                     const y = window.screenY + contentRect.bottom + GAP;
 
-                                                    window.electronAPI.invoke('toggle-settings-window', { x, y });
+                                                    window.electronAPI.toggleSettingsWindow({ x, y });
                                                 }}
                                                 className={`
                                             w-7 h-7 flex items-center justify-center rounded-lg 

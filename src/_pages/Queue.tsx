@@ -165,12 +165,12 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
     const loadDefaultModel = async () => {
       try {
         // @ts-ignore
-        const result = await window.electronAPI.invoke('get-default-model');
+        const result = await window.electronAPI.getDefaultModel();
         if (result && result.model) {
           setCurrentModel(result.model);
           // Set runtime model to the default
           // @ts-ignore
-          window.electronAPI.invoke('set-model', result.model).catch(() => { });
+          window.electronAPI.setModel(result.model).catch(() => { });
         }
       } catch (error) {
         console.error('Error loading default model:', error);
@@ -282,7 +282,7 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
 
   const handleModelChange = (modelId: string) => {
     setCurrentModel(modelId)
-    window.electronAPI.invoke('set-model', modelId).catch(console.error);
+    window.electronAPI.setModel(modelId).catch(console.error);
     setChatMessages((msgs) => [...msgs, {
       role: "gemini",
       text: `🔄 Switched to ${modelId}. Ready for your questions!`

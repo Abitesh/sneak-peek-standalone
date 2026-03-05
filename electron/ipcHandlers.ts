@@ -1584,9 +1584,10 @@ export function initializeIpcHandlers(appState: AppState): void {
       return { fallback: true };
     }
 
-    // Check if the meeting actually has embeddings
-    if (!ragManager.isMeetingProcessed(meetingId)) {
-      console.log(`[RAG] Meeting ${meetingId} not processed, falling back to regular chat`);
+    // For completed meetings, check if post-meeting RAG is processed.
+    // For live meetings with JIT indexing, let RAGManager.queryMeeting() decide.
+    if (!ragManager.isMeetingProcessed(meetingId) && !ragManager.isLiveIndexingActive(meetingId)) {
+      console.log(`[RAG] Meeting ${meetingId} not processed and no JIT indexing, falling back to regular chat`);
       return { fallback: true };
     }
 
@@ -1616,6 +1617,51 @@ export function initializeIpcHandlers(appState: AppState): void {
 
         console.error("[RAG] Query error:", error);
         event.sender.send("rag:stream-error", { meetingId, error: msg });
+      }
+      return { success: false, error: error.message };
+    } finally {
+      activeRAGQueries.delete(queryKey);
+    }
+  });
+
+  // Query live meeting with JIT RAG
+  safeHandle("rag:query-live", async (event, { query }: { query: string }) => {
+    const ragManager = appState.getRAGManager();
+
+    if (!ragManager || !ragManager.isReady()) {
+      return { fallback: true };
+    }
+
+    // Check if JIT indexing is active and has chunks
+    if (!ragManager.isLiveIndexingActive('live-meeting-current')) {
+      return { fallback: true };
+    }
+
+    const abortController = new AbortController();
+    const queryKey = `live-${Date.now()}`;
+    activeRAGQueries.set(queryKey, abortController);
+
+    try {
+      const stream = ragManager.queryMeeting('live-meeting-current', query, abortController.signal);
+
+      for await (const chunk of stream) {
+        if (abortController.signal.aborted) break;
+        event.sender.send("rag:stream-chunk", { live: true, chunk });
+      }
+
+      event.sender.send("rag:stream-complete", { live: true });
+      return { success: true };
+
+    } catch (error: any) {
+      if (error.name !== 'AbortError') {
+        const msg = error.message || "";
+        // If JIT RAG failed (no embeddings yet, no relevant context), fallback to regular chat
+        if (msg.includes('NO_RELEVANT_CONTEXT') || msg.includes('NO_MEETING_EMBEDDINGS')) {
+          console.log(`[RAG] JIT query failed with '${msg}', falling back to regular live chat`);
+          return { fallback: true };
+        }
+        console.error("[RAG] Live query error:", error);
+        event.sender.send("rag:stream-error", { live: true, error: msg });
       }
       return { success: false, error: error.message };
     } finally {

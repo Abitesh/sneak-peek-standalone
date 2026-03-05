@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useStreamBuffer } from '../hooks/useStreamBuffer';
 import { X, Copy, Check, Globe, ArrowUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import nativelyIcon from './icon.png';
@@ -119,6 +120,7 @@ const GlobalChatOverlay: React.FC<GlobalChatOverlayProps> = ({
     const [chatState, setChatState] = useState<ChatState>('idle');
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [query, setQuery] = useState('');
+    const streamBuffer = useStreamBuffer();
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const chatWindowRef = useRef<HTMLDivElement>(null);
@@ -198,23 +200,28 @@ const GlobalChatOverlay: React.FC<GlobalChatOverlayProps> = ({
                 isStreaming: true
             }]);
 
-            // Set up RAG streaming listeners
+            // Set up RAG streaming listeners (RAF-batched)
+            streamBuffer.reset();
             const tokenCleanup = window.electronAPI?.onRAGStreamChunk((data: { chunk: string }) => {
                 setChatState('streaming_response');
-                setMessages(prev => prev.map(msg =>
-                    msg.id === assistantMessageId
-                        ? { ...msg, content: msg.content + data.chunk }
-                        : msg
-                ));
+                streamBuffer.appendToken(data.chunk, (content) => {
+                    setMessages(prev => prev.map(msg =>
+                        msg.id === assistantMessageId
+                            ? { ...msg, content }
+                            : msg
+                    ));
+                });
             });
 
             const doneCleanup = window.electronAPI?.onRAGStreamComplete(() => {
+                const finalContent = streamBuffer.getBufferedContent();
                 setMessages(prev => prev.map(msg =>
                     msg.id === assistantMessageId
-                        ? { ...msg, isStreaming: false }
+                        ? { ...msg, content: finalContent, isStreaming: false }
                         : msg
                 ));
                 setChatState('idle');
+                streamBuffer.reset();
                 tokenCleanup?.();
                 doneCleanup?.();
                 errorCleanup?.();
@@ -225,6 +232,7 @@ const GlobalChatOverlay: React.FC<GlobalChatOverlayProps> = ({
                 setMessages(prev => prev.filter(msg => msg.id !== assistantMessageId));
                 setErrorMessage("Couldn't get a response. Please try again.");
                 setChatState('error');
+                streamBuffer.reset();
                 tokenCleanup?.();
                 doneCleanup?.();
                 errorCleanup?.();
@@ -241,22 +249,27 @@ const GlobalChatOverlay: React.FC<GlobalChatOverlayProps> = ({
                 errorCleanup?.();
 
                 // Setup fallback listeners (Standard Gemini)
+                streamBuffer.reset();
                 const oldTokenCleanup = window.electronAPI?.onGeminiStreamToken((token: string) => {
                     setChatState('streaming_response');
-                    setMessages(prev => prev.map(msg =>
-                        msg.id === assistantMessageId
-                            ? { ...msg, content: msg.content + token }
-                            : msg
-                    ));
+                    streamBuffer.appendToken(token, (content) => {
+                        setMessages(prev => prev.map(msg =>
+                            msg.id === assistantMessageId
+                                ? { ...msg, content }
+                                : msg
+                        ));
+                    });
                 });
 
                 const oldDoneCleanup = window.electronAPI?.onGeminiStreamDone(() => {
+                    const finalContent = streamBuffer.getBufferedContent();
                     setMessages(prev => prev.map(msg =>
                         msg.id === assistantMessageId
-                            ? { ...msg, isStreaming: false }
+                            ? { ...msg, content: finalContent, isStreaming: false }
                             : msg
                     ));
                     setChatState('idle');
+                    streamBuffer.reset();
                     oldTokenCleanup?.();
                     oldDoneCleanup?.();
                     oldErrorCleanup?.();
@@ -267,6 +280,7 @@ const GlobalChatOverlay: React.FC<GlobalChatOverlayProps> = ({
                     setMessages(prev => prev.filter(msg => msg.id !== assistantMessageId));
                     setErrorMessage("Couldn't get a response. Please check your settings.");
                     setChatState('error');
+                    streamBuffer.reset();
                     oldTokenCleanup?.();
                     oldDoneCleanup?.();
                     oldErrorCleanup?.();

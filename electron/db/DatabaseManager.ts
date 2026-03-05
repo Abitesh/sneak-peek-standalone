@@ -3,6 +3,7 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import { app } from 'electron';
 import fs from 'fs';
+import * as sqliteVec from 'sqlite-vec';
 
 // Interfaces for our data objects
 export interface Meeting {
@@ -77,6 +78,16 @@ export class DatabaseManager {
             }
 
             this.db = new Database(this.dbPath);
+
+            // Load sqlite-vec extension for native vector search
+            try {
+                sqliteVec.load(this.db);
+                console.log('[DatabaseManager] sqlite-vec extension loaded successfully');
+            } catch (extErr) {
+                console.error('[DatabaseManager] Failed to load sqlite-vec extension:', extErr);
+                console.warn('[DatabaseManager] Vector search will fall back to JS cosine similarity');
+            }
+
             this.runMigrations();
         } catch (error) {
             console.error('[DatabaseManager] Failed to initialize database:', error);
@@ -84,145 +95,228 @@ export class DatabaseManager {
         }
     }
 
+    // ============================================
+    // PRAGMA user_version Migration System
+    // ============================================
+    // Each version is applied exactly once, in order.
+    // New migrations append a new `if (version < N)` block.
+    // ============================================
+
     private runMigrations() {
         if (!this.db) return;
 
-        const createMeetingsTable = `
-            CREATE TABLE IF NOT EXISTS meetings (
-                id TEXT PRIMARY KEY,
-                title TEXT,
-                start_time INTEGER,
-                duration_ms INTEGER,
-                summary_json TEXT, -- JSON containing actionItems, keyPoints, and legacy summary text if needed
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                calendar_event_id TEXT,
-                source TEXT
-            );
-        `;
+        const version = (this.db.pragma('user_version', { simple: true }) as number) || 0;
+        console.log(`[DatabaseManager] Current schema version: ${version}`);
 
-        const createTranscriptsTable = `
-            CREATE TABLE IF NOT EXISTS transcripts (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                meeting_id TEXT,
-                speaker TEXT,
-                content TEXT,
-                timestamp_ms INTEGER,
-                FOREIGN KEY(meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
-            );
-        `;
+        // Version 0 → 1: Initial schema (all core tables)
+        if (version < 1) {
+            console.log('[DatabaseManager] Applying migration v0 → v1: Initial schema');
+            this.db.exec(`
+                CREATE TABLE IF NOT EXISTS meetings (
+                    id TEXT PRIMARY KEY,
+                    title TEXT,
+                    start_time INTEGER,
+                    duration_ms INTEGER,
+                    summary_json TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    calendar_event_id TEXT,
+                    source TEXT,
+                    is_processed INTEGER DEFAULT 1
+                );
 
-        const createAiInteractionsTable = `
-            CREATE TABLE IF NOT EXISTS ai_interactions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                meeting_id TEXT,
-                type TEXT,
-                timestamp INTEGER,
-                user_query TEXT,
-                ai_response TEXT,
-                metadata_json TEXT, -- JSON for lists or extra data
-                FOREIGN KEY(meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
-            );
-        `;
+                CREATE TABLE IF NOT EXISTS transcripts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    meeting_id TEXT,
+                    speaker TEXT,
+                    content TEXT,
+                    timestamp_ms INTEGER,
+                    FOREIGN KEY(meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
+                );
 
-        this.db.exec(createMeetingsTable);
-        this.db.exec(createTranscriptsTable);
-        this.db.exec(createAiInteractionsTable);
+                CREATE TABLE IF NOT EXISTS ai_interactions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    meeting_id TEXT,
+                    type TEXT,
+                    timestamp INTEGER,
+                    user_query TEXT,
+                    ai_response TEXT,
+                    metadata_json TEXT,
+                    FOREIGN KEY(meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
+                );
 
-        // RAG: Semantic chunks with embeddings
-        const createChunksTable = `
-            CREATE TABLE IF NOT EXISTS chunks (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                meeting_id TEXT NOT NULL,
-                chunk_index INTEGER NOT NULL,
-                speaker TEXT,
-                start_timestamp_ms INTEGER,
-                end_timestamp_ms INTEGER,
-                cleaned_text TEXT NOT NULL,
-                token_count INTEGER NOT NULL,
-                embedding BLOB,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY(meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
-            );
-        `;
-        this.db.exec(createChunksTable);
+                CREATE TABLE IF NOT EXISTS chunks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    meeting_id TEXT NOT NULL,
+                    chunk_index INTEGER NOT NULL,
+                    speaker TEXT,
+                    start_timestamp_ms INTEGER,
+                    end_timestamp_ms INTEGER,
+                    cleaned_text TEXT NOT NULL,
+                    token_count INTEGER NOT NULL,
+                    embedding BLOB,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
+                );
 
-        // RAG: Meeting-level summaries for global search
-        const createChunkSummariesTable = `
-            CREATE TABLE IF NOT EXISTS chunk_summaries (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                meeting_id TEXT NOT NULL UNIQUE,
-                summary_text TEXT NOT NULL,
-                embedding BLOB,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY(meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
-            );
-        `;
-        this.db.exec(createChunkSummariesTable);
+                CREATE TABLE IF NOT EXISTS chunk_summaries (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    meeting_id TEXT NOT NULL UNIQUE,
+                    summary_text TEXT NOT NULL,
+                    embedding BLOB,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
+                );
 
-        // RAG: Embedding queue for retry/failure handling
-        const createEmbeddingQueueTable = `
-            CREATE TABLE IF NOT EXISTS embedding_queue (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                meeting_id TEXT NOT NULL,
-                chunk_id INTEGER,
-                status TEXT DEFAULT 'pending',
-                retry_count INTEGER DEFAULT 0,
-                error_message TEXT,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                processed_at TEXT
-            );
-        `;
-        this.db.exec(createEmbeddingQueueTable);
+                CREATE TABLE IF NOT EXISTS embedding_queue (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    meeting_id TEXT NOT NULL,
+                    chunk_id INTEGER,
+                    status TEXT DEFAULT 'pending',
+                    retry_count INTEGER DEFAULT 0,
+                    error_message TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    processed_at TEXT
+                );
 
-        // Create index for chunks lookup
-        try {
-            this.db.exec("CREATE INDEX IF NOT EXISTS idx_chunks_meeting ON chunks(meeting_id)");
-        } catch (e) { /* Index may exist */ }
+                CREATE INDEX IF NOT EXISTS idx_chunks_meeting ON chunks(meeting_id);
 
-        // Migration for existing tables
-        try {
-            this.db.exec("ALTER TABLE meetings ADD COLUMN calendar_event_id TEXT");
-        } catch (e) { /* Column likely exists */ }
+                CREATE TABLE IF NOT EXISTS user_profile (
+                    id INTEGER PRIMARY KEY,
+                    structured_json TEXT NOT NULL,
+                    compact_persona TEXT NOT NULL,
+                    intro_short TEXT,
+                    intro_interview TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                );
 
-        try {
-            this.db.exec("ALTER TABLE meetings ADD COLUMN source TEXT");
-        } catch (e) { /* Column likely exists */ }
+                CREATE TABLE IF NOT EXISTS resume_nodes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    category TEXT,
+                    title TEXT,
+                    organization TEXT,
+                    start_date TEXT,
+                    end_date TEXT,
+                    duration_months INTEGER,
+                    text_content TEXT,
+                    tags TEXT,
+                    embedding BLOB
+                );
+            `);
+            this.db.pragma('user_version = 1');
+        }
 
-        try {
-            this.db.exec("ALTER TABLE meetings ADD COLUMN is_processed INTEGER DEFAULT 1"); // Default to 1 (true) for existing records
-        } catch (e) { /* Column likely exists */ }
+        // Version 1 → 2: Add columns for existing installs (safe for fresh installs too)
+        if (version < 2) {
+            console.log('[DatabaseManager] Applying migration v1 → v2: Add meetings columns');
+            // For fresh installs these columns already exist from v1, so we guard with try/catch.
+            // Unlike the old code, these are versioned and run exactly once.
+            const columnsToAdd = [
+                "ALTER TABLE meetings ADD COLUMN calendar_event_id TEXT",
+                "ALTER TABLE meetings ADD COLUMN source TEXT",
+                "ALTER TABLE meetings ADD COLUMN is_processed INTEGER DEFAULT 1"
+            ];
+            for (const sql of columnsToAdd) {
+                try { this.db.exec(sql); } catch (e) { /* Column already exists from v1 CREATE */ }
+            }
+            this.db.pragma('user_version = 2');
+        }
 
-        // Profile Engine: User profile table
-        const createUserProfileTable = `
-            CREATE TABLE IF NOT EXISTS user_profile (
-                id INTEGER PRIMARY KEY,
-                structured_json TEXT NOT NULL,
-                compact_persona TEXT NOT NULL,
-                intro_short TEXT,
-                intro_interview TEXT,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            );
-        `;
-        this.db.exec(createUserProfileTable);
+        // Version 2 → 3: sqlite-vec virtual tables for native vector search
+        if (version < 3) {
+            console.log('[DatabaseManager] Applying migration v2 → v3: vec0 virtual tables');
+            try {
+                // Create vec0 virtual table for chunk embeddings (768-dim float32)
+                this.db.exec(`
+                    CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0(
+                        chunk_id INTEGER PRIMARY KEY,
+                        embedding float[768]
+                    );
+                `);
 
-        // Profile Engine: Resume nodes table (atomic searchable units)
-        const createResumeNodesTable = `
-            CREATE TABLE IF NOT EXISTS resume_nodes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                category TEXT,
-                title TEXT,
-                organization TEXT,
-                start_date TEXT,
-                end_date TEXT,
-                duration_months INTEGER,
-                text_content TEXT,
-                tags TEXT,
-                embedding BLOB
-            );
-        `;
-        this.db.exec(createResumeNodesTable);
+                // Create vec0 virtual table for summary embeddings (768-dim float32)
+                this.db.exec(`
+                    CREATE VIRTUAL TABLE IF NOT EXISTS vec_summaries USING vec0(
+                        summary_id INTEGER PRIMARY KEY,
+                        embedding float[768]
+                    );
+                `);
+
+                // Migrate existing chunk embeddings from BLOB column to vec0 table
+                this.migrateExistingEmbeddings();
+
+                console.log('[DatabaseManager] vec0 virtual tables created successfully');
+            } catch (e) {
+                console.error('[DatabaseManager] vec0 migration failed (sqlite-vec may not be loaded):', e);
+                console.warn('[DatabaseManager] VectorStore will fall back to JS cosine similarity');
+            }
+            this.db.pragma('user_version = 3');
+        }
 
         console.log('[DatabaseManager] Migrations completed.');
+    }
+
+    /**
+     * One-time migration: Copy existing BLOB embeddings into vec0 virtual tables.
+     */
+    private migrateExistingEmbeddings(): void {
+        if (!this.db) return;
+
+        // Migrate chunk embeddings
+        try {
+            const chunkRows = this.db.prepare(
+                'SELECT id, embedding FROM chunks WHERE embedding IS NOT NULL'
+            ).all() as any[];
+
+            if (chunkRows.length > 0) {
+                const insert = this.db.prepare(
+                    'INSERT OR IGNORE INTO vec_chunks(chunk_id, embedding) VALUES (?, ?)'
+                );
+                const migrateAll = this.db.transaction(() => {
+                    for (const row of chunkRows) {
+                        insert.run(row.id, row.embedding);
+                    }
+                });
+                migrateAll();
+                console.log(`[DatabaseManager] Migrated ${chunkRows.length} chunk embeddings to vec_chunks`);
+            }
+        } catch (e) {
+            console.error('[DatabaseManager] Failed to migrate chunk embeddings:', e);
+        }
+
+        // Migrate summary embeddings
+        try {
+            const summaryRows = this.db.prepare(
+                'SELECT id, embedding FROM chunk_summaries WHERE embedding IS NOT NULL'
+            ).all() as any[];
+
+            if (summaryRows.length > 0) {
+                const insert = this.db.prepare(
+                    'INSERT OR IGNORE INTO vec_summaries(summary_id, embedding) VALUES (?, ?)'
+                );
+                const migrateAll = this.db.transaction(() => {
+                    for (const row of summaryRows) {
+                        insert.run(row.id, row.embedding);
+                    }
+                });
+                migrateAll();
+                console.log(`[DatabaseManager] Migrated ${summaryRows.length} summary embeddings to vec_summaries`);
+            }
+        } catch (e) {
+            console.error('[DatabaseManager] Failed to migrate summary embeddings:', e);
+        }
+    }
+
+    /**
+     * Check if sqlite-vec is available (vec0 tables exist)
+     */
+    public hasVecExtension(): boolean {
+        if (!this.db) return false;
+        try {
+            this.db.prepare("SELECT count(*) FROM vec_chunks LIMIT 1").get();
+            return true;
+        } catch (e) {
+            return false;
+        }
     }
 
     // ============================================

@@ -113,7 +113,40 @@ interface ElectronAPI {
   onIntelligenceModeChanged: (callback: (data: { mode: string }) => void) => () => void
   onIntelligenceError: (callback: (data: { error: string; mode: string }) => void) => () => void
 
-  invoke: (channel: string, ...args: any[]) => Promise<any>
+  // Model Management
+  getDefaultModel: () => Promise<{ model: string }>
+  setModel: (modelId: string) => Promise<{ success: boolean; error?: string }>
+  setDefaultModel: (modelId: string) => Promise<{ success: boolean; error?: string }>
+  toggleModelSelector: (coords: { x: number; y: number }) => Promise<void>
+
+  // Settings Window
+  toggleSettingsWindow: (coords?: { x: number; y: number }) => Promise<void>
+
+  // Groq Fast Text Mode
+  getGroqFastTextMode: () => Promise<{ enabled: boolean }>
+  setGroqFastTextMode: (enabled: boolean) => Promise<{ success: boolean; error?: string }>
+
+  // Demo
+  seedDemo: () => Promise<{ success: boolean }>
+
+  // Custom Providers
+  saveCustomProvider: (provider: any) => Promise<{ success: boolean; id?: string; error?: string }>
+  getCustomProviders: () => Promise<any[]>
+  deleteCustomProvider: (id: string) => Promise<{ success: boolean; error?: string }>
+
+  // Follow-up Email
+  generateFollowupEmail: (input: any) => Promise<string>
+  extractEmailsFromTranscript: (transcript: Array<{ text: string }>) => Promise<string[]>
+  getCalendarAttendees: (eventId: string) => Promise<Array<{ email: string; name: string }>>
+  openMailto: (params: { to: string; subject: string; body: string }) => Promise<{ success: boolean; error?: string }>
+
+  // Audio Test
+  startAudioTest: (deviceId?: string) => Promise<{ success: boolean }>
+  stopAudioTest: () => Promise<{ success: boolean }>
+  onAudioTestLevel: (callback: (level: number) => void) => () => void
+
+  // Database
+  flushDatabase: () => Promise<{ success: boolean }>
   showWindow: () => Promise<void>
   hideWindow: () => Promise<void>
   onToggleExpand: (callback: () => void) => () => void
@@ -124,7 +157,7 @@ interface ElectronAPI {
   onGeminiStreamToken: (callback: (token: string) => void) => () => void
   onGeminiStreamDone: (callback: () => void) => () => void
   onGeminiStreamError: (callback: (error: string) => void) => () => void
-  on: (channel: string, callback: (...args: any[]) => void) => () => void
+
 
   onUndetectableChanged: (callback: (state: boolean) => void) => () => void
   onGroqFastTextChanged: (callback: (enabled: boolean) => void) => () => void
@@ -156,6 +189,7 @@ interface ElectronAPI {
 
   // RAG (Retrieval-Augmented Generation) API
   ragQueryMeeting: (meetingId: string, query: string) => Promise<{ success?: boolean; fallback?: boolean; error?: string }>
+  ragQueryLive: (query: string) => Promise<{ success?: boolean; fallback?: boolean; error?: string }>
   ragQueryGlobal: (query: string) => Promise<{ success?: boolean; fallback?: boolean; error?: string }>
   ragCancelQuery: (options: { meetingId?: string; global?: boolean }) => Promise<{ success: boolean }>
   ragIsMeetingProcessed: (meetingId: string) => Promise<boolean>
@@ -622,15 +656,48 @@ contextBridge.exposeInMainWorld("electronAPI", {
     }
   },
 
-  invoke: (channel: string, ...args: any[]) => ipcRenderer.invoke(channel, ...args),
+  // Model Management
+  getDefaultModel: () => ipcRenderer.invoke('get-default-model'),
+  setModel: (modelId: string) => ipcRenderer.invoke('set-model', modelId),
+  setDefaultModel: (modelId: string) => ipcRenderer.invoke('set-default-model', modelId),
+  toggleModelSelector: (coords: { x: number; y: number }) => ipcRenderer.invoke('toggle-model-selector', coords),
 
-  on: (channel: string, callback: (...args: any[]) => void) => {
-    const subscription = (_: any, ...args: any[]) => callback(...args)
-    ipcRenderer.on(channel, subscription)
+  // Settings Window
+  toggleSettingsWindow: (coords?: { x: number; y: number }) => ipcRenderer.invoke('toggle-settings-window', coords),
+
+  // Groq Fast Text Mode
+  getGroqFastTextMode: () => ipcRenderer.invoke('get-groq-fast-text-mode'),
+  setGroqFastTextMode: (enabled: boolean) => ipcRenderer.invoke('set-groq-fast-text-mode', enabled),
+
+  // Demo
+  seedDemo: () => ipcRenderer.invoke('seed-demo'),
+
+  // Custom Providers
+  saveCustomProvider: (provider: any) => ipcRenderer.invoke('save-custom-provider', provider),
+  getCustomProviders: () => ipcRenderer.invoke('get-custom-providers'),
+  deleteCustomProvider: (id: string) => ipcRenderer.invoke('delete-custom-provider', id),
+
+  // Follow-up Email
+  generateFollowupEmail: (input: any) => ipcRenderer.invoke('generate-followup-email', input),
+  extractEmailsFromTranscript: (transcript: Array<{ text: string }>) => ipcRenderer.invoke('extract-emails-from-transcript', transcript),
+  getCalendarAttendees: (eventId: string) => ipcRenderer.invoke('get-calendar-attendees', eventId),
+  openMailto: (params: { to: string; subject: string; body: string }) => ipcRenderer.invoke('open-mailto', params),
+
+  // Audio Test
+  startAudioTest: (deviceId?: string) => ipcRenderer.invoke('start-audio-test', deviceId),
+  stopAudioTest: () => ipcRenderer.invoke('stop-audio-test'),
+  onAudioTestLevel: (callback: (level: number) => void) => {
+    const subscription = (_: any, level: number) => callback(level)
+    ipcRenderer.on('audio-test-level', subscription)
     return () => {
-      ipcRenderer.removeListener(channel, subscription)
+      ipcRenderer.removeListener('audio-test-level', subscription)
     }
   },
+
+  // Database
+  flushDatabase: () => ipcRenderer.invoke('flush-database'),
+
+
 
   onUndetectableChanged: (callback: (state: boolean) => void) => {
     const subscription = (_: any, state: boolean) => callback(state)
@@ -724,6 +791,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // RAG API
   ragQueryMeeting: (meetingId: string, query: string) => ipcRenderer.invoke('rag:query-meeting', { meetingId, query }),
+  ragQueryLive: (query: string) => ipcRenderer.invoke('rag:query-live', { query }),
   ragQueryGlobal: (query: string) => ipcRenderer.invoke('rag:query-global', { query }),
   ragCancelQuery: (options: { meetingId?: string; global?: boolean }) => ipcRenderer.invoke('rag:cancel-query', options),
   ragIsMeetingProcessed: (meetingId: string) => ipcRenderer.invoke('rag:is-meeting-processed', meetingId),

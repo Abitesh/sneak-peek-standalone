@@ -125,8 +125,8 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
     useEffect(() => {
         console.log("Launcher mounted");
         // Seed demo data if needed (safe to call always)
-        if (window.electronAPI && window.electronAPI.invoke) {
-            window.electronAPI.invoke('seed-demo').catch(err => console.error("Failed to seed demo:", err));
+        if (window.electronAPI && window.electronAPI.seedDemo) {
+            window.electronAPI.seedDemo().catch(err => console.error("Failed to seed demo:", err));
         }
 
         // Sync initial undetectable state
@@ -191,7 +191,7 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
             const inputDeviceId = localStorage.getItem('preferredInputDeviceId');
             const outputDeviceId = localStorage.getItem('preferredOutputDeviceId');
 
-            await window.electronAPI.invoke('start-meeting', {
+            await window.electronAPI.startMeeting({
                 title: preparedEvent.title,
                 calendarEventId: preparedEvent.id,
                 source: 'calendar',

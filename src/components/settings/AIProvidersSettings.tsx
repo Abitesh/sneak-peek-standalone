@@ -112,7 +112,7 @@ export const AIProvidersSettings: React.FC = () => {
     useEffect(() => {
         const loadCredentials = async () => {
             try {                // @ts-ignore
-                const fastMode = await window.electronAPI?.invoke('get-groq-fast-text-mode');
+                const fastMode = await window.electronAPI?.getGroqFastTextMode();
                 if (fastMode) setFastResponseMode(fastMode.enabled);
 
                 // @ts-ignore
@@ -127,14 +127,14 @@ export const AIProvidersSettings: React.FC = () => {
                 }
 
                 // @ts-ignore
-                const custom = await window.electronAPI?.invoke('get-custom-providers');
+                const custom = await window.electronAPI?.getCustomProviders();
                 if (custom) {
                     setCustomProviders(custom);
                 }
 
                 // Load persisted default model
                 // @ts-ignore
-                const result = await window.electronAPI?.invoke('get-default-model');
+                const result = await window.electronAPI?.getDefaultModel();
                 if (result && result.model) {
                     setDefaultModel(result.model);
                 }
@@ -165,7 +165,7 @@ export const AIProvidersSettings: React.FC = () => {
             setFastResponseMode(false);
             localStorage.setItem('natively_groq_fast_text', 'false');
             // @ts-ignore
-            window.electronAPI?.invoke('set-groq-fast-text-mode', false);
+            window.electronAPI?.setGroqFastTextMode(false);
         }
     }, [hasStoredKey.groq, fastResponseMode]);
 
@@ -185,7 +185,7 @@ export const AIProvidersSettings: React.FC = () => {
         setOllamaStatus('checking');
         try {
             // @ts-ignore
-            const result = await window.electronAPI?.invoke('ensure-ollama-running');
+            const result = await window.electronAPI?.invoke?.('ensure-ollama-running');
             if (result && result.success) {
                 // It's running (or just started), now fetch models
                 checkOllama(true);
@@ -204,7 +204,7 @@ export const AIProvidersSettings: React.FC = () => {
 
         try {
             // @ts-ignore
-            const models = await window.electronAPI?.invoke('get-available-ollama-models');
+            const models = await window.electronAPI?.getAvailableOllamaModels?.();
             if (models && models.length > 0) {
                 setOllamaModels(models);
                 setOllamaStatus('detected');
@@ -227,7 +227,7 @@ export const AIProvidersSettings: React.FC = () => {
         setOllamaStatus('fixing');
         try {
             // @ts-ignore
-            const result = await window.electronAPI?.invoke('force-restart-ollama');
+            const result = await window.electronAPI?.invoke?.('force-restart-ollama');
             if (result && result.success) {
                 setOllamaRestarted(true);
                 // Wait for server to be ready
@@ -368,15 +368,15 @@ export const AIProvidersSettings: React.FC = () => {
 
         try {
             // @ts-ignore
-            const result = await window.electronAPI.invoke('save-custom-provider', newProvider);
+            const result = await window.electronAPI.saveCustomProvider(newProvider);
             if (result.success) {
                 // Refresh list
                 // @ts-ignore
-                const updated = await window.electronAPI.invoke('get-custom-providers');
+                const updated = await window.electronAPI.getCustomProviders();
                 setCustomProviders(updated);
                 setIsEditingCustom(false);
             } else {
-                setCurlError(result.error);
+                setCurlError(result.error ?? null);
             }
         } catch (e: any) {
             setCurlError(e.message);
@@ -387,10 +387,10 @@ export const AIProvidersSettings: React.FC = () => {
         if (!confirm("Are you sure you want to delete this provider?")) return;
         try {
             // @ts-ignore
-            const result = await window.electronAPI.invoke('delete-custom-provider', id);
+            const result = await window.electronAPI.deleteCustomProvider(id);
             if (result.success) {
                 // @ts-ignore
-                const updated = await window.electronAPI.invoke('get-custom-providers');
+                const updated = await window.electronAPI.getCustomProviders();
                 setCustomProviders(updated);
             }
         } catch (e) {
@@ -425,7 +425,7 @@ export const AIProvidersSettings: React.FC = () => {
                         onChange={(val) => {
                             setDefaultModel(val);
                             // @ts-ignore - persist as default + update runtime + broadcast
-                            window.electronAPI?.invoke('set-default-model', val).catch(console.error);
+                            window.electronAPI?.setDefaultModel(val).catch(console.error);
                         }}
                     />
                 </div>
@@ -455,7 +455,7 @@ export const AIProvidersSettings: React.FC = () => {
                             setFastResponseMode(newState);
                             localStorage.setItem('natively_groq_fast_text', String(newState));
                             // @ts-ignore
-                            await window.electronAPI?.invoke('set-groq-fast-text-mode', newState);
+                            await window.electronAPI?.setGroqFastTextMode(newState);
                         }}
                         className={`w-10 h-6 rounded-full p-1 transition-colors ${!hasStoredKey.groq ? 'cursor-not-allowed bg-bg-input border border-border-subtle' : fastResponseMode ? 'bg-orange-500 cursor-pointer' : 'bg-bg-input border border-border-subtle cursor-pointer'}`}
                     >

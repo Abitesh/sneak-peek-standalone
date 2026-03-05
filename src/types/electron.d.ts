@@ -141,8 +141,41 @@ export interface ElectronAPI {
   onGeminiStreamToken: (callback: (token: string) => void) => () => void
   onGeminiStreamDone: (callback: () => void) => () => void
   onGeminiStreamError: (callback: (error: string) => void) => () => void;
-  on: (channel: string, callback: (...args: any[]) => void) => () => void;
-  invoke: (channel: string, ...args: any[]) => Promise<any>
+
+  // Model Management
+  getDefaultModel: () => Promise<{ model: string }>;
+  setModel: (modelId: string) => Promise<{ success: boolean; error?: string }>;
+  setDefaultModel: (modelId: string) => Promise<{ success: boolean; error?: string }>;
+  toggleModelSelector: (coords: { x: number; y: number }) => Promise<void>;
+
+  // Settings Window
+  toggleSettingsWindow: (coords?: { x: number; y: number }) => Promise<void>;
+
+  // Groq Fast Text Mode
+  getGroqFastTextMode: () => Promise<{ enabled: boolean }>;
+  setGroqFastTextMode: (enabled: boolean) => Promise<{ success: boolean; error?: string }>;
+
+  // Demo
+  seedDemo: () => Promise<{ success: boolean }>;
+
+  // Custom Providers
+  saveCustomProvider: (provider: any) => Promise<{ success: boolean; id?: string; error?: string }>;
+  getCustomProviders: () => Promise<any[]>;
+  deleteCustomProvider: (id: string) => Promise<{ success: boolean; error?: string }>;
+
+  // Follow-up Email
+  generateFollowupEmail: (input: any) => Promise<string>;
+  extractEmailsFromTranscript: (transcript: Array<{ text: string }>) => Promise<string[]>;
+  getCalendarAttendees: (eventId: string) => Promise<Array<{ email: string; name: string }>>;
+  openMailto: (params: { to: string; subject: string; body: string }) => Promise<{ success: boolean; error?: string }>;
+
+  // Audio Test
+  startAudioTest: (deviceId?: string) => Promise<{ success: boolean }>;
+  stopAudioTest: () => Promise<{ success: boolean }>;
+  onAudioTestLevel: (callback: (level: number) => void) => () => void;
+
+  // Database
+  flushDatabase: () => Promise<{ success: boolean }>;
 
   onUndetectableChanged: (callback: (state: boolean) => void) => () => void;
   onGroqFastTextChanged: (callback: (enabled: boolean) => void) => () => void;
@@ -176,6 +209,7 @@ export interface ElectronAPI {
 
   // RAG (Retrieval-Augmented Generation) API
   ragQueryMeeting: (meetingId: string, query: string) => Promise<{ success?: boolean; fallback?: boolean; error?: string }>
+  ragQueryLive: (query: string) => Promise<{ success?: boolean; fallback?: boolean; error?: string }>
   ragQueryGlobal: (query: string) => Promise<{ success?: boolean; fallback?: boolean; error?: string }>
   ragCancelQuery: (options: { meetingId?: string; global?: boolean }) => Promise<{ success: boolean }>
   ragIsMeetingProcessed: (meetingId: string) => Promise<boolean>
