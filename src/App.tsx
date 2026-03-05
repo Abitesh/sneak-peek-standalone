@@ -10,6 +10,11 @@ import StartupSequence from "./components/StartupSequence"
 import { AnimatePresence, motion } from "framer-motion"
 import UpdateBanner from "./components/UpdateBanner"
 import { SupportToaster } from "./components/SupportToaster"
+import { ProfileFeatureToaster } from "./components/ProfileFeatureToaster"
+import { JDAwarenessToaster } from "./components/JDAwarenessToaster"
+import { PremiumPromoToaster } from "./components/PremiumPromoToaster"
+import { PremiumUpgradeModal } from "./components/premium/PremiumUpgradeModal"
+import { useAdCampaigns } from "./hooks/useAdCampaigns"
 import { analytics } from "./lib/analytics/analytics.service"
 
 const queryClient = new QueryClient()
@@ -60,10 +65,27 @@ const App: React.FC = () => {
   // State
   const [showStartup, setShowStartup] = useState(true);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState('general');
+  const [showPremiumModal, setShowPremiumModal] = useState(false);
+  const [isPremiumActive, setIsPremiumActive] = useState(false);
+  
+  // Profile state for ad targeting
+  const [hasProfile, setHasProfile] = useState(false);
+
+  // Initialize Ads Campaign Manager
+  const isAppReady = !isSettingsWindow && !isOverlayWindow && !isModelSelectorWindow && !showStartup;
+  const { activeAd, dismissAd } = useAdCampaigns(isPremiumActive, hasProfile, isAppReady);
+
+  useEffect(() => {
+    // Basic status check for campaign targeting
+    window.electronAPI?.profileGetStatus?.().then(s => setHasProfile(s?.hasProfile || false)).catch(() => {});
+    window.electronAPI?.licenseCheckPremium?.().then(setIsPremiumActive).catch(() => {});
+  }, []);
 
   // Handlers
   const handleStartMeeting = async () => {
     try {
+      localStorage.setItem('natively_last_meeting_start', Date.now().toString());
       const inputDeviceId = localStorage.getItem('preferredInputDeviceId');
       let outputDeviceId = localStorage.getItem('preferredOutputDeviceId');
       const useLegacyAudio = localStorage.getItem('useLegacyAudioBackend') === 'true';
@@ -102,6 +124,17 @@ const App: React.FC = () => {
     try {
       await window.electronAPI.endMeeting();
       console.log("[App.tsx] endMeeting IPC completed");
+      
+      const startStr = localStorage.getItem('natively_last_meeting_start');
+      if (startStr) {
+        const duration = Date.now() - parseInt(startStr, 10);
+        const threshold = import.meta.env.DEV ? 10000 : 180000;
+        if (duration >= threshold) {
+          localStorage.setItem('natively_show_profile_toaster', 'true');
+        }
+        localStorage.removeItem('natively_last_meeting_start');
+      }
+
       // Switch back to Native Launcher Mode
       await window.electronAPI.setWindowMode('launcher');
     } catch (err) {
@@ -182,11 +215,17 @@ const App: React.FC = () => {
               <ToastProvider>
                 <Launcher
                   onStartMeeting={handleStartMeeting}
-                  onOpenSettings={() => setIsSettingsOpen(true)}
+                  onOpenSettings={(tab = 'general') => {
+                    setSettingsInitialTab(tab);
+                    setIsSettingsOpen(true);
+                  }}
                 />
                 <SettingsOverlay
                   isOpen={isSettingsOpen}
-                  onClose={() => setIsSettingsOpen(false)}
+                  onClose={() => {
+                    setIsSettingsOpen(false);
+                  }}
+                  initialTab={settingsInitialTab}
                 />
                 <ToastViewport />
               </ToastProvider>
@@ -196,6 +235,44 @@ const App: React.FC = () => {
       </AnimatePresence>
       <UpdateBanner />
       <SupportToaster />
+      <ProfileFeatureToaster 
+        isOpen={activeAd === 'profile'} 
+        onDismiss={dismissAd}
+        onSetupProfile={() => {
+          setSettingsInitialTab('profile');
+          setIsSettingsOpen(true);
+        }} 
+      />
+      <JDAwarenessToaster 
+        isOpen={activeAd === 'jd'} 
+        onDismiss={dismissAd}
+        onSetupJD={() => {
+          setSettingsInitialTab('profile');
+          setIsSettingsOpen(true);
+        }} 
+      />
+      <PremiumPromoToaster 
+        isOpen={activeAd === 'promo'} 
+        onDismiss={dismissAd}
+        onUpgrade={() => {
+          setShowPremiumModal(true);
+        }} 
+      />
+      <PremiumUpgradeModal
+        isOpen={showPremiumModal}
+        onClose={() => setShowPremiumModal(false)}
+        isPremium={isPremiumActive}
+        onActivated={() => {
+          setIsPremiumActive(true);
+          setShowPremiumModal(false);
+          // After activation, open settings to Profile Intelligence
+          setTimeout(() => {
+            setSettingsInitialTab('profile');
+            setIsSettingsOpen(true);
+          }, 300);
+        }}
+        onDeactivated={() => setIsPremiumActive(false)}
+      />
     </div>
   )
 }

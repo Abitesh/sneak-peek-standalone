@@ -221,10 +221,25 @@ const ProviderSelect: React.FC<ProviderSelectProps> = ({ value, options, onChang
 interface SettingsOverlayProps {
     isOpen: boolean;
     onClose: () => void;
+    initialTab?: string;
 }
 
-const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) => {
-    const [activeTab, setActiveTab] = useState('general');
+const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose, initialTab = 'general' }) => {
+    const [activeTab, setActiveTab] = useState(initialTab);
+    
+    // Sync active tab when modal opens
+    useEffect(() => {
+        if (isOpen && initialTab) {
+            setActiveTab(initialTab);
+            
+            // Proactively load profile data if starting on profile tab
+            if (initialTab === 'profile') {
+                window.electronAPI?.profileGetStatus?.().then(setProfileStatus).catch(() => { });
+                window.electronAPI?.profileGetProfile?.().then(setProfileData).catch(() => { });
+            }
+        }
+    }, [isOpen, initialTab]);
+    
     const { shortcuts, updateShortcut, resetShortcuts } = useShortcuts();
     const [isUndetectable, setIsUndetectable] = useState(false);
     const [disguiseMode, setDisguiseMode] = useState<'terminal' | 'settings' | 'activity' | 'none'>('none');
@@ -916,10 +931,15 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                     className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-8"
                 >
                     <motion.div
-                        initial={{ scale: 0.95, opacity: 0, y: 10 }}
+                        initial={{ scale: 0.94, opacity: 0, y: 20 }}
                         animate={{ scale: 1, opacity: 1, y: 0 }}
-                        exit={{ scale: 0.95, opacity: 0, y: 10 }}
-                        transition={{ type: "spring", stiffness: 350, damping: 25 }}
+                        exit={{ scale: 0.94, opacity: 0, y: 20 }}
+                        transition={{ 
+                            type: "spring", 
+                            stiffness: 400, 
+                            damping: 32,
+                            mass: 1
+                        }}
                         className="bg-bg-elevated w-full max-w-4xl h-[80vh] rounded-2xl border border-border-subtle shadow-2xl flex overflow-hidden"
                     >
                         {/* Sidebar */}
@@ -966,7 +986,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                         }}
                                         className={`w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-3 ${activeTab === 'profile' ? 'bg-bg-item-active text-text-primary' : 'text-text-secondary hover:text-text-primary hover:bg-bg-item-active/50'}`}
                                     >
-                                        <User size={16} /> Profile
+                                        <User size={16} /> Profile Intelligence
                                     </button>
 
                                     <button
@@ -1372,11 +1392,11 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                                         )}
 
                                                         {/* High-fidelity Toggle */}
-                                                        <div className="flex items-center gap-2 bg-bg-input px-3 py-1.5 rounded-full border border-border-subtle">
+                                                        <div className={`flex items-center gap-2 bg-bg-input px-3 py-1.5 rounded-full border border-border-subtle ${!isPremium ? 'opacity-40 cursor-not-allowed' : ''}`} title={!isPremium ? 'Requires Pro license' : ''}>
                                                             <span className="text-xs font-medium text-text-secondary">Persona Engine</span>
                                                             <div
                                                                 onClick={async () => {
-                                                                    if (!profileStatus.hasProfile) return;
+                                                                    if (!profileStatus.hasProfile || !isPremium) return;
                                                                     const newState = !profileStatus.profileMode;
                                                                     try {
                                                                         await window.electronAPI?.profileSetMode?.(newState);
@@ -1385,9 +1405,9 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                                                                         console.error('Failed to toggle profile mode:', e);
                                                                     }
                                                                 }}
-                                                                className={`w-9 h-5 rounded-full relative transition-colors ${!profileStatus.hasProfile ? 'opacity-40 cursor-not-allowed bg-bg-toggle-switch' : profileStatus.profileMode ? 'bg-accent-primary cursor-pointer' : 'bg-bg-toggle-switch border border-border-muted cursor-pointer'}`}
+                                                                className={`w-9 h-5 rounded-full relative transition-colors ${(!profileStatus.hasProfile || !isPremium) ? 'opacity-40 cursor-not-allowed bg-bg-toggle-switch' : profileStatus.profileMode ? 'bg-accent-primary cursor-pointer' : 'bg-bg-toggle-switch border border-border-muted cursor-pointer'}`}
                                                             >
-                                                                <div className={`absolute top-1 left-1 w-3 h-3 rounded-full bg-white transition-transform ${profileStatus.profileMode ? 'translate-x-4' : 'translate-x-0'}`} />
+                                                                <div className={`absolute top-1 left-1 w-3 h-3 rounded-full bg-white transition-transform ${profileStatus.profileMode && isPremium ? 'translate-x-4' : 'translate-x-0'}`} />
                                                             </div>
                                                         </div>
                                                     </div>
@@ -2447,6 +2467,8 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose }) =>
                 }}
                 onDeactivated={() => {
                     setIsPremium(false);
+                    // Auto-disable profile mode in UI when license is removed
+                    setProfileStatus(prev => ({ ...prev, profileMode: false }));
                 }}
             />
         </AnimatePresence >

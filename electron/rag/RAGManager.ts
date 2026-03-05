@@ -236,6 +236,17 @@ export class RAGManager {
             console.log('[RAGManager] Embedding pipeline not ready, skipping live indexing');
             return;
         }
+        
+        // Ensure meeting row exists in DB to satisfy foreign key constraints for chunks
+        try {
+            this.db.prepare(`
+                INSERT OR IGNORE INTO meetings (id, title, start_time, duration_ms, summary_json, created_at, source, is_processed)
+                VALUES (?, 'Live Meeting', ?, 0, '{}', ?, 'manual', 0)
+            `).run(meetingId, Date.now(), new Date().toISOString());
+        } catch (e) {
+            console.warn('[RAGManager] Failed to create transient meeting row for live indexing', e);
+        }
+
         this.liveIndexer.start(meetingId);
     }
 
@@ -272,6 +283,15 @@ export class RAGManager {
      */
     deleteMeetingData(meetingId: string): void {
         this.vectorStore.deleteChunksForMeeting(meetingId);
+        
+        // Also clean up transient meeting row if it was a live session
+        try {
+            if (meetingId === 'live-meeting-current') {
+                this.db.prepare('DELETE FROM meetings WHERE id = ?').run(meetingId);
+            }
+        } catch (e) {
+            console.warn('[RAGManager] Failed to delete transient meeting row', e);
+        }
     }
 
     /**
