@@ -80,6 +80,12 @@ _The privacy-first AI assistant for meetings._
   </a>
 </p>
 
+<p align="center">
+  <a href="https://evynignatious.gumroad.com/l/natively">
+    <img src="https://img.shields.io/badge/Buy_Natively_Pro-Unlock_Premium-FF3366?style=for-the-badge&logo=gumroad&logoColor=white" />
+  </a>
+</p>
+
 <small>Requires macOS 12+ or Windows 10/11</small>
 
 </div>
