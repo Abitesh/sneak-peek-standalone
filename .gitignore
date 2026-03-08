@@ -173,5 +173,3 @@ native-module/*.node
 native-module/target/
 native-module/*.node
 
-# Premium Features (proprietary — not included in open-source builds)
-premium/

@@ -75,7 +75,7 @@ _The privacy-first AI assistant for meetings._
   <a href="https://github.com/evinjohnn/natively-cluely-ai-assistant/releases/latest">
     <img src="https://img.shields.io/badge/Download-macOS-000000?style=for-the-badge&logo=apple&logoColor=white" />
   </a>
-  <a href="https://github.com/evinjohnn/natively-cluely-ai-assistant/releases/latest">
+  <a href="https://github.com/evinjohnn/natively-cluely-ai-assistant/releases/tag/v1.1.2">
     <img src="https://img.shields.io/badge/Download-Windows-0078D4?style=for-the-badge&logo=windows&logoColor=white" />
   </a>
 </p>
@@ -513,6 +513,11 @@ Quality pull requests will be reviewed and merged.
 Licensed under the GNU Affero General Public License v3.0 (AGPL-3.0).
 
 If you run or modify this software over a network, you must provide the full source code under the same license.
+
+This repository contains the open-source core of the project.
+
+Some features available in official releases are part of the
+commercial Premium Edition and are not included in this repository.
 
 > **Note:** This project is available for sponsorships, ads, or partnerships – perfect for companies in the AI, productivity, or developer tools space.
 
