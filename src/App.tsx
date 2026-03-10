@@ -90,6 +90,16 @@ const App: React.FC = () => {
     // Basic status check for campaign targeting
     window.electronAPI?.profileGetStatus?.().then(s => setHasProfile(s?.hasProfile || false)).catch(() => {});
     window.electronAPI?.licenseCheckPremium?.().then(setIsPremiumActive).catch(() => {});
+
+    // Listen for meeting processing completion to trigger post-meeting ads
+    const removeMeetingsListener = window.electronAPI?.onMeetingsUpdated?.(() => {
+      console.log("[App.tsx] Meetings updated (processing finished), starting ad delay timer");
+      setLastMeetingEndTime(Date.now());
+    });
+
+    return () => {
+      if (removeMeetingsListener) removeMeetingsListener();
+    }
   }, []);
 
   // Handlers
@@ -146,7 +156,7 @@ const App: React.FC = () => {
       }
 
       // Switch back to Native Launcher Mode
-      setLastMeetingEndTime(Date.now());
+      // (Ad delay tracking moved to onMeetingsUpdated listener so ads wait for note generation to finish)
       await window.electronAPI.setWindowMode('launcher');
     } catch (err) {
       console.error("Failed to end meeting:", err);

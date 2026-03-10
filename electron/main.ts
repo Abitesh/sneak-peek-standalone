@@ -817,7 +817,7 @@ export class AppState {
 
     // Defer the heavy native audio/capture initializations
     // This allows the IPC call to return instantly, avoiding UI freeze on Start Natively
-    setTimeout(async () => {
+    setImmediate(async () => {
       // Check for audio configuration preference
       if (metadata && metadata.audio) {
         await this.reconfigureAudio(metadata.audio.inputDeviceId, metadata.audio.outputDeviceId);
@@ -838,7 +838,7 @@ export class AppState {
       if (this.ragManager) {
         this.ragManager.startLiveIndexing('live-meeting-current');
       }
-    }, 150);
+    });
   }
 
   public async endMeeting(): Promise<void> {
