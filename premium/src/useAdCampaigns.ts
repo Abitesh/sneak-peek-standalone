@@ -40,7 +40,8 @@ export const useAdCampaigns = (
   hasProfile: boolean,
   isAppReady: boolean, // True when launcher is visible and steady
   appStartTime: number,
-  lastMeetingEndTime: number | null
+  lastMeetingEndTime: number | null,
+  isProcessingMeeting: boolean
 ) => {
     const [activeAd, setActiveAd] = useState<AdCampaign>(null);
 
@@ -49,7 +50,7 @@ export const useAdCampaigns = (
         // so it doesn't pop up over modals or during meeting.
         // We also check for overlay window explicitly.
         const isOverlayWindow = new URLSearchParams(window.location.search).get('window') === 'overlay';
-        if (!isAppReady || isOverlayWindow) return;
+        if (!isAppReady || isOverlayWindow || isProcessingMeeting) return;
 
         let isMounted = true;
         let timer: ReturnType<typeof setTimeout>;
@@ -204,7 +205,7 @@ export const useAdCampaigns = (
             if (timer) clearTimeout(timer);
         };
 
-    }, [isAppReady, isPremium, hasProfile]);
+    }, [isAppReady, isPremium, hasProfile, appStartTime, lastMeetingEndTime, isProcessingMeeting]);
 
     const dismissAd = (campaignId?: string) => {
         if (campaignId) {

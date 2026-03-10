@@ -68,6 +68,6 @@ jobs:
              echo "No changes to sync."
           else
              git commit -m "Auto-sync from private repo: ${{ github.sha }}"
-             git push origin HEAD:main
+             git push --force origin HEAD:main
              echo "Successfully synced to public repository."
           fi

@@ -76,6 +76,7 @@ const App: React.FC = () => {
   // Initialize Ads Campaign Manager
   const [appStartTime] = useState<number>(Date.now());
   const [lastMeetingEndTime, setLastMeetingEndTime] = useState<number | null>(null);
+  const [isProcessingMeeting, setIsProcessingMeeting] = useState<boolean>(false);
   
   const isAppReady = !isSettingsWindow && !isOverlayWindow && !isModelSelectorWindow && !showStartup;
   const { activeAd, dismissAd } = useAdCampaigns(
@@ -83,7 +84,8 @@ const App: React.FC = () => {
     hasProfile, 
     isAppReady,
     appStartTime,
-    lastMeetingEndTime
+    lastMeetingEndTime,
+    isProcessingMeeting
   );
 
   useEffect(() => {
@@ -94,6 +96,7 @@ const App: React.FC = () => {
     // Listen for meeting processing completion to trigger post-meeting ads
     const removeMeetingsListener = window.electronAPI?.onMeetingsUpdated?.(() => {
       console.log("[App.tsx] Meetings updated (processing finished), starting ad delay timer");
+      setIsProcessingMeeting(false);
       setLastMeetingEndTime(Date.now());
     });
 
@@ -141,6 +144,7 @@ const App: React.FC = () => {
   const handleEndMeeting = async () => {
     console.log("[App.tsx] handleEndMeeting triggered");
     analytics.trackMeetingEnded();
+    setIsProcessingMeeting(true);
     try {
       await window.electronAPI.endMeeting();
       console.log("[App.tsx] endMeeting IPC completed");

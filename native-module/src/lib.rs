@@ -125,10 +125,8 @@ impl SystemAudioCapture {
                 }
                 
                 // 1. Drain ring buffer (lock-free)
-                let mut batch_count = 0;
                 while let Some(sample) = consumer.try_pop() {
                     raw_batch.push(sample);
-                    batch_count += 1;
                     if raw_batch.len() >= 480 {
                         break;
                     }
@@ -267,10 +265,8 @@ impl MicrophoneCapture {
                 }
                 
                 // 1. Drain ring buffer (lock-free)
-                let mut batch_count = 0;
                 while let Some(sample) = consumer.try_pop() {
                     raw_batch.push(sample);
-                    batch_count += 1;
                     if raw_batch.len() >= 480 {
                         break;
                     }
