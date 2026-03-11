@@ -24,6 +24,18 @@ Unlike cloud-only tools, Natively uses **Local RAG (Retrieval Augmented Generati
 
 ---
 
+## Support Natively
+
+The community around **Natively** created a Pump.fun token to support the project.
+
+Creator rewards help cover **AI/API bills** and ongoing development costs.
+
+<p align="center">
+  <a href="https://pump.fun/coin/B5opQ9euCVcJALeeCQbrFv5kePG8cCcoYqnXfx4Ppump">
+    <img src="assets/pumpfun-card.png" alt="Support Natively on Pump.fun" width="520" />
+  </a>
+</p>
+
 ## Why Natively?
 
 While other tools focus on being "lightweight" wrappers, Natively is a complete intelligence system.
