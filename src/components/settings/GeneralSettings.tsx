@@ -101,11 +101,11 @@ export const GeneralSettings: React.FC<GeneralSettingsProps> = () => {
                     {/* Recognition Language */}
                     <div className="bg-bg-item-surface rounded-xl p-5 border border-border-subtle">
                         <label className="block text-xs font-medium text-text-secondary uppercase tracking-wide mb-2">Recognition Language (STT)</label>
-                        <div className="relative">
+                        <div className="relative inline-block">
                             <select
                                 value={recognitionLanguage}
                                 onChange={(e) => handleLanguageChange(e.target.value)}
-                                className="w-full appearance-none bg-bg-input border border-border-subtle rounded-lg px-4 py-2.5 text-xs text-text-primary focus:outline-none focus:border-accent-primary transition-colors cursor-pointer"
+                                className="appearance-none bg-bg-input border border-border-subtle rounded-lg pl-5 pr-10 py-2.5 text-xs text-text-primary focus:outline-none focus:border-accent-primary transition-colors cursor-pointer"
                             >
                                 {Object.entries(availableLanguages).map(([key, lang]) => (
                                     <option key={key} value={key}>
@@ -121,11 +121,11 @@ export const GeneralSettings: React.FC<GeneralSettingsProps> = () => {
                     {/* AI Response Language */}
                     <div className="bg-bg-item-surface rounded-xl p-5 border border-border-subtle">
                         <label className="block text-xs font-medium text-text-secondary uppercase tracking-wide mb-2">AI Response Language</label>
-                        <div className="relative">
+                        <div className="relative inline-block">
                             <select
                                 value={aiResponseLanguage}
                                 onChange={(e) => handleAiLanguageChange(e.target.value)}
-                                className="w-full appearance-none bg-bg-input border border-border-subtle rounded-lg px-4 py-2.5 text-xs text-text-primary focus:outline-none focus:border-accent-primary transition-colors cursor-pointer"
+                                className="appearance-none bg-bg-input border border-border-subtle rounded-lg pl-5 pr-10 py-2.5 text-xs text-text-primary focus:outline-none focus:border-accent-primary transition-colors cursor-pointer"
                             >
                                 {availableAiLanguages.map((lang) => (
                                     <option key={lang.code} value={lang.code}>

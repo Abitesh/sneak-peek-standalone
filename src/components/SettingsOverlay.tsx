@@ -646,13 +646,6 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose, init
                 setSttDeepgramKey('');
                 setHasStoredDeepgramKey(false);
             }
-
-            if (provider === 'soniox') {
-                // @ts-ignore
-                await window.electronAPI?.setSonioxApiKey?.('');
-                setSttSonioxKey('');
-                setHasStoredSonioxKey(false);
-            }
         } catch (e) {
             console.error(`Failed to remove ${provider} STT key:`, e);
         }
@@ -1131,7 +1124,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose, init
                                                     <div className="relative" ref={themeDropdownRef}>
                                                         <button
                                                             onClick={() => setIsThemeDropdownOpen(!isThemeDropdownOpen)}
-                                                            className="bg-bg-component hover:bg-bg-elevated border border-border-subtle text-text-primary px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-2 min-w-[100px] justify-between"
+                                                            className="bg-bg-component hover:bg-bg-elevated border border-border-subtle text-text-primary px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-2 min-w-[110px] justify-between"
                                                         >
                                                             <div className="flex items-center gap-2 overflow-hidden">
                                                                 <span className="text-text-secondary shrink-0">
@@ -1146,7 +1139,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose, init
 
                                                         {/* Dropdown Menu */}
                                                         {isThemeDropdownOpen && (
-                                                            <div className="absolute right-0 top-full mt-1 w-full bg-bg-elevated border border-border-subtle rounded-lg shadow-xl overflow-hidden z-20 p-1 animated fadeIn select-none">
+                                                            <div className="absolute right-0 top-full mt-1 min-w-full w-max bg-bg-elevated border border-border-subtle rounded-lg shadow-xl overflow-hidden z-20 p-1 animated fadeIn select-none">
                                                                 {[
                                                                     { mode: 'system', label: 'System', icon: <Monitor size={14} /> },
                                                                     { mode: 'light', label: 'Light', icon: <Sun size={14} /> },
@@ -1184,7 +1177,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose, init
                                                     <div className="relative" ref={aiLangDropdownRef}>
                                                         <button
                                                             onClick={() => setIsAiLangDropdownOpen(!isAiLangDropdownOpen)}
-                                                            className="bg-bg-component hover:bg-bg-elevated border border-border-subtle text-text-primary px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-2 min-w-[140px] justify-between"
+                                                            className="bg-bg-component hover:bg-bg-elevated border border-border-subtle text-text-primary pl-4 pr-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-2 min-w-[110px] justify-between"
                                                         >
                                                             <span className="capitalize text-ellipsis overflow-hidden whitespace-nowrap">
                                                                 {aiResponseLanguage}
@@ -1194,7 +1187,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose, init
 
                                                         {/* Dropdown Menu */}
                                                         {isAiLangDropdownOpen && (
-                                                            <div className="absolute right-0 top-full mt-1 w-full min-w-[160px] bg-bg-elevated border border-border-subtle rounded-lg shadow-xl overflow-hidden z-20 p-1 animated fadeIn select-none max-h-60 overflow-y-auto custom-scrollbar">
+                                                            <div className="absolute right-0 top-full mt-1 min-w-full w-max bg-bg-elevated border border-border-subtle rounded-lg shadow-xl overflow-hidden z-20 p-1 animated fadeIn select-none max-h-60 overflow-y-auto custom-scrollbar">
                                                                 {availableAiLanguages.map((option) => (
                                                                     <button
                                                                         key={option.code}

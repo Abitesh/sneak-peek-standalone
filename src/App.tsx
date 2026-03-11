@@ -74,13 +74,14 @@ const App: React.FC = () => {
   
   // Profile state for ad targeting
   const [hasProfile, setHasProfile] = useState(false);
+  const [isLauncherMainView, setIsLauncherMainView] = useState(true);
 
   // Initialize Ads Campaign Manager
   const [appStartTime] = useState<number>(Date.now());
   const [lastMeetingEndTime, setLastMeetingEndTime] = useState<number | null>(null);
   const [isProcessingMeeting, setIsProcessingMeeting] = useState<boolean>(false);
   
-  const isAppReady = !isSettingsWindow && !isOverlayWindow && !isModelSelectorWindow && !showStartup;
+  const isAppReady = !isSettingsWindow && !isOverlayWindow && !isModelSelectorWindow && !showStartup && !isSettingsOpen && isLauncherMainView;
   const { activeAd, dismissAd } = useAdCampaigns(
     isPremiumActive, 
     hasProfile, 
@@ -246,6 +247,7 @@ const App: React.FC = () => {
                     setSettingsInitialTab(tab);
                     setIsSettingsOpen(true);
                   }}
+                  onPageChange={setIsLauncherMainView}
                 />
                 <SettingsOverlay
                   isOpen={isSettingsOpen}
@@ -262,36 +264,40 @@ const App: React.FC = () => {
       </AnimatePresence>
       <UpdateBanner />
       <SupportToaster />
-      <ProfileFeatureToaster 
-        isOpen={activeAd === 'profile'} 
-        onDismiss={dismissAd}
-        onSetupProfile={() => {
-          setSettingsInitialTab('profile');
-          setIsSettingsOpen(true);
-        }} 
-      />
-      <JDAwarenessToaster 
-        isOpen={activeAd === 'jd'} 
-        onDismiss={dismissAd}
-        onSetupJD={() => {
-          setSettingsInitialTab('profile');
-          setIsSettingsOpen(true);
-        }} 
-      />
-      <PremiumPromoToaster 
-        isOpen={activeAd === 'promo'} 
-        onDismiss={dismissAd}
-        onUpgrade={() => {
-          setShowPremiumModal(true);
-        }} 
-      />
-      
-      {/* Remote Campaigns Render Logic */}
-      <RemoteCampaignToaster
-        isOpen={typeof activeAd === 'object' && activeAd !== null}
-        campaign={typeof activeAd === 'object' && activeAd !== null ? activeAd : undefined as any}
-        onDismiss={dismissAd}
-      />
+      {isLauncherMainView && !isSettingsOpen && (
+        <>
+          <ProfileFeatureToaster 
+            isOpen={activeAd === 'profile'} 
+            onDismiss={dismissAd}
+            onSetupProfile={() => {
+              setSettingsInitialTab('profile');
+              setIsSettingsOpen(true);
+            }} 
+          />
+          <JDAwarenessToaster 
+            isOpen={activeAd === 'jd'} 
+            onDismiss={dismissAd}
+            onSetupJD={() => {
+              setSettingsInitialTab('profile');
+              setIsSettingsOpen(true);
+            }} 
+          />
+          <PremiumPromoToaster 
+            isOpen={activeAd === 'promo'} 
+            onDismiss={dismissAd}
+            onUpgrade={() => {
+              setShowPremiumModal(true);
+            }} 
+          />
+          
+          {/* Remote Campaigns Render Logic */}
+          <RemoteCampaignToaster
+            isOpen={typeof activeAd === 'object' && activeAd !== null}
+            campaign={typeof activeAd === 'object' && activeAd !== null ? activeAd : undefined as any}
+            onDismiss={dismissAd}
+          />
+        </>
+      )}
 
       <PremiumUpgradeModal
         isOpen={showPremiumModal}

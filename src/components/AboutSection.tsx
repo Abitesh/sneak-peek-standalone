@@ -182,12 +182,11 @@ export const AboutSection: React.FC<AboutSectionProps> = () => {
                             </div>
                             <div>
                                 <h5 className="text-sm font-bold text-text-primary">Official Website</h5>
-                                <p className="text-xs text-text-secondary mt-0.5">nativelyai.vercel.app</p>
                             </div>
                         </div>
                         <a
-                            href="https://nativelyai.vercel.app"
-                            onClick={(e) => handleOpenLink(e, "https://nativelyai.vercel.app")}
+                            href="https://natively.software"
+                            onClick={(e) => handleOpenLink(e, "https://natively.software")}
                             className="whitespace-nowrap px-4 py-2 bg-text-primary hover:bg-white/90 text-bg-main text-xs font-bold rounded-lg transition-all shadow hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0 flex items-center gap-2"
                         >
                             <Globe size={14} />

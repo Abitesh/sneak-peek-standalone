@@ -41,7 +41,8 @@ interface Meeting {
 
 interface LauncherProps {
     onStartMeeting: () => void;
-    onOpenSettings: () => void;
+    onOpenSettings: (tab?: string) => void;
+    onPageChange?: (isMain: boolean) => void;
 }
 
 // Helper to format date groups
@@ -69,7 +70,7 @@ const formatTime = (dateStr: string) => {
     return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }).toLowerCase();
 };
 
-const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) => {
+const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings, onPageChange }) => {
     const [meetings, setMeetings] = useState<Meeting[]>([]);
     const [isDetectable, setIsDetectable] = useState(false);
     const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
@@ -249,6 +250,13 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings }) =
         window.addEventListener('click', handleClickOutside);
         return () => window.removeEventListener('click', handleClickOutside);
     }, []);
+
+    // Notify parent if we are on the main launcher list view
+    useEffect(() => {
+        if (onPageChange) {
+            onPageChange(!selectedMeeting && !isGlobalChatOpen);
+        }
+    }, [selectedMeeting, isGlobalChatOpen, onPageChange]);
 
     const handleOpenMeeting = async (meeting: Meeting) => {
         setForwardMeeting(null); // Clear forward history on new navigation

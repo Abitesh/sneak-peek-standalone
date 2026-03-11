@@ -181,7 +181,7 @@ export class SonioxStreamingSTT extends EventEmitter {
             };
 
             if (this.languageCode) {
-                config.languages = [this.languageCode];
+                config.language_hints = [this.languageCode];
             }
 
             try {

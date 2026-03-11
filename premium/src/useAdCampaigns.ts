@@ -44,16 +44,50 @@ export const useAdCampaigns = (
   isProcessingMeeting: boolean
 ) => {
     const [activeAd, setActiveAd] = useState<AdCampaign>(null);
+    const [isInactive, setIsInactive] = useState(false);
+    const [pendingAd, setPendingAd] = useState<{ ad: AdCampaign, id: string, readyAt: number } | null>(null);
 
+    // 1. Track Inactivity
+    useEffect(() => {
+        const isOverlayWindow = new URLSearchParams(window.location.search).get('window') === 'overlay';
+        if (!isAppReady || isOverlayWindow || isProcessingMeeting) return;
+
+        let inactivityTimer: ReturnType<typeof setTimeout>;
+        const resetInactivity = () => {
+            setIsInactive(false);
+            clearTimeout(inactivityTimer);
+            inactivityTimer = setTimeout(() => setIsInactive(true), 5000);
+        };
+
+        resetInactivity();
+        const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'click'];
+        events.forEach(e => window.addEventListener(e, resetInactivity));
+
+        return () => {
+            clearTimeout(inactivityTimer);
+            events.forEach(e => window.removeEventListener(e, resetInactivity));
+        };
+    }, [isAppReady, isProcessingMeeting]);
+
+    // 2. Fetch and Queue Campaigns
     useEffect(() => {
         // Enforce trigger only when the app reaches an "idle/ready" state (e.g. Launcher is visible)
         // so it doesn't pop up over modals or during meeting.
         // We also check for overlay window explicitly.
         const isOverlayWindow = new URLSearchParams(window.location.search).get('window') === 'overlay';
-        if (!isAppReady || isOverlayWindow || isProcessingMeeting) return;
+        if (!isAppReady || isOverlayWindow || isProcessingMeeting) {
+            // Dismiss active ad gracefully if they navigate away
+            if (activeAd) {
+                setActiveAd(null);
+            }
+            // Clear pending ad
+            if (pendingAd) {
+                setPendingAd(null);
+            }
+            return;
+        }
 
         let isMounted = true;
-        let timer: ReturnType<typeof setTimeout>;
 
         const checkCampaigns = async () => {
             // 1. Enforce Global Cooldown System
@@ -122,59 +156,73 @@ export const useAdCampaigns = (
             if (!isMounted) return;
 
             // 3. Determine what to show
-            // Priority: 1. Remote Campaigns, 2. Local Promo, 3. Local JD/Profile Nudges
-            let selectedAd: AdCampaign = null;
+            // Gather all eligible candidates (Remote + Local)
+            let candidates: { ad: AdCampaign, id: string, priority: number }[] = [];
 
-            if (remoteCampaigns.length > 0) {
-                // Pick the highest priority remote ad
-                selectedAd = remoteCampaigns.sort((a: any, b: any) => (b.priority || 0) - (a.priority || 0))[0];
-            } else {
-                // 4. Identify Eligible Local Campaigns
-                // Helper to check if an ad is eligible (not dismissed recently or at all)
-                const isAdEligible = (key: string) => {
-                    const val = localStorage.getItem(key);
-                    if (!val) return true; // Never dismissed
-                    
-                    // Legacy support for older users who have 'true' stored
-                    if (val === 'true') {
-                        return false; 
-                    }
+            // Add Remote Campaigns
+            remoteCampaigns.forEach(c => {
+                candidates.push({ ad: c as AdCampaign, id: c.id, priority: c.priority || 0 });
+            });
 
-                    const dismissedTime = parseInt(val, 10);
-                    if (isNaN(dismissedTime)) return true;
-
-                    const daysSinceDismissal = (now - dismissedTime) / (1000 * 60 * 60 * 24);
-                    const cooldownDays = import.meta.env.DEV ? 0 : 7; 
-
-                    return daysSinceDismissal >= cooldownDays;
-                };
-
-                const eligible: LocalAdCampaign[] = [];
+            // Gather Local Campaigns
+            const isAdEligible = (key: string) => {
+                const val = localStorage.getItem(key);
+                if (!val) return true; // Never dismissed
                 
-                if (!isPremium && isAdEligible('natively_promo_toaster_dismissed')) {
-                    eligible.push('promo');
-                }
-                
-                if (!hasProfile && isAdEligible('natively_profile_toaster_dismissed')) {
-                    eligible.push('profile');
+                // Legacy support for older users who have 'true' stored
+                if (val === 'true') {
+                    return false; 
                 }
 
-                // If they have a profile, but no JD uploaded, promote JD awareness
-                if (hasProfile && isAdEligible('natively_jd_toaster_dismissed')) {
-                    eligible.push('jd');
-                }
+                const dismissedTime = parseInt(val, 10);
+                if (isNaN(dismissedTime)) return true;
 
-                if (eligible.length > 0) {
-                    const chance = import.meta.env.DEV ? 1 : 0.6; // 100% in DEV, 60% in PROD
-                    if (Math.random() <= chance) {
-                        selectedAd = eligible[Math.floor(Math.random() * eligible.length)];
-                    }
-                }
+                const daysSinceDismissal = (now - dismissedTime) / (1000 * 60 * 60 * 24);
+                const cooldownDays = import.meta.env.DEV ? 0 : 7; 
+
+                return daysSinceDismissal >= cooldownDays;
+            };
+
+            const localEligible: LocalAdCampaign[] = [];
+            
+            if (!isPremium && isAdEligible('natively_promo_toaster_dismissed')) {
+                localEligible.push('promo');
+            }
+            
+            if (!hasProfile && isAdEligible('natively_profile_toaster_dismissed')) {
+                localEligible.push('profile');
             }
 
-            if (!selectedAd) return;
+            // If they have a profile, but no JD uploaded, promote JD awareness
+            if (hasProfile && isAdEligible('natively_jd_toaster_dismissed')) {
+                localEligible.push('jd');
+            }
 
-            if (!selectedAd) return;
+            localEligible.forEach(l => {
+                // Local ads typically have a baseline priority of 0, whereas remote ads might be weighted higher
+                candidates.push({ ad: l, id: l, priority: 0 });
+            });
+
+            if (candidates.length === 0) return;
+
+            // 4. Implement Queue / History Logic
+            let history: string[] = JSON.parse(localStorage.getItem('natively_ads_shown_history') || '[]');
+            let availableCandidates = candidates.filter(c => !history.includes(c.id));
+
+            if (availableCandidates.length === 0) {
+                // Reset history if all ads have been shown
+                history = [];
+                localStorage.setItem('natively_ads_shown_history', JSON.stringify(history));
+                availableCandidates = candidates;
+            }
+
+            // Group by highest priority
+            availableCandidates.sort((a, b) => b.priority - a.priority);
+            const topPriority = availableCandidates[0].priority;
+            const topCandidates = availableCandidates.filter(c => c.priority === topPriority);
+            
+            // Randomly select one from the highest priority grouping
+            const selectedCandidate = topCandidates[Math.floor(Math.random() * topCandidates.length)];
 
             // 5. Trigger with Dynamic Delay
             // User requested: 10 seconds after app opens, OR 6 seconds after a meeting ends.
@@ -191,21 +239,55 @@ export const useAdCampaigns = (
                 delayToUse = Math.max(0, 10000 - timeSinceAppStart);
             }
 
-            timer = setTimeout(() => {
-                if (!isMounted) return;
-                setActiveAd(selectedAd);
-                localStorage.setItem('natively_last_ad_shown_time', now.toString()); // Start cooldown clock
-            }, delayToUse);
+            if (!isMounted) return;
+            setPendingAd({ ad: selectedCandidate.ad, id: selectedCandidate.id, readyAt: nowTime + delayToUse });
         };
 
-        checkCampaigns();
+        // Delay checking to prevent immediate spamming if the user navigates back and forth quickly
+        const fetchTimer = setTimeout(() => {
+            checkCampaigns();
+        }, 500);
 
         return () => {
             isMounted = false;
-            if (timer) clearTimeout(timer);
+            clearTimeout(fetchTimer);
         };
 
-    }, [isAppReady, isPremium, hasProfile, appStartTime, lastMeetingEndTime, isProcessingMeeting]);
+    }, [isAppReady, isPremium, hasProfile, appStartTime, lastMeetingEndTime, isProcessingMeeting, activeAd, pendingAd]);
+
+    // 6. Show Ad when Inactive and Ready
+    useEffect(() => {
+        if (!pendingAd || activeAd) return;
+
+        const checkAndShow = () => {
+            if (Date.now() >= pendingAd.readyAt && isInactive) {
+                setActiveAd(pendingAd.ad);
+                
+                // Track cooldown & history
+                localStorage.setItem('natively_last_ad_shown_time', Date.now().toString());
+                const history = JSON.parse(localStorage.getItem('natively_ads_shown_history') || '[]');
+                if (!history.includes(pendingAd.id)) {
+                    history.push(pendingAd.id);
+                    localStorage.setItem('natively_ads_shown_history', JSON.stringify(history));
+                }
+                
+                setPendingAd(null);
+            }
+        };
+
+        const remainingTime = pendingAd.readyAt - Date.now();
+        let timer: ReturnType<typeof setTimeout>;
+
+        // We check once immediately, or wait until the ready time.
+        // It will also re-run whenever `isInactive` flips to true, which is exactly what we want.
+        if (remainingTime > 0) {
+            timer = setTimeout(checkAndShow, remainingTime);
+        } else {
+            checkAndShow();
+        }
+
+        return () => clearTimeout(timer);
+    }, [pendingAd, isInactive, activeAd]);
 
     const dismissAd = (campaignId?: string) => {
         if (campaignId) {
