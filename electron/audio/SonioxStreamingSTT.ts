@@ -140,6 +140,19 @@ export class SonioxStreamingSTT extends EventEmitter {
         }
     }
 
+    public finalize(): void {
+        if (!this.isActive || !this.ws || !this.configSent) return;
+
+        if (this.ws.readyState === WebSocket.OPEN) {
+            try {
+                this.ws.send(JSON.stringify({ type: 'finalize' }));
+                console.log('[SonioxStreaming] Sent manual finalize message');
+            } catch (err) {
+                console.error('[SonioxStreaming] Failed to send finalize:', err);
+            }
+        }
+    }
+
     // =========================================================================
     // WebSocket Connection
     // =========================================================================
@@ -164,6 +177,7 @@ export class SonioxStreamingSTT extends EventEmitter {
                 sample_rate: this.sampleRate,
                 num_channels: this.numChannels,
                 enable_language_identification: true,
+                enable_endpoint_detection: true,
             };
 
             if (this.languageCode) {
@@ -197,61 +211,51 @@ export class SonioxStreamingSTT extends EventEmitter {
                 const tokens = msg.tokens;
                 if (!tokens || !Array.isArray(tokens) || tokens.length === 0) return;
 
-                // Separate final and non-final tokens
-                let newFinalText = '';
+                let currentFinalText = '';
                 let nonFinalText = '';
 
                 for (const token of tokens) {
                     if (!token.text) continue;
 
+                    if (token.text === '<fin>') {
+                        console.log('[SonioxStreaming] Received <fin> manual finalization marker');
+                        continue;
+                    }
+
+                    if (token.text === '<end>') {
+                        console.log('[SonioxStreaming] Received <end> endpoint detection marker');
+                        continue;
+                    }
+
                     if (token.is_final) {
-                        newFinalText += token.text;
+                        currentFinalText += token.text;
                     } else {
                         nonFinalText += token.text;
                     }
                 }
 
-                // Accumulate final text
-                if (newFinalText) {
-                    this.pendingFinalText += newFinalText;
-                }
-
-                // Emit non-final (interim) transcript for live display
-                if (nonFinalText.trim()) {
-                    const interimText = (this.pendingFinalText + nonFinalText).trim();
-                    if (interimText) {
-                        this.emit('transcript', {
-                            text: interimText,
-                            isFinal: false,
-                            confidence: 1.0,
-                        });
-                    }
-                }
-
-                // On endpoint detection (all tokens finalized), emit the final transcript
-                // Soniox signals endpoint when all pending tokens become final
-                // We detect this when we get final tokens and no non-final tokens remain
-                if (this.pendingFinalText.trim() && !nonFinalText) {
+                // 1. Emit final tokens immediately
+                if (currentFinalText) {
                     this.emit('transcript', {
-                        text: this.pendingFinalText.trim(),
+                        text: currentFinalText,
                         isFinal: true,
                         confidence: 1.0,
                     });
-                    this.pendingFinalText = '';
+                }
+
+                // 2. Emit non-final tokens as interim (live preview)
+                if (nonFinalText) {
+                    this.emit('transcript', {
+                        text: nonFinalText,
+                        isFinal: false,
+                        confidence: 1.0,
+                    });
                 }
 
                 // Session finished
                 if (msg.finished) {
-                    // Flush any remaining final text
-                    if (this.pendingFinalText.trim()) {
-                        this.emit('transcript', {
-                            text: this.pendingFinalText.trim(),
-                            isFinal: true,
-                            confidence: 1.0,
-                        });
-                        this.pendingFinalText = '';
-                    }
                     console.log('[SonioxStreaming] Session finished');
+                    this.stop();
                 }
             } catch (err) {
                 console.error('[SonioxStreaming] Parse error:', err);

@@ -635,6 +635,11 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose, init
                 await window.electronAPI?.setIbmWatsonApiKey?.('');
                 setSttIbmKey('');
                 setHasStoredIbmWatsonKey(false);
+            } else if (provider === 'soniox') {
+                // @ts-ignore
+                await window.electronAPI?.setSonioxApiKey?.('');
+                setSttSonioxKey('');
+                setHasStoredSonioxKey(false);
             } else {
                 // @ts-ignore
                 await window.electronAPI?.setDeepgramApiKey?.('');

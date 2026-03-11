@@ -282,9 +282,20 @@ export class RAGManager {
      * Delete RAG data for a meeting
      */
     deleteMeetingData(meetingId: string): void {
+        // 1. Delete from vector store (chunks and summaries)
         this.vectorStore.deleteChunksForMeeting(meetingId);
         
-        // Also clean up transient meeting row if it was a live session
+        // 2. Clear embedding queue for this meeting to prevent "Chunk not found" errors on re-processing
+        try {
+            const info = this.db.prepare('DELETE FROM embedding_queue WHERE meeting_id = ?').run(meetingId);
+            if (info.changes > 0) {
+                console.log(`[RAGManager] Cleared ${info.changes} items from embedding_queue for meeting ${meetingId}`);
+            }
+        } catch (e) {
+            console.warn(`[RAGManager] Failed to clear embedding_queue for meeting ${meetingId}`, e);
+        }
+        
+        // 3. Clean up transient meeting row if it was a live session
         try {
             if (meetingId === 'live-meeting-current') {
                 this.db.prepare('DELETE FROM meetings WHERE id = ?').run(meetingId);

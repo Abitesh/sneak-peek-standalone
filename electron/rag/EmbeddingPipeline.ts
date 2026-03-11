@@ -176,16 +176,22 @@ export class EmbeddingPipeline {
             throw new Error('Embedding client not initialized');
         }
 
-        const result = await this.client.models.embedContent({
+        // Following @google/genai v1.44.0 documentation
+        const response = await this.client.models.embedContent({
             model: EMBEDDING_MODEL,
-            contents: [{ parts: [{ text }] }]
-        });
+            contents: [text],
+            config: {
+                outputDimensionality: 768
+            }
+        } as any);
 
-        if (!result.embeddings || !result.embeddings[0]) {
+        if (!response.embeddings || !response.embeddings[0]) {
             throw new Error('No embedding returned from API');
         }
 
-        return result.embeddings[0].values as number[];
+        // In the new SDK, embeddings[0] contains the values
+        const values = (response.embeddings[0] as any).values || response.embeddings[0];
+        return values as number[];
     }
 
     /**
