@@ -75,7 +75,7 @@ _The privacy-first AI assistant for meetings._
   <a href="https://github.com/evinjohnn/natively-cluely-ai-assistant/releases/latest">
     <img src="https://img.shields.io/badge/Download-macOS-000000?style=for-the-badge&logo=apple&logoColor=white" />
   </a>
-  <a href="https://github.com/evinjohnn/natively-cluely-ai-assistant/releases/tag/v1.1.2">
+  <a href="https://github.com/evinjohnn/natively-cluely-ai-assistant/releases/tag/v2.0.2">
     <img src="https://img.shields.io/badge/Download-Windows-0078D4?style=for-the-badge&logo=windows&logoColor=white" />
   </a>
 </p>
@@ -105,7 +105,7 @@ _The privacy-first AI assistant for meetings._
 >     **For .dmg downloads:**
 >     1. Open Terminal and run:
 >        ```bash
->        xattr -cr ~/Downloads/Natively-1.1.7-arm64.dmg
+>        xattr -cr ~/Downloads/Natively-2.0.2-arm64.dmg
 >        ```
 >     2. Install the natively.dmg
 >     3. Open Terminal and run: `xattr -cr /Applications/Natively.app`
