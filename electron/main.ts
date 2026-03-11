@@ -223,8 +223,8 @@ export class AppState {
     this.setupOllamaIpcHandlers()
 
     // --- NEW SYSTEM AUDIO PIPELINE (SOX + NODE GOOGLE STT) ---
-    // LAZY INIT: Do not setup pipeline here to prevent launch volume surge.
-    // this.setupSystemAudioPipeline()
+    // EAGER INIT: Requested by user to prevent SCK freeze during meeting start.
+    this.setupSystemAudioPipeline()
 
     // Initialize Auto-Updater
     this.setupAutoUpdater()
@@ -642,7 +642,7 @@ export class AppState {
 
     // 1. System Audio (Output Capture)
     if (this.systemAudioCapture) {
-      this.systemAudioCapture.stop();
+      this.systemAudioCapture.destroy();
       this.systemAudioCapture = null;
     }
 

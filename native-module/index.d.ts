@@ -25,6 +25,7 @@ export declare class SystemAudioCapture {
   constructor(deviceId?: string | undefined | null)
   getSampleRate(): number
   start(callback: (...args: any[]) => any): void
+  pauseCapture(): void
   stop(): void
 }
 export declare class MicrophoneCapture {

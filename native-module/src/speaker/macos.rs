@@ -1,6 +1,6 @@
 use anyhow::Result;
 use ringbuf::HeapCons;
-use std::sync::{Arc, Mutex, Condvar};
+use std::sync::Arc;
 use super::core_audio;
 use super::sck;
 
@@ -67,7 +67,7 @@ impl SpeakerStream {
     pub fn sample_rate(&self) -> u32 {
         match &self.backend {
              BackendStream::CoreAudio(s) => s.sample_rate(),
-             BackendStream::Sck(s) => s.sample_rate(),
+             BackendStream::Sck(s) => s.sample_rate() as u32,
         }
     }
     
@@ -78,11 +78,4 @@ impl SpeakerStream {
         }
     }
 
-    /// Get the Condvar for DSP thread to wait on audio data
-    pub fn data_ready_signal(&self) -> Arc<(Mutex<bool>, Condvar)> {
-        match &self.backend {
-            BackendStream::CoreAudio(s) => s.data_ready_signal(),
-            BackendStream::Sck(s) => s.data_ready_signal(),
-        }
-    }
 }

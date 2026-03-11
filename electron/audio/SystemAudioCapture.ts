@@ -24,9 +24,12 @@ export class SystemAudioCapture extends EventEmitter {
         if (!RustAudioCapture) {
             console.error('[SystemAudioCapture] Rust class implementation not found.');
         } else {
-            // LAZY INIT: Don't create native monitor here - it causes 1-second audio mute + quality drop
-            // The monitor will be created in start() when the meeting actually begins
-            console.log(`[SystemAudioCapture] Initialized (lazy). Device ID: ${this.deviceId || 'default'}`);
+            console.log(`[SystemAudioCapture] Initialized (eager). Device ID: ${this.deviceId || 'default'}`);
+            try {
+                this.monitor = new RustAudioCapture(this.deviceId);
+            } catch (e) {
+                console.error('[SystemAudioCapture] Failed applying eager init:', e);
+            }
         }
     }
 
@@ -47,12 +50,11 @@ export class SystemAudioCapture extends EventEmitter {
             return;
         }
 
-        // Use setImmediate to yield to the event loop before doing heavy native initialization.
+        // Use setImmediate to yield to the event loop.
         setImmediate(() => {
-            // LAZY INIT: Create monitor here when meeting starts (not in constructor)
-            // This prevents the 1-second audio mute + quality drop at app launch
+            // Only create if destroyed or failed previously
             if (!this.monitor) {
-                console.log('[SystemAudioCapture] Creating native monitor (lazy init)...');
+                console.log('[SystemAudioCapture] Recreating native monitor...');
                 try {
                     this.monitor = new RustAudioCapture(this.deviceId);
                 } catch (e) {
@@ -92,16 +94,33 @@ export class SystemAudioCapture extends EventEmitter {
     public stop(): void {
         if (!this.isRecording) return;
 
-        console.log('[SystemAudioCapture] Stopping capture...');
+        console.log('[SystemAudioCapture] Pausing native capture (keeping stream warm)...');
         try {
-            this.monitor?.stop();
+            if (this.monitor && this.monitor.pauseCapture) {
+                this.monitor.pauseCapture();
+            }
         } catch (e) {
-            console.error('[SystemAudioCapture] Error stopping:', e);
+            console.error('[SystemAudioCapture] Error pausing:', e);
         }
 
-        // Destroy monitor
+        // We DO NOT destroy the monitor so it remains warm for the next meeting!
+        this.isRecording = false;
+        this.emit('stop');
+    }
+
+    /**
+     * Completely destroy the native stream.
+     */
+    public destroy(): void {
+        console.log('[SystemAudioCapture] Destroying native monitor completely...');
+        try {
+            if (this.monitor && this.monitor.stop) {
+                this.monitor.stop();
+            }
+        } catch (e) {}
         this.monitor = null;
         this.isRecording = false;
         this.emit('stop');
+        this.removeAllListeners();
     }
 }
