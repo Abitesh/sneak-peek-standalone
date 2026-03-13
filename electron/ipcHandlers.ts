@@ -1136,7 +1136,7 @@ export function initializeIpcHandlers(appState: AppState): void {
       let response;
 
       if (provider === 'gemini') {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent`;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent`;
         response = await axios.post(url, {
           contents: [{ parts: [{ text: "Hello" }] }]
         }, {
@@ -1151,14 +1151,14 @@ export function initializeIpcHandlers(appState: AppState): void {
         });
       } else if (provider === 'openai') {
         response = await axios.post('https://api.openai.com/v1/chat/completions', {
-          model: "gpt-5.2-chat-latest",
+          model: "gpt-5.3-chat-latest",
           messages: [{ role: "user", content: "Hello" }]
         }, {
           headers: { Authorization: `Bearer ${apiKey}` }
         });
       } else if (provider === 'claude') {
         response = await axios.post('https://api.anthropic.com/v1/messages', {
-          model: "claude-sonnet-4-5",
+          model: "claude-sonnet-4-6",
           max_tokens: 10,
           messages: [{ role: "user", content: "Hello" }]
         }, {
@@ -1279,7 +1279,7 @@ export function initializeIpcHandlers(appState: AppState): void {
       return { model: cm.getDefaultModel() };
     } catch (error: any) {
       console.error("Error getting default model:", error);
-      return { model: 'gemini-3-flash-preview' };
+      return { model: 'gemini-3.1-flash-lite-preview' };
     }
   });
 

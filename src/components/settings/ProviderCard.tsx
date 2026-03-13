@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Trash2, AlertCircle, CheckCircle, ExternalLink, Loader2, ChevronDown, Check, RefreshCw } from 'lucide-react';
 
 interface FetchedModel {
@@ -22,6 +22,7 @@ interface ProviderCardProps {
     savedStatus: boolean;
     keyPlaceholder: string;
     keyUrl: string;
+    onPreferredModelChange?: (modelId: string) => void;
 }
 
 export const ProviderCard: React.FC<ProviderCardProps> = ({
@@ -40,6 +41,7 @@ export const ProviderCard: React.FC<ProviderCardProps> = ({
     savedStatus,
     keyPlaceholder,
     keyUrl,
+    onPreferredModelChange,
 }) => {
     const [fetchedModels, setFetchedModels] = useState<FetchedModel[]>([]);
     const [isFetching, setIsFetching] = useState(false);
@@ -47,6 +49,23 @@ export const ProviderCard: React.FC<ProviderCardProps> = ({
     const [selectedModel, setSelectedModel] = useState<string>(preferredModel || '');
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
     const dropdownRef = React.useRef<HTMLDivElement>(null);
+
+    // Refs to avoid stale closures in the auto-save timer
+    const savedRef = useRef(savedStatus);
+    const savingRef = useRef(savingStatus);
+    savedRef.current = savedStatus;
+    savingRef.current = savingStatus;
+
+    // Auto-save API key after 5 seconds of inactivity
+    useEffect(() => {
+        if (!apiKey.trim()) return;
+        const timer = setTimeout(() => {
+            if (!savedRef.current && !savingRef.current) {
+                onSaveKey().catch(console.error);
+            }
+        }, 5000);
+        return () => clearTimeout(timer);
+    }, [apiKey]);
 
     // Sync preferredModel prop
     useEffect(() => {
@@ -89,6 +108,9 @@ export const ProviderCard: React.FC<ProviderCardProps> = ({
                         setSelectedModel(firstModel);
                         // @ts-ignore
                         await window.electronAPI?.setProviderPreferredModel(providerId, firstModel);
+                        if (onPreferredModelChange) {
+                            onPreferredModelChange(firstModel);
+                        }
                     }
                 }
             } else {
@@ -107,6 +129,9 @@ export const ProviderCard: React.FC<ProviderCardProps> = ({
         try {
             // @ts-ignore
             await window.electronAPI?.setProviderPreferredModel(providerId, modelId);
+            if (onPreferredModelChange) {
+                onPreferredModelChange(modelId);
+            }
         } catch (e) {
             console.error('Failed to save preferred model:', e);
         }

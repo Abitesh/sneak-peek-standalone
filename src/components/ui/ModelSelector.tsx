@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ChevronDown, Check, Cloud, Terminal, Monitor, Server, Plus } from 'lucide-react';
+import { STANDARD_CLOUD_MODELS, prettifyModelId } from '../../utils/modelUtils';
 
 interface ModelSelectorProps {
     currentModel: string;
@@ -17,6 +18,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({ currentModel, onSe
     const [activeTab, setActiveTab] = useState<'cloud' | 'custom' | 'local'>('cloud');
     const [ollamaModels, setOllamaModels] = useState<string[]>([]);
     const [customProviders, setCustomProviders] = useState<CustomProvider[]>([]);
+    const [cloudModels, setCloudModels] = useState<{ id: string; name: string; desc: string; provider: string }[]>([]);
     const dropdownRef = useRef<HTMLDivElement>(null);
 
     // Close on click outside
@@ -43,6 +45,20 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({ currentModel, onSe
                 // Load Ollama
                 const local = await window.electronAPI?.getAvailableOllamaModels() as string[];
                 if (local) setOllamaModels(local);
+
+                // Build dynamic cloud models from credentials
+                // @ts-ignore
+                const creds = await window.electronAPI?.getStoredCredentials?.();
+                const cModels: { id: string; name: string; desc: string; provider: string }[] = [];
+                for (const [prov, cfg] of Object.entries(STANDARD_CLOUD_MODELS)) {
+                    if (!cfg.hasKeyCheck(creds)) continue;
+                    cfg.ids.forEach((id, i) => cModels.push({ id, name: cfg.names[i], desc: cfg.descs[i], provider: prov }));
+                    const pm = creds?.[cfg.pmKey];
+                    if (pm && !cfg.ids.includes(pm)) {
+                        cModels.push({ id: pm, name: prettifyModelId(pm), desc: `${prov.charAt(0).toUpperCase() + prov.slice(1)} • Preferred`, provider: prov });
+                    }
+                }
+                setCloudModels(cModels);
             } catch (e) {
                 console.error("Failed to load models:", e);
             }
@@ -64,11 +80,15 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({ currentModel, onSe
 
     const getModelDisplayName = (model: string) => {
         if (model.startsWith('ollama-')) return model.replace('ollama-', '');
-        if (model === 'gemini-3-flash-preview') return 'Gemini 3 Flash';
-        if (model === 'gemini-3-pro-preview') return 'Gemini 3 Pro';
+        if (model === 'gemini-3.1-flash-lite-preview') return 'Gemini 3.1 Flash';
+        if (model === 'gemini-3.1-pro-preview') return 'Gemini 3.1 Pro';
         if (model === 'llama-3.3-70b-versatile') return 'Groq Llama 3.3';
-        if (model === 'gpt-5.2-chat-latest') return 'GPT 5.2';
-        if (model === 'claude-sonnet-4-5') return 'Sonnet 4.5';
+        if (model === 'gpt-5.3-chat-latest') return 'GPT 5.3';
+        if (model === 'claude-sonnet-4-6') return 'Sonnet 4.6';
+
+        // Check dynamic cloud models
+        const cloud = cloudModels.find(m => m.id === model);
+        if (cloud) return cloud.name;
 
         // Check custom providers
         const custom = customProviders.find(p => p.id === model || p.name === model);
@@ -117,47 +137,31 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({ currentModel, onSe
                         {/* Cloud Models */}
                         {activeTab === 'cloud' && (
                             <div className="space-y-1">
-                                <ModelOption
-                                    id="gemini-3-flash-preview"
-                                    name="Gemini 3 Flash"
-                                    desc="Fastest • Multimodal"
-                                    icon={<Monitor size={14} />}
-                                    selected={currentModel === 'gemini-3-flash-preview'}
-                                    onSelect={() => handleSelect('gemini-3-flash-preview')}
-                                />
-                                <ModelOption
-                                    id="gemini-3-pro-preview"
-                                    name="Gemini 3 Pro"
-                                    desc="Reasoning • High Quality"
-                                    icon={<Monitor size={14} />}
-                                    selected={currentModel === 'gemini-3-pro-preview'}
-                                    onSelect={() => handleSelect('gemini-3-pro-preview')}
-                                />
-                                <div className="h-px bg-border-subtle my-1" />
-                                <ModelOption
-                                    id="gpt-5.2-chat-latest"
-                                    name="GPT 5.2"
-                                    desc="OpenAI"
-                                    icon={<Cloud size={14} />}
-                                    selected={currentModel === 'gpt-5.2-chat-latest'}
-                                    onSelect={() => handleSelect('gpt-5.2-chat-latest')}
-                                />
-                                <ModelOption
-                                    id="claude-sonnet-4-5"
-                                    name="Sonnet 4.5"
-                                    desc="Anthropic"
-                                    icon={<Cloud size={14} />}
-                                    selected={currentModel === 'claude-sonnet-4-5'}
-                                    onSelect={() => handleSelect('claude-sonnet-4-5')}
-                                />
-                                <ModelOption
-                                    id="llama-3.3-70b-versatile"
-                                    name="Groq Llama 3.3"
-                                    desc="Ultra Fast"
-                                    icon={<Cloud size={14} />}
-                                    selected={currentModel === 'llama-3.3-70b-versatile'}
-                                    onSelect={() => handleSelect('llama-3.3-70b-versatile')}
-                                />
+                                {cloudModels.length === 0 ? (
+                                    <div className="text-center py-6 text-text-tertiary">
+                                        <p className="text-xs mb-2">No cloud providers configured.</p>
+                                        <p className="text-[10px] opacity-70">Add API keys in Settings.</p>
+                                    </div>
+                                ) : (
+                                    cloudModels.map((m, idx) => {
+                                        const prevProvider = idx > 0 ? cloudModels[idx - 1].provider : null;
+                                        const showDivider = prevProvider && prevProvider !== m.provider;
+                                        const icon = m.provider === 'gemini' ? <Monitor size={14} /> : <Cloud size={14} />;
+                                        return (
+                                            <React.Fragment key={m.id}>
+                                                {showDivider && <div className="h-px bg-border-subtle my-1" />}
+                                                <ModelOption
+                                                    id={m.id}
+                                                    name={m.name}
+                                                    desc={m.desc}
+                                                    icon={icon}
+                                                    selected={currentModel === m.id}
+                                                    onSelect={() => handleSelect(m.id)}
+                                                />
+                                            </React.Fragment>
+                                        );
+                                    })
+                                )}
                             </div>
                         )}
 

@@ -167,7 +167,7 @@ export class CredentialsManager {
         return this.credentials.aiResponseLanguage || 'English';
     }
     public getDefaultModel(): string {
-        return this.credentials.defaultModel || 'gemini-3-flash-preview';
+        return this.credentials.defaultModel || 'gemini-3.1-flash-lite-preview';
     }
 
     public getAllCredentials(): StoredCredentials {

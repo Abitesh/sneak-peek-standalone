@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Trash2, Edit2, AlertCircle, CheckCircle, Save, ChevronDown, Check, RefreshCw, ExternalLink, Loader2 } from 'lucide-react';
+import { STANDARD_CLOUD_MODELS, prettifyModelId } from '../../utils/modelUtils';
 import { validateCurl } from '../../lib/curl-validator';
 import { ProviderCard } from './ProviderCard';
 
@@ -106,7 +107,7 @@ export const AIProvidersSettings: React.FC = () => {
     const [isRefreshingOllama, setIsRefreshingOllama] = useState(false);
 
     // --- Default Model ---
-    const [defaultModel, setDefaultModel] = useState<string>('gemini-3-flash-preview');
+    const [defaultModel, setDefaultModel] = useState<string>('gemini-3.1-flash-lite-preview');
     const [fastResponseMode, setFastResponseMode] = useState(false);
 
     // --- Dynamic Model Discovery ---
@@ -425,14 +426,24 @@ export const AIProvidersSettings: React.FC = () => {
                     </div>
                     <ModelSelect
                         value={defaultModel}
-                        options={[
-                            ...(hasStoredKey.gemini ? [{ id: preferredModels.gemini || 'gemini-3-flash-preview', name: preferredModels.gemini || 'Gemini 3 Flash' }] : []),
-                            ...(hasStoredKey.openai ? [{ id: preferredModels.openai || 'gpt-5.2-chat-latest', name: preferredModels.openai || 'GPT 5.2' }] : []),
-                            ...(hasStoredKey.claude ? [{ id: preferredModels.claude || 'claude-sonnet-4-5', name: preferredModels.claude || 'Sonnet 4.5' }] : []),
-                            ...(hasStoredKey.groq ? [{ id: preferredModels.groq || 'llama-3.3-70b-versatile', name: preferredModels.groq || 'Groq Llama 3.3' }] : []),
-                            ...customProviders.map(p => ({ id: p.id, name: p.name })),
-                            ...ollamaModels.map(m => ({ id: `ollama-${m}`, name: `${m} (Local)` }))
-                        ]}
+                        options={(() => {
+                            const opts: { id: string; name: string }[] = [];
+                            for (const [prov, cfg] of Object.entries(STANDARD_CLOUD_MODELS)) {
+                                if (!hasStoredKey[prov as keyof typeof hasStoredKey]) continue;
+                                cfg.ids.forEach((id, i) => opts.push({ id, name: cfg.names[i] }));
+                                const pm = preferredModels[prov as keyof typeof preferredModels];
+                                if (pm && !cfg.ids.includes(pm)) {
+                                    opts.push({ id: pm, name: prettifyModelId(pm) });
+                                }
+                            }
+                            customProviders.forEach(p => opts.push({ id: p.id, name: p.name }));
+                            ollamaModels.forEach(m => opts.push({ id: `ollama-${m}`, name: `${m} (Local)` }));
+                            // Ensure current default model always appears
+                            if (defaultModel && !opts.find(o => o.id === defaultModel)) {
+                                opts.unshift({ id: defaultModel, name: prettifyModelId(defaultModel) });
+                            }
+                            return opts;
+                        })()}
                         onChange={(val) => {
                             setDefaultModel(val);
                             // @ts-ignore - persist as default + update runtime + broadcast
@@ -501,6 +512,7 @@ export const AIProvidersSettings: React.FC = () => {
                         savedStatus={!!savedStatus.gemini}
                         keyPlaceholder="AIzaSy..."
                         keyUrl="https://aistudio.google.com/app/apikey"
+                        onPreferredModelChange={(model) => setPreferredModels(prev => ({ ...prev, gemini: model }))}
                     />
 
                     {/* Groq */}
@@ -520,6 +532,7 @@ export const AIProvidersSettings: React.FC = () => {
                         savedStatus={!!savedStatus.groq}
                         keyPlaceholder="gsk_..."
                         keyUrl="https://console.groq.com/keys"
+                        onPreferredModelChange={(model) => setPreferredModels(prev => ({ ...prev, groq: model }))}
                     />
 
                     {/* OpenAI */}
@@ -539,6 +552,7 @@ export const AIProvidersSettings: React.FC = () => {
                         savedStatus={!!savedStatus.openai}
                         keyPlaceholder="sk-..."
                         keyUrl="https://platform.openai.com/api-keys"
+                        onPreferredModelChange={(model) => setPreferredModels(prev => ({ ...prev, openai: model }))}
                     />
 
                     {/* Claude */}
@@ -558,6 +572,7 @@ export const AIProvidersSettings: React.FC = () => {
                         savedStatus={!!savedStatus.claude}
                         keyPlaceholder="sk-ant-..."
                         keyUrl="https://console.anthropic.com/settings/keys"
+                        onPreferredModelChange={(model) => setPreferredModels(prev => ({ ...prev, claude: model }))}
                     />
 
                 </div>

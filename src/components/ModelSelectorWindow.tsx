@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { Check, Loader2 } from 'lucide-react';
+import { STANDARD_CLOUD_MODELS, prettifyModelId } from '../utils/modelUtils';
 
 // Define Model Types
 interface ModelOption {
@@ -75,22 +76,16 @@ const ModelSelectorWindow = () => {
                 // Build the list
                 const models: ModelOption[] = [];
 
-                // Cloud Models (only if key exists) — use dynamic preferred models
-                if (creds?.hasGeminiKey) {
-                    const modelId = creds.geminiPreferredModel || 'gemini-3-flash-preview';
-                    models.push({ id: modelId, name: `Gemini (${modelId})`, type: 'cloud', provider: 'gemini' });
-                }
-                if (creds?.hasOpenaiKey) {
-                    const modelId = creds.openaiPreferredModel || 'gpt-5.2-chat-latest';
-                    models.push({ id: modelId, name: `OpenAI (${modelId})`, type: 'cloud', provider: 'openai' });
-                }
-                if (creds?.hasClaudeKey) {
-                    const modelId = creds.claudePreferredModel || 'claude-sonnet-4-5';
-                    models.push({ id: modelId, name: `Claude (${modelId})`, type: 'cloud', provider: 'claude' });
-                }
-                if (creds?.hasGroqKey) {
-                    const modelId = creds.groqPreferredModel || 'llama-3.3-70b-versatile';
-                    models.push({ id: modelId, name: `Groq (${modelId})`, type: 'cloud', provider: 'groq' });
+                // Cloud Models — standard models + unique preferred models
+                for (const [prov, cfg] of Object.entries(STANDARD_CLOUD_MODELS)) {
+                    if (!cfg.hasKeyCheck(creds)) continue;
+                    cfg.ids.forEach((id, i) => {
+                        models.push({ id, name: cfg.names[i], type: 'cloud', provider: prov });
+                    });
+                    const pm = creds?.[cfg.pmKey];
+                    if (pm && !cfg.ids.includes(pm)) {
+                        models.push({ id: pm, name: prettifyModelId(pm), type: 'cloud', provider: prov });
+                    }
                 }
 
                 // Custom Providers

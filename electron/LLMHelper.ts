@@ -26,11 +26,11 @@ interface OllamaResponse {
 }
 
 // Model constant for Gemini 3 Flash
-const GEMINI_FLASH_MODEL = "gemini-3-flash-preview"
-const GEMINI_PRO_MODEL = "gemini-3-pro-preview"
+const GEMINI_FLASH_MODEL = "gemini-3.1-flash-lite-preview"
+const GEMINI_PRO_MODEL = "gemini-3.1-pro-preview"
 const GROQ_MODEL = "llama-3.3-70b-versatile"
-const OPENAI_MODEL = "gpt-5.2-chat-latest"
-const CLAUDE_MODEL = "claude-sonnet-4-5"
+const OPENAI_MODEL = "gpt-5.3-chat-latest"
+const CLAUDE_MODEL = "claude-sonnet-4-6"
 const MAX_OUTPUT_TOKENS = 65536
 const CLAUDE_MAX_OUTPUT_TOKENS = 64000
 
@@ -1386,6 +1386,9 @@ ANSWER DIRECTLY:`;
       if (this.client) {
         providers.push({ name: `Gemini Pro (${GEMINI_PRO_MODEL})`, execute: () => this.streamWithGeminiModel(combinedMessages.gemini, GEMINI_PRO_MODEL, imagePaths) });
       }
+      if (this.groqClient) {
+        providers.push({ name: `Groq (meta-llama/llama-4-scout-17b-16e-instruct)`, execute: () => this.streamWithGroqMultimodal(userContent, imagePaths!, openaiSystemPrompt) });
+      }
     } else {
       // TEXT-ONLY PROVIDER ORDER: Groq → OpenAI → Claude → Gemini Flash → Gemini Pro
       if (this.groqClient) {
@@ -1592,6 +1595,45 @@ ANSWER DIRECTLY:`;
       stream: true,
       temperature: 0.4,
       max_tokens: 32768,
+    });
+
+    for await (const chunk of stream) {
+      const content = chunk.choices[0]?.delta?.content;
+      if (content) {
+        yield content;
+      }
+    }
+  }
+
+  /**
+   * Stream multimodal (image + text) response from Groq using Llama 4 Scout as a last resort
+   */
+  private async * streamWithGroqMultimodal(userMessage: string, imagePaths: string[], systemPrompt?: string): AsyncGenerator<string, void, unknown> {
+    if (!this.groqClient) throw new Error("Groq client not initialized");
+
+    const messages: any[] = [];
+    if (systemPrompt) {
+      messages.push({ role: "system", content: systemPrompt });
+    }
+
+    const contentParts: any[] = [{ type: "text", text: userMessage }];
+    for (const p of imagePaths) {
+      if (fs.existsSync(p)) {
+        // Groq requires base64 URL format for images, similar to OpenAI
+        const imageData = await fs.promises.readFile(p);
+        contentParts.push({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${imageData.toString("base64")}` } });
+      }
+    }
+    messages.push({ role: "user", content: contentParts });
+
+    const stream = await this.groqClient.chat.completions.create({
+      model: "meta-llama/llama-4-scout-17b-16e-instruct",
+      messages,
+      stream: true,
+      max_tokens: 1024,
+      temperature: 1,
+      top_p: 1,
+      stop: null
     });
 
     for await (const chunk of stream) {
