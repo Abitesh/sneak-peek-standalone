@@ -367,6 +367,8 @@ export function initializeIpcHandlers(appState: AppState): void {
     }
   });
 
+
+
   safeHandle("quit-app", () => {
     app.quit()
   })
@@ -491,15 +493,31 @@ export function initializeIpcHandlers(appState: AppState): void {
       const success = await llmHelper.forceRestartOllama();
       return { success };
     } catch (error: any) {
+      console.error("Error force restarting Ollama:", error);
       return { success: false, error: error.message };
+    }
+  });
+
+  safeHandle('restart-ollama', async () => {
+    try {
+      // First try to kill it if it's running
+      await appState.processingHelper.getLLMHelper().forceRestartOllama();
+      
+      // The forceRestartOllama now calls OllamaManager.getInstance().init() internally
+      // so we don't need to do it again here.
+      
+      return true;
+    } catch (error: any) {
+      console.error("[IPC restart-ollama] Failed to restart:", error);
+      return false;
     }
   });
 
   safeHandle("ensure-ollama-running", async () => {
     try {
-      const llmHelper = appState.processingHelper.getLLMHelper();
-      const result = await llmHelper.ensureOllamaRunning();
-      return result;
+      const { OllamaManager } = require('./services/OllamaManager');
+      await OllamaManager.getInstance().init();
+      return { success: true };
     } catch (error: any) {
       return { success: false, message: error.message };
     }
@@ -746,9 +764,54 @@ export function initializeIpcHandlers(appState: AppState): void {
         hasSonioxKey: hasKey(creds.sonioxApiKey),
         hasGoogleSearchKey: hasKey(creds.googleSearchApiKey),
         hasGoogleSearchCseId: hasKey(creds.googleSearchCseId),
+        // Dynamic Model Discovery - preferred models
+        geminiPreferredModel: creds.geminiPreferredModel || undefined,
+        groqPreferredModel: creds.groqPreferredModel || undefined,
+        openaiPreferredModel: creds.openaiPreferredModel || undefined,
+        claudePreferredModel: creds.claudePreferredModel || undefined,
       };
     } catch (error: any) {
       return { hasGeminiKey: false, hasGroqKey: false, hasOpenaiKey: false, hasClaudeKey: false, googleServiceAccountPath: null, sttProvider: 'google', groqSttModel: 'whisper-large-v3-turbo', hasSttGroqKey: false, hasSttOpenaiKey: false, hasDeepgramKey: false, hasElevenLabsKey: false, hasAzureKey: false, azureRegion: 'eastus', hasIbmWatsonKey: false, ibmWatsonRegion: 'us-south', hasSonioxKey: false, hasGoogleSearchKey: false, hasGoogleSearchCseId: false };
+    }
+  });
+
+  // ==========================================
+  // Dynamic Model Discovery Handlers
+  // ==========================================
+
+  safeHandle("fetch-provider-models", async (_, provider: 'gemini' | 'groq' | 'openai' | 'claude', apiKey: string) => {
+    try {
+      // Fall back to stored key if no key was explicitly provided
+      let key = apiKey?.trim();
+      if (!key) {
+        const { CredentialsManager } = require('./services/CredentialsManager');
+        const cm = CredentialsManager.getInstance();
+        if (provider === 'gemini') key = cm.getGeminiApiKey();
+        else if (provider === 'groq') key = cm.getGroqApiKey();
+        else if (provider === 'openai') key = cm.getOpenaiApiKey();
+        else if (provider === 'claude') key = cm.getClaudeApiKey();
+      }
+
+      if (!key) {
+        return { success: false, error: 'No API key available. Please save a key first.' };
+      }
+
+      const { fetchProviderModels } = require('./utils/modelFetcher');
+      const models = await fetchProviderModels(provider, key);
+      return { success: true, models };
+    } catch (error: any) {
+      console.error(`[IPC] Failed to fetch ${provider} models:`, error);
+      const msg = error?.response?.data?.error?.message || error.message || 'Failed to fetch models';
+      return { success: false, error: msg };
+    }
+  });
+
+  safeHandle("set-provider-preferred-model", async (_, provider: 'gemini' | 'groq' | 'openai' | 'claude', modelId: string) => {
+    try {
+      const { CredentialsManager } = require('./services/CredentialsManager');
+      CredentialsManager.getInstance().setPreferredModel(provider, modelId);
+    } catch (error: any) {
+      console.error(`[IPC] Failed to set preferred model for ${provider}:`, error);
     }
   });
 
@@ -900,7 +963,7 @@ export function initializeIpcHandlers(appState: AppState): void {
         // Test Deepgram via WebSocket connection
         const WebSocket = require('ws');
         return await new Promise<{ success: boolean; error?: string }>((resolve) => {
-          const url = 'wss://api.deepgram.com/v1/listen?model=nova-2&encoding=linear16&sample_rate=16000&channels=1';
+          const url = 'wss://api.deepgram.com/v1/listen?model=nova-3&encoding=linear16&sample_rate=16000&channels=1';
           const ws = new WebSocket(url, {
             headers: { Authorization: `Token ${apiKey} ` },
           });
@@ -994,7 +1057,7 @@ export function initializeIpcHandlers(appState: AppState): void {
         // ElevenLabs: multipart with xi-api-key header
         const form = new FormData();
         form.append('file', testWav, { filename: 'test.wav', contentType: 'audio/wav' });
-        form.append('model_id', 'scribe_v1');
+        form.append('model_id', 'scribe_v2');
         await axios.post('https://api.elevenlabs.io/v1/speech-to-text', form, {
           headers: { 'xi-api-key': apiKey, ...form.getHeaders() },
           timeout: 15000,
@@ -1073,7 +1136,7 @@ export function initializeIpcHandlers(appState: AppState): void {
       let response;
 
       if (provider === 'gemini') {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent`;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent`;
         response = await axios.post(url, {
           contents: [{ parts: [{ text: "Hello" }] }]
         }, {
@@ -1081,21 +1144,21 @@ export function initializeIpcHandlers(appState: AppState): void {
         });
       } else if (provider === 'groq') {
         response = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
-          model: "llama3-8b-8192",
+          model: "llama-3.3-70b-versatile",
           messages: [{ role: "user", content: "Hello" }]
         }, {
           headers: { Authorization: `Bearer ${apiKey}` }
         });
       } else if (provider === 'openai') {
         response = await axios.post('https://api.openai.com/v1/chat/completions', {
-          model: "gpt-3.5-turbo",
+          model: "gpt-5.2-chat-latest",
           messages: [{ role: "user", content: "Hello" }]
         }, {
           headers: { Authorization: `Bearer ${apiKey}` }
         });
       } else if (provider === 'claude') {
         response = await axios.post('https://api.anthropic.com/v1/messages', {
-          model: "claude-3-haiku-20240307",
+          model: "claude-sonnet-4-5",
           max_tokens: 10,
           messages: [{ role: "user", content: "Hello" }]
         }, {
@@ -1744,10 +1807,27 @@ export function initializeIpcHandlers(appState: AppState): void {
   });
 
   // Check if meeting has RAG embeddings
-  safeHandle("rag:is-meeting-processed", async (_, meetingId: string) => {
-    const ragManager = appState.getRAGManager();
-    if (!ragManager) return false;
-    return ragManager.isMeetingProcessed(meetingId);
+  safeHandle('rag:is-meeting-processed', async (_, meetingId: string) => {
+    try {
+      const ragManager = appState.getRAGManager();
+      if (!ragManager) throw new Error('RAGManager not initialized');
+      return ragManager.isMeetingProcessed(meetingId);
+    } catch (error: any) {
+      console.error('[IPC rag:is-meeting-processed] Error:', error);
+      return false;
+    }
+  });
+
+  safeHandle('rag:reindex-incompatible-meetings', async () => {
+    try {
+      const ragManager = appState.getRAGManager();
+      if (!ragManager) throw new Error('RAGManager not initialized');
+      await ragManager.reindexIncompatibleMeetings();
+      return { success: true };
+    } catch (error: any) {
+      console.error('[IPC rag:reindex-incompatible-meetings] Error:', error);
+      return { success: false, error: error.message };
+    }
   });
 
   // Get RAG queue status

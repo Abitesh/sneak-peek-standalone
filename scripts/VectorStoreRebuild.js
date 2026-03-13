@@ -1,4 +1,5 @@
-// electron/rag/VectorStore.ts
+const fs = require('fs');
+const content = `// electron/rag/VectorStore.ts
 // SQLite-based vector storage with native sqlite-vec search (fallback to JS cosine similarity)
 // JS fallback is offloaded to a worker_threads Worker to avoid blocking the Electron main thread.
 
@@ -67,10 +68,10 @@ export class VectorStore {
 
             this.worker.on('exit', (code) => {
                 if (code !== 0) {
-                    console.warn(`[VectorStore] Worker exited with code ${code}`);
+                    console.warn(\`[VectorStore] Worker exited with code \${code}\`);
                 }
                 this.worker = null;
-                this.rejectAllPending(new Error(`Worker exited with code ${code}`));
+                this.rejectAllPending(new Error(\`Worker exited with code \${code}\`));
             });
         }
         return this.worker;
@@ -100,7 +101,7 @@ export class VectorStore {
         return new Promise<T>((resolve, reject) => {
             const timer = setTimeout(() => {
                 this.pendingRequests.delete(id);
-                reject(new Error(`[VectorStore] Worker request ${id} timed out after ${VectorStore.WORKER_TIMEOUT_MS}ms`));
+                reject(new Error(\`[VectorStore] Worker request \${id} timed out after \${VectorStore.WORKER_TIMEOUT_MS}ms\`));
             }, VectorStore.WORKER_TIMEOUT_MS);
 
             this.pendingRequests.set(id, { resolve, reject, timer });
@@ -137,10 +138,10 @@ export class VectorStore {
      * Save chunks to database (without embeddings)
      */
     saveChunks(chunks: Chunk[]): number[] {
-        const insert = this.db.prepare(`
+        const insert = this.db.prepare(\`
             INSERT INTO chunks (meeting_id, chunk_index, speaker, start_timestamp_ms, end_timestamp_ms, cleaned_text, token_count)
             VALUES (?, ?, ?, ?, ?, ?, ?)
-        `);
+        \`);
 
         const ids: number[] = [];
 
@@ -187,11 +188,11 @@ export class VectorStore {
      * Get chunks without embeddings for a meeting
      */
     getChunksWithoutEmbeddings(meetingId: string): StoredChunk[] {
-        const rows = this.db.prepare(`
+        const rows = this.db.prepare(\`
             SELECT * FROM chunks 
             WHERE meeting_id = ? AND embedding IS NULL
             ORDER BY chunk_index ASC
-        `).all(meetingId) as any[];
+        \`).all(meetingId) as any[];
 
         return rows.map(r => this.rowToChunk(r));
     }
@@ -200,11 +201,11 @@ export class VectorStore {
      * Get all chunks for a meeting
      */
     getChunksForMeeting(meetingId: string): StoredChunk[] {
-        const rows = this.db.prepare(`
+        const rows = this.db.prepare(\`
             SELECT * FROM chunks 
             WHERE meeting_id = ?
             ORDER BY chunk_index ASC
-        `).all(meetingId) as any[];
+        \`).all(meetingId) as any[];
 
         return rows.map(r => this.rowToChunk(r));
     }
@@ -246,13 +247,13 @@ export class VectorStore {
             // We fetch more than limit to allow post-filtering by meetingId, minSimilarity, and provider
             const fetchLimit = (meetingId || providerName) ? limit * 4 : limit;
 
-            const vecRows = this.db.prepare(`
+            const vecRows = this.db.prepare(\`
                 SELECT chunk_id, distance
                 FROM vec_chunks
                 WHERE embedding MATCH ?
                 ORDER BY distance
                 LIMIT ?
-            `).all(queryBlob, fetchLimit) as any[];
+            \`).all(queryBlob, fetchLimit) as any[];
 
             if (vecRows.length === 0) return [];
 
@@ -260,12 +261,12 @@ export class VectorStore {
             const chunkIds = vecRows.map(r => r.chunk_id);
             const placeholders = chunkIds.map(() => '?').join(',');
 
-            let chunkQuery = `
+            let chunkQuery = \`
                 SELECT c.* 
                 FROM chunks c
                 JOIN meetings m ON c.meeting_id = m.id
-                WHERE c.id IN (${placeholders})
-            `;
+                WHERE c.id IN (\${placeholders})
+            \`;
             const params: any[] = [...chunkIds];
 
             if (meetingId) {
@@ -319,12 +320,12 @@ export class VectorStore {
         minSimilarity: number,
         providerName?: string
     ): Promise<ScoredChunk[]> {
-        let query = `
+        let query = \`
             SELECT c.* 
             FROM chunks c
             JOIN meetings m ON c.meeting_id = m.id
             WHERE c.embedding IS NOT NULL
-        `;
+        \`;
         const params: any[] = [];
 
         if (meetingId) {
@@ -400,7 +401,7 @@ export class VectorStore {
                 if (ids.length > 0) {
                     const placeholders = ids.map(() => '?').join(',');
                     this.db.prepare(
-                        `DELETE FROM vec_chunks WHERE chunk_id IN (${placeholders})`
+                        \`DELETE FROM vec_chunks WHERE chunk_id IN (\${placeholders})\`
                     ).run(...ids.map(r => r.id));
                 }
             } catch (e) {
@@ -415,10 +416,10 @@ export class VectorStore {
      * Check if meeting has embeddings
      */
     hasEmbeddings(meetingId: string): boolean {
-        const row = this.db.prepare(`
+        const row = this.db.prepare(\`
             SELECT COUNT(*) as count FROM chunks 
             WHERE meeting_id = ? AND embedding IS NOT NULL
-        `).get(meetingId) as any;
+        \`).get(meetingId) as any;
 
         return row.count > 0;
     }
@@ -431,10 +432,10 @@ export class VectorStore {
      * Save or update meeting summary
      */
     saveSummary(meetingId: string, summaryText: string): void {
-        this.db.prepare(`
+        this.db.prepare(\`
             INSERT OR REPLACE INTO chunk_summaries (meeting_id, summary_text)
             VALUES (?, ?)
-        `).run(meetingId, summaryText);
+        \`).run(meetingId, summaryText);
     }
 
     /**
@@ -490,25 +491,25 @@ export class VectorStore {
 
         try {
             const fetchLimit = providerName ? limit * 4 : limit;
-            const vecRows = this.db.prepare(`
+            const vecRows = this.db.prepare(\`
                 SELECT summary_id, distance
                 FROM vec_summaries
                 WHERE embedding MATCH ?
                 ORDER BY distance
                 LIMIT ?
-            `).all(queryBlob, fetchLimit) as any[];
+            \`).all(queryBlob, fetchLimit) as any[];
 
             if (vecRows.length === 0) return [];
 
             const ids = vecRows.map(r => r.summary_id);
             const placeholders = ids.map(() => '?').join(',');
 
-            let summaryQuery = `
+            let summaryQuery = \`
                 SELECT s.* 
                 FROM chunk_summaries s
                 JOIN meetings m ON s.meeting_id = m.id
-                WHERE s.id IN (${placeholders})
-            `;
+                WHERE s.id IN (\${placeholders})
+            \`;
             const params: any[] = [...ids];
 
             if (providerName) {
@@ -551,12 +552,12 @@ export class VectorStore {
         limit: number,
         providerName?: string
     ): Promise<{ meetingId: string; summaryText: string; similarity: number }[]> {
-        let query = `
+        let query = \`
             SELECT s.* 
             FROM chunk_summaries s
             JOIN meetings m ON s.meeting_id = m.id
             WHERE s.embedding IS NOT NULL
-        `;
+        \`;
         const params: any[] = [];
         
         if (providerName) {
@@ -614,12 +615,12 @@ export class VectorStore {
      * Get count of meetings with incompatible embeddings
      */
     getIncompatibleMeetingsCount(providerName: string): number {
-        const row = this.db.prepare(`
+        const row = this.db.prepare(\`
             SELECT COUNT(*) as count FROM meetings 
             WHERE embedding_provider IS NOT NULL 
             AND embedding_provider != ?
             AND is_processed = 1
-        `).get(providerName) as any;
+        \`).get(providerName) as any;
 
         return row.count || 0;
     }
@@ -629,12 +630,12 @@ export class VectorStore {
      */
     deleteEmbeddingsForMeetings(providerName: string): string[] {
         // Find incompatible meetings
-        const rows = this.db.prepare(`
+        const rows = this.db.prepare(\`
             SELECT id FROM meetings 
             WHERE embedding_provider IS NOT NULL 
             AND embedding_provider != ?
             AND is_processed = 1
-        `).all(providerName) as any[];
+        \`).all(providerName) as any[];
 
         const meetingIds = rows.map(r => r.id);
         if (meetingIds.length === 0) return [];
@@ -651,12 +652,12 @@ export class VectorStore {
                     const cIds = this.db.prepare('SELECT id FROM chunks WHERE meeting_id = ?').all(id) as any[];
                     if (cIds.length > 0) {
                         const placeholders = cIds.map(() => '?').join(',');
-                        this.db.prepare(`DELETE FROM vec_chunks WHERE chunk_id IN (${placeholders})`).run(...cIds.map(r => r.id));
+                        this.db.prepare(\`DELETE FROM vec_chunks WHERE chunk_id IN (\${placeholders})\`).run(...cIds.map(r => r.id));
                     }
 
                     const sIds = this.db.prepare('SELECT id FROM chunk_summaries WHERE meeting_id = ?').get(id) as any;
                     if (sIds) {
-                         this.db.prepare(`DELETE FROM vec_summaries WHERE summary_id = ?`).run(sIds.id);
+                         this.db.prepare(\`DELETE FROM vec_summaries WHERE summary_id = ?\`).run(sIds.id);
                     }
                 } catch (e) {}
             }

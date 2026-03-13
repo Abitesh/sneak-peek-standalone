@@ -70,7 +70,7 @@ export const STT_PROVIDERS: Record<SttProviderId, SttProviderConfig> = {
         name: 'Deepgram Nova-2',
         description: 'Real-time streaming transcription via Deepgram WebSocket',
         endpoint: 'wss://api.deepgram.com/v1/listen',
-        model: 'nova-2',
+        model: 'nova-3',
         uploadType: 'websocket',
         authHeader: (apiKey: string) => ({
             Authorization: `Token ${apiKey}`,
@@ -82,7 +82,7 @@ export const STT_PROVIDERS: Record<SttProviderId, SttProviderConfig> = {
         name: 'ElevenLabs Scribe',
         description: 'High-quality STT via ElevenLabs Scribe API',
         endpoint: 'https://api.elevenlabs.io/v1/speech-to-text',
-        model: 'scribe_v1',
+        model: 'scribe_v2',
         uploadType: 'multipart',
         authHeader: (apiKey: string) => ({
             'xi-api-key': apiKey,

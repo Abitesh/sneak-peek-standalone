@@ -11,7 +11,7 @@ export { VectorStore } from './VectorStore';
 export type { StoredChunk, ScoredChunk } from './VectorStore';
 
 export { EmbeddingPipeline } from './EmbeddingPipeline';
-export type { EmbeddingConfig } from './EmbeddingPipeline';
+export type { AppAPIConfig } from './EmbeddingProviderResolver';
 
 export { RAGRetriever } from './RAGRetriever';
 export type { RetrievalOptions, RetrievedContext, QueryIntent } from './RAGRetriever';

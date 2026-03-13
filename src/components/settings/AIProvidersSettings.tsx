@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Trash2, Edit2, AlertCircle, CheckCircle, Save, ChevronDown, Check, RefreshCw, ExternalLink, Loader2 } from 'lucide-react';
 import { validateCurl } from '../../lib/curl-validator';
+import { ProviderCard } from './ProviderCard';
 
 interface CustomProvider {
     id: string;
@@ -108,6 +109,9 @@ export const AIProvidersSettings: React.FC = () => {
     const [defaultModel, setDefaultModel] = useState<string>('gemini-3-flash-preview');
     const [fastResponseMode, setFastResponseMode] = useState(false);
 
+    // --- Dynamic Model Discovery ---
+    const [preferredModels, setPreferredModels] = useState<Record<string, string>>({});
+
     // Load Initial Data
     useEffect(() => {
         const loadCredentials = async () => {
@@ -124,6 +128,13 @@ export const AIProvidersSettings: React.FC = () => {
                         openai: creds.hasOpenaiKey,
                         claude: creds.hasClaudeKey
                     });
+                    // Load preferred models
+                    const pm: Record<string, string> = {};
+                    if (creds.geminiPreferredModel) pm.gemini = creds.geminiPreferredModel;
+                    if (creds.groqPreferredModel) pm.groq = creds.groqPreferredModel;
+                    if (creds.openaiPreferredModel) pm.openai = creds.openaiPreferredModel;
+                    if (creds.claudePreferredModel) pm.claude = creds.claudePreferredModel;
+                    setPreferredModels(pm);
                 }
 
                 // @ts-ignore
@@ -415,10 +426,10 @@ export const AIProvidersSettings: React.FC = () => {
                     <ModelSelect
                         value={defaultModel}
                         options={[
-                            ...(hasStoredKey.gemini ? [{ id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash' }] : []),
-                            ...(hasStoredKey.openai ? [{ id: 'gpt-5.2-chat-latest', name: 'GPT 5.2' }] : []),
-                            ...(hasStoredKey.claude ? [{ id: 'claude-sonnet-4-5', name: 'Sonnet 4.5' }] : []),
-                            ...(hasStoredKey.groq ? [{ id: 'llama-3.3-70b-versatile', name: 'Groq Llama 3.3' }] : []),
+                            ...(hasStoredKey.gemini ? [{ id: preferredModels.gemini || 'gemini-3-flash-preview', name: preferredModels.gemini || 'Gemini 3 Flash' }] : []),
+                            ...(hasStoredKey.openai ? [{ id: preferredModels.openai || 'gpt-5.2-chat-latest', name: preferredModels.openai || 'GPT 5.2' }] : []),
+                            ...(hasStoredKey.claude ? [{ id: preferredModels.claude || 'claude-sonnet-4-5', name: preferredModels.claude || 'Sonnet 4.5' }] : []),
+                            ...(hasStoredKey.groq ? [{ id: preferredModels.groq || 'llama-3.3-70b-versatile', name: preferredModels.groq || 'Groq Llama 3.3' }] : []),
                             ...customProviders.map(p => ({ id: p.id, name: p.name })),
                             ...ollamaModels.map(m => ({ id: `ollama-${m}`, name: `${m} (Local)` }))
                         ]}
@@ -474,252 +485,80 @@ export const AIProvidersSettings: React.FC = () => {
                 <div className="space-y-4">
 
                     {/* Gemini */}
-                    <div className="bg-bg-item-surface rounded-xl p-5 border border-border-subtle">
-                        <div className="mb-2">
-                            <label className="block text-xs font-medium text-text-primary uppercase tracking-wide">
-                                Gemini API Key
-                                {hasStoredKey.gemini && <span className="ml-2 text-green-500 normal-case">✓ Saved</span>}
-                            </label>
-                        </div>
-                        <div className="flex gap-2 mb-3">
-                            <input
-                                type="password"
-                                value={apiKey}
-                                onChange={(e) => setApiKey(e.target.value)}
-                                placeholder={hasStoredKey.gemini ? "••••••••••••" : "AIzaSy..."}
-                                className="flex-1 bg-bg-input border border-border-subtle rounded-lg px-4 py-2.5 text-xs text-text-primary focus:outline-none focus:border-accent-primary transition-colors"
-                            />
-                            <button
-                                onClick={() => handleSaveKey('gemini', apiKey, setApiKey)}
-                                disabled={savingStatus.gemini || !apiKey.trim()}
-                                className={`px-5 py-2.5 rounded-lg text-xs font-medium transition-colors ${savedStatus.gemini
-                                    ? 'bg-green-500/20 text-green-400'
-                                    : 'bg-bg-input hover:bg-bg-secondary border border-border-subtle text-text-primary disabled:opacity-50'
-                                    }`}
-                            >
-                                {savingStatus.gemini ? 'Saving...' : savedStatus.gemini ? 'Saved!' : 'Save'}
-                            </button>
-                            {hasStoredKey.gemini && (
-                                <button
-                                    onClick={() => handleRemoveKey('gemini', setApiKey)}
-                                    className="px-2.5 py-2.5 rounded-lg text-xs font-medium text-text-tertiary hover:text-red-500 hover:bg-red-500/10 transition-all"
-                                    title="Remove API Key"
-                                >
-                                    <Trash2 size={16} strokeWidth={1.5} />
-                                </button>
-                            )}
-                        </div>
-                        <div className="flex items-center gap-3">
-                            <button
-                                onClick={() => handleTestConnection('gemini', apiKey)}
-                                disabled={(!apiKey.trim() && !hasStoredKey.gemini) || testStatus.gemini === 'testing'}
-                                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors border border-border-subtle flex items-center gap-2 ${testStatus.gemini === 'success' ? 'bg-green-500/10 text-green-500 border-green-500/20' :
-                                    testStatus.gemini === 'error' ? 'bg-red-500/10 text-red-500 border-red-500/20' :
-                                        'bg-bg-input hover:bg-bg-elevated text-text-primary'
-                                    }`}
-                                title={testError.gemini || "Test Connection"}
-                            >
-                                {testStatus.gemini === 'testing' ? <><Loader2 size={12} className="animate-spin" /> Testing...</> :
-                                    testStatus.gemini === 'success' ? <><CheckCircle size={12} /> Connected</> :
-                                        testStatus.gemini === 'error' ? <><AlertCircle size={12} /> Error</> :
-                                            <>{/* No Icon */} Test Connection</>}
-                            </button>
-                            <button
-                                onClick={() => openKeyUrl('gemini')}
-                                className="text-xs text-text-tertiary hover:text-text-primary flex items-center gap-1 transition-colors"
-                                title="Get API Key"
-                            >
-                                <ExternalLink size={12} />
-                            </button>
-                        </div>
-                        {testError.gemini && <p className="text-[10px] text-red-400 mt-1.5">{testError.gemini}</p>}
-                    </div>
+                    <ProviderCard
+                        providerId="gemini"
+                        providerName="Gemini"
+                        apiKey={apiKey}
+                        preferredModel={preferredModels.gemini}
+                        hasStoredKey={!!hasStoredKey.gemini}
+                        onKeyChange={setApiKey}
+                        onSaveKey={async () => { await handleSaveKey('gemini', apiKey, setApiKey); }}
+                        onRemoveKey={() => handleRemoveKey('gemini', setApiKey)}
+                        onTestConnection={() => handleTestConnection('gemini', apiKey)}
+                        testStatus={testStatus.gemini || 'idle'}
+                        testError={testError.gemini}
+                        savingStatus={!!savingStatus.gemini}
+                        savedStatus={!!savedStatus.gemini}
+                        keyPlaceholder="AIzaSy..."
+                        keyUrl="https://aistudio.google.com/app/apikey"
+                    />
 
                     {/* Groq */}
-                    <div className="bg-bg-item-surface rounded-xl p-5 border border-border-subtle">
-                        <div className="mb-2">
-                            <label className="block text-xs font-medium text-text-primary uppercase tracking-wide">
-                                Groq API Key
-                                {hasStoredKey.groq && <span className="ml-2 text-green-500 normal-case">✓ Saved</span>}
-                            </label>
-                        </div>
-                        <div className="flex gap-2 mb-3">
-                            <input
-                                type="password"
-                                value={groqApiKey}
-                                onChange={(e) => setGroqApiKey(e.target.value)}
-                                placeholder={hasStoredKey.groq ? "••••••••••••" : "gsk_..."}
-                                className="flex-1 bg-bg-input border border-border-subtle rounded-lg px-4 py-2.5 text-xs text-text-primary focus:outline-none focus:border-accent-primary transition-colors"
-                            />
-                            <button
-                                onClick={() => handleSaveKey('groq', groqApiKey, setGroqApiKey)}
-                                disabled={savingStatus.groq || !groqApiKey.trim()}
-                                className={`px-5 py-2.5 rounded-lg text-xs font-medium transition-colors ${savedStatus.groq
-                                    ? 'bg-green-500/20 text-green-400'
-                                    : 'bg-bg-input hover:bg-bg-secondary border border-border-subtle text-text-primary disabled:opacity-50'
-                                    }`}
-                            >
-                                {savingStatus.groq ? 'Saving...' : savedStatus.groq ? 'Saved!' : 'Save'}
-                            </button>
-                            {hasStoredKey.groq && (
-                                <button
-                                    onClick={() => handleRemoveKey('groq', setGroqApiKey)}
-                                    className="px-2.5 py-2.5 rounded-lg text-xs font-medium text-text-tertiary hover:text-red-500 hover:bg-red-500/10 transition-all"
-                                    title="Remove API Key"
-                                >
-                                    <Trash2 size={16} strokeWidth={1.5} />
-                                </button>
-                            )}
-                        </div>
-                        <div className="flex items-center gap-3">
-                            <button
-                                onClick={() => handleTestConnection('groq', groqApiKey)}
-                                disabled={(!groqApiKey.trim() && !hasStoredKey.groq) || testStatus.groq === 'testing'}
-                                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors border border-border-subtle flex items-center gap-2 ${testStatus.groq === 'success' ? 'bg-green-500/10 text-green-500 border-green-500/20' :
-                                    testStatus.groq === 'error' ? 'bg-red-500/10 text-red-500 border-red-500/20' :
-                                        'bg-bg-input hover:bg-bg-elevated text-text-primary'
-                                    }`}
-                                title={testError.groq || "Test Connection"}
-                            >
-                                {testStatus.groq === 'testing' ? <><Loader2 size={12} className="animate-spin" /> Testing...</> :
-                                    testStatus.groq === 'success' ? <><CheckCircle size={12} /> Connected</> :
-                                        testStatus.groq === 'error' ? <><AlertCircle size={12} /> Error</> :
-                                            <>{/* No Icon */} Test Connection</>}
-                            </button>
-                            <button
-                                onClick={() => openKeyUrl('groq')}
-                                className="text-xs text-text-tertiary hover:text-text-primary flex items-center gap-1 transition-colors"
-                                title="Get API Key"
-                            >
-                                <ExternalLink size={12} />
-                            </button>
-                        </div>
-                        {testError.groq && <p className="text-[10px] text-red-400 mt-1.5">{testError.groq}</p>}
-                    </div>
+                    <ProviderCard
+                        providerId="groq"
+                        providerName="Groq"
+                        apiKey={groqApiKey}
+                        preferredModel={preferredModels.groq}
+                        hasStoredKey={!!hasStoredKey.groq}
+                        onKeyChange={setGroqApiKey}
+                        onSaveKey={async () => { await handleSaveKey('groq', groqApiKey, setGroqApiKey); }}
+                        onRemoveKey={() => handleRemoveKey('groq', setGroqApiKey)}
+                        onTestConnection={() => handleTestConnection('groq', groqApiKey)}
+                        testStatus={testStatus.groq || 'idle'}
+                        testError={testError.groq}
+                        savingStatus={!!savingStatus.groq}
+                        savedStatus={!!savedStatus.groq}
+                        keyPlaceholder="gsk_..."
+                        keyUrl="https://console.groq.com/keys"
+                    />
 
                     {/* OpenAI */}
-                    <div className="bg-bg-item-surface rounded-xl p-5 border border-border-subtle">
-                        <div className="mb-2">
-                            <label className="block text-xs font-medium text-text-primary uppercase tracking-wide">
-                                OpenAI API Key
-                                {hasStoredKey.openai && <span className="ml-2 text-green-500 normal-case">✓ Saved</span>}
-                            </label>
-                        </div>
-                        <div className="flex gap-2 mb-3">
-                            <input
-                                type="password"
-                                value={openaiApiKey}
-                                onChange={(e) => setOpenaiApiKey(e.target.value)}
-                                placeholder={hasStoredKey.openai ? "••••••••••••" : "sk-..."}
-                                className="flex-1 bg-bg-input border border-border-subtle rounded-lg px-4 py-2.5 text-xs text-text-primary focus:outline-none focus:border-accent-primary transition-colors"
-                            />
-                            <button
-                                onClick={() => handleSaveKey('openai', openaiApiKey, setOpenaiApiKey)}
-                                disabled={savingStatus.openai || !openaiApiKey.trim()}
-                                className={`px-5 py-2.5 rounded-lg text-xs font-medium transition-colors ${savedStatus.openai
-                                    ? 'bg-green-500/20 text-green-400'
-                                    : 'bg-bg-input hover:bg-bg-secondary border border-border-subtle text-text-primary disabled:opacity-50'
-                                    }`}
-                            >
-                                {savingStatus.openai ? 'Saving...' : savedStatus.openai ? 'Saved!' : 'Save'}
-                            </button>
-                            {hasStoredKey.openai && (
-                                <button
-                                    onClick={() => handleRemoveKey('openai', setOpenaiApiKey)}
-                                    className="px-2.5 py-2.5 rounded-lg text-xs font-medium text-text-tertiary hover:text-red-500 hover:bg-red-500/10 transition-all"
-                                    title="Remove API Key"
-                                >
-                                    <Trash2 size={16} strokeWidth={1.5} />
-                                </button>
-                            )}
-                        </div>
-                        <div className="flex items-center gap-3">
-                            <button
-                                onClick={() => handleTestConnection('openai', openaiApiKey)}
-                                disabled={(!openaiApiKey.trim() && !hasStoredKey.openai) || testStatus.openai === 'testing'}
-                                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors border border-border-subtle flex items-center gap-2 ${testStatus.openai === 'success' ? 'bg-green-500/10 text-green-500 border-green-500/20' :
-                                    testStatus.openai === 'error' ? 'bg-red-500/10 text-red-500 border-red-500/20' :
-                                        'bg-bg-input hover:bg-bg-elevated text-text-primary'
-                                    }`}
-                                title={testError.openai || "Test Connection"}
-                            >
-                                {testStatus.openai === 'testing' ? <><Loader2 size={12} className="animate-spin" /> Testing...</> :
-                                    testStatus.openai === 'success' ? <><CheckCircle size={12} /> Connected</> :
-                                        testStatus.openai === 'error' ? <><AlertCircle size={12} /> Error</> :
-                                            <>{/* No Icon */} Test Connection</>}
-                            </button>
-                            <button
-                                onClick={() => openKeyUrl('openai')}
-                                className="text-xs text-text-tertiary hover:text-text-primary flex items-center gap-1 transition-colors"
-                                title="Get API Key"
-                            >
-                                <ExternalLink size={12} />
-                            </button>
-                        </div>
-                        {testError.openai && <p className="text-[10px] text-red-400 mt-1.5">{testError.openai}</p>}
-                    </div>
+                    <ProviderCard
+                        providerId="openai"
+                        providerName="OpenAI"
+                        apiKey={openaiApiKey}
+                        preferredModel={preferredModels.openai}
+                        hasStoredKey={!!hasStoredKey.openai}
+                        onKeyChange={setOpenaiApiKey}
+                        onSaveKey={async () => { await handleSaveKey('openai', openaiApiKey, setOpenaiApiKey); }}
+                        onRemoveKey={() => handleRemoveKey('openai', setOpenaiApiKey)}
+                        onTestConnection={() => handleTestConnection('openai', openaiApiKey)}
+                        testStatus={testStatus.openai || 'idle'}
+                        testError={testError.openai}
+                        savingStatus={!!savingStatus.openai}
+                        savedStatus={!!savedStatus.openai}
+                        keyPlaceholder="sk-..."
+                        keyUrl="https://platform.openai.com/api-keys"
+                    />
 
                     {/* Claude */}
-                    <div className="bg-bg-item-surface rounded-xl p-5 border border-border-subtle">
-                        <div className="mb-2">
-                            <label className="block text-xs font-medium text-text-primary uppercase tracking-wide">
-                                Claude API Key
-                                {hasStoredKey.claude && <span className="ml-2 text-green-500 normal-case">✓ Saved</span>}
-                            </label>
-                        </div>
-                        <div className="flex gap-2 mb-3">
-                            <input
-                                type="password"
-                                value={claudeApiKey}
-                                onChange={(e) => setClaudeApiKey(e.target.value)}
-                                placeholder={hasStoredKey.claude ? "••••••••••••" : "sk-ant-..."}
-                                className="flex-1 bg-bg-input border border-border-subtle rounded-lg px-4 py-2.5 text-xs text-text-primary focus:outline-none focus:border-accent-primary transition-colors"
-                            />
-                            <button
-                                onClick={() => handleSaveKey('claude', claudeApiKey, setClaudeApiKey)}
-                                disabled={savingStatus.claude || !claudeApiKey.trim()}
-                                className={`px-5 py-2.5 rounded-lg text-xs font-medium transition-colors ${savedStatus.claude
-                                    ? 'bg-green-500/20 text-green-400'
-                                    : 'bg-bg-input hover:bg-bg-secondary border border-border-subtle text-text-primary disabled:opacity-50'
-                                    }`}
-                            >
-                                {savingStatus.claude ? 'Saving...' : savedStatus.claude ? 'Saved!' : 'Save'}
-                            </button>
-                            {hasStoredKey.claude && (
-                                <button
-                                    onClick={() => handleRemoveKey('claude', setClaudeApiKey)}
-                                    className="px-2.5 py-2.5 rounded-lg text-xs font-medium text-text-tertiary hover:text-red-500 hover:bg-red-500/10 transition-all"
-                                    title="Remove API Key"
-                                >
-                                    <Trash2 size={16} strokeWidth={1.5} />
-                                </button>
-                            )}
-                        </div>
-                        <div className="flex items-center gap-3">
-                            <button
-                                onClick={() => handleTestConnection('claude', claudeApiKey)}
-                                disabled={(!claudeApiKey.trim() && !hasStoredKey.claude) || testStatus.claude === 'testing'}
-                                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors border border-border-subtle flex items-center gap-2 ${testStatus.claude === 'success' ? 'bg-green-500/10 text-green-500 border-green-500/20' :
-                                    testStatus.claude === 'error' ? 'bg-red-500/10 text-red-500 border-red-500/20' :
-                                        'bg-bg-input hover:bg-bg-elevated text-text-primary'
-                                    }`}
-                                title={testError.claude || "Test Connection"}
-                            >
-                                {testStatus.claude === 'testing' ? <><Loader2 size={12} className="animate-spin" /> Testing...</> :
-                                    testStatus.claude === 'success' ? <><CheckCircle size={12} /> Connected</> :
-                                        testStatus.claude === 'error' ? <><AlertCircle size={12} /> Error</> :
-                                            <>{/* No Icon */} Test Connection</>}
-                            </button>
-                            <button
-                                onClick={() => openKeyUrl('claude')}
-                                className="text-xs text-text-tertiary hover:text-text-primary flex items-center gap-1 transition-colors"
-                                title="Get API Key"
-                            >
-                                <ExternalLink size={12} />
-                            </button>
-                        </div>
-                        {testError.claude && <p className="text-[10px] text-red-400 mt-1.5">{testError.claude}</p>}
-                    </div>
+                    <ProviderCard
+                        providerId="claude"
+                        providerName="Claude"
+                        apiKey={claudeApiKey}
+                        preferredModel={preferredModels.claude}
+                        hasStoredKey={!!hasStoredKey.claude}
+                        onKeyChange={setClaudeApiKey}
+                        onSaveKey={async () => { await handleSaveKey('claude', claudeApiKey, setClaudeApiKey); }}
+                        onRemoveKey={() => handleRemoveKey('claude', setClaudeApiKey)}
+                        onTestConnection={() => handleTestConnection('claude', claudeApiKey)}
+                        testStatus={testStatus.claude || 'idle'}
+                        testError={testError.claude}
+                        savingStatus={!!savingStatus.claude}
+                        savedStatus={!!savedStatus.claude}
+                        keyPlaceholder="sk-ant-..."
+                        keyUrl="https://console.anthropic.com/settings/keys"
+                    />
 
                 </div>
             </div>

@@ -99,6 +99,7 @@ try {
 
 import { CredentialsManager } from "./services/CredentialsManager"
 import { ReleaseNotesManager } from "./update/ReleaseNotesManager"
+import { OllamaManager } from './services/OllamaManager'
 
 export class AppState {
   private static instance: AppState | null = null
@@ -221,6 +222,9 @@ export class AppState {
 
     // Initialize RAGManager (requires database to be ready)
     this.initializeRAGManager()
+    
+    // Check and prep Ollama embedding model
+    this.bootstrapOllamaEmbeddings()
 
 
     this.setupIntelligenceEvents()
@@ -244,14 +248,53 @@ export class AppState {
     });
   }
 
+  private async bootstrapOllamaEmbeddings() {
+    try {
+      const { OllamaBootstrap } = require('./rag/OllamaBootstrap');
+      const bootstrap = new OllamaBootstrap();
+
+      // Fire and forget — don't await this before showing the window
+      const result = await bootstrap.bootstrap('nomic-embed-text', (status: string, percent: number) => {
+        // Send progress to renderer via IPC
+        this.broadcast('ollama:pull-progress', { status, percent });
+      });
+
+      if (result === 'pulled' || result === 'already_pulled') {
+        this.broadcast('ollama:pull-complete');
+        // Re-resolve the embedding provider given that Ollama might now be available
+        if (this.ragManager) {
+           console.log('[AppState] Ollama model ready, re-evaluating RAG pipeline provider');
+           const { CredentialsManager } = require('./services/CredentialsManager');
+           const cm = CredentialsManager.getInstance();
+           this.ragManager.initializeEmbeddings({
+              openaiKey: cm.getOpenAiApiKey() || process.env.OPENAI_API_KEY || undefined,
+              geminiKey: cm.getGeminiApiKey() || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || undefined,
+              ollamaUrl: process.env.OLLAMA_URL || "http://localhost:11434"
+           });
+        }
+      }
+    } catch (err) {
+       console.error('[AppState] Failed to bootstrap Ollama:', err);
+    }
+  }
+
   private initializeRAGManager(): void {
     try {
       const db = DatabaseManager.getInstance();
       const sqliteDb = db.getDb();
 
       if (sqliteDb) {
-        const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
-        this.ragManager = new RAGManager({ db: sqliteDb, apiKey });
+        const { CredentialsManager } = require('./services/CredentialsManager');
+        const cm = CredentialsManager.getInstance();
+        const openaiKey = cm.getOpenAiApiKey() || process.env.OPENAI_API_KEY;
+        const geminiKey = cm.getGeminiApiKey() || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
+        
+        this.ragManager = new RAGManager({ 
+            db: sqliteDb, 
+            openaiKey,
+            geminiKey,
+            ollamaUrl: process.env.OLLAMA_URL || 'http://localhost:11434'
+        });
         this.ragManager.setLLMHelper(this.processingHelper.getLLMHelper());
         console.log('[AppState] RAGManager initialized');
       }
@@ -273,30 +316,28 @@ export class AppState {
 
         // generateContent function for LLM calls
         this.knowledgeOrchestrator.setGenerateContentFn(async (contents: any[]) => {
-          return await llmHelper.chatWithGemini(
-            contents[0]?.text || '',
-            undefined,
-            undefined,
-            true // skipSystemPrompt for raw content generation
+          return await llmHelper.generateContentStructured(
+            contents[0]?.text || ''
           );
         });
 
-        // Embedding function using Gemini embeddings API
-        const { GoogleGenAI } = require('@google/genai');
-        const { CredentialsManager } = require('./services/CredentialsManager');
-        const cm = CredentialsManager.getInstance();
-        const geminiKey = cm.getGeminiApiKey() || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
-        if (geminiKey) {
-          const genAI = new GoogleGenAI({ apiKey: geminiKey });
-          this.knowledgeOrchestrator.setEmbedFn(async (text: string) => {
-            const result = await genAI.models.embedContent({
-              model: 'models/gemini-embedding-001',
-              contents: [{ parts: [{ text }] }]
-            });
-            if (!result.embeddings || !result.embeddings[0]) {
-              throw new Error('No embedding returned from API');
-            }
-            return result.embeddings[0].values as number[];
+        // Embedding function — lazily delegate to the cascaded EmbeddingPipeline
+        // (OpenAI → Gemini → Ollama → Local bundled model).
+        // We await waitForReady() so uploads during boot wait for the pipeline
+        // instead of immediately throwing 'not ready'.
+        const self = this;
+        this.knowledgeOrchestrator.setEmbedFn(async (text: string) => {
+          const pipeline = self.ragManager?.getEmbeddingPipeline();
+          if (!pipeline) throw new Error('RAG pipeline not available');
+          await pipeline.waitForReady();
+          return await pipeline.getEmbedding(text);
+        });
+        if (typeof this.knowledgeOrchestrator.setEmbedQueryFn === 'function') {
+          this.knowledgeOrchestrator.setEmbedQueryFn(async (text: string) => {
+            const pipeline = self.ragManager?.getEmbeddingPipeline();
+            if (!pipeline) throw new Error('RAG pipeline not available');
+            await pipeline.waitForReady();
+            return await pipeline.getEmbeddingForQuery(text);
           });
         }
 
@@ -1646,6 +1687,9 @@ async function initializeApp() {
   process.title = initialAppName;
 
   app.whenReady().then(() => {
+    // Start the Ollama lifecycle manager
+    OllamaManager.getInstance().init().catch(console.error);
+
     CredentialsManager.getInstance().init();
 
     // Anonymous install ping - one-time, non-blocking
@@ -1746,6 +1790,10 @@ async function initializeApp() {
 
   // Scrub API keys from memory on quit to minimize exposure window
   app.on("before-quit", () => {
+    console.log("App is quitting, cleaning up resources...");
+    // Kill Ollama if we started it
+    OllamaManager.getInstance().stop();
+
     try {
       const { CredentialsManager } = require('./services/CredentialsManager');
       CredentialsManager.getInstance().scrubMemory();

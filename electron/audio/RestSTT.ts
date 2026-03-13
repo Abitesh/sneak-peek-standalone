@@ -67,7 +67,7 @@ const PROVIDER_CONFIGS: Record<RestSttProvider, ProviderConfigFactory> = {
     },
     elevenlabs: (apiKey) => ({
         endpoint: 'https://api.elevenlabs.io/v1/speech-to-text',
-        model: 'scribe_v1',
+        model: 'scribe_v2',
         authHeader: { 'xi-api-key': apiKey },
         uploadType: 'multipart',
         extractTranscript: (data: any) => {

@@ -1,18 +1,15 @@
 // electron/rag/EmbeddingPipeline.ts
 // Post-meeting embedding generation with queue-based retry logic
-// Uses Gemini text-embedding-004 (768 dimensions)
+// Uses pluggable IEmbeddingProvider (Gemini, OpenAI, or Ollama)
 
-import { GoogleGenAI } from '@google/genai';
 import Database from 'better-sqlite3';
 import { VectorStore, StoredChunk } from './VectorStore';
 
-const EMBEDDING_MODEL = 'models/gemini-embedding-001';
+import { EmbeddingProviderResolver, AppAPIConfig } from './EmbeddingProviderResolver';
+import { IEmbeddingProvider } from './providers/IEmbeddingProvider';
+
 const MAX_RETRIES = 3;
 const RETRY_DELAY_BASE_MS = 2000;
-
-export interface EmbeddingConfig {
-    apiKey: string;
-}
 
 /**
  * EmbeddingPipeline - Handles post-meeting embedding generation
@@ -21,12 +18,14 @@ export interface EmbeddingConfig {
  * - NOT real-time: embeddings generated after meeting ends
  * - Queue-based: persists in SQLite for retry on failure
  * - Background processing: doesn't block UI
+ * - Provider-agnostic: works with Gemini, OpenAI, or Ollama embeddings
  */
 export class EmbeddingPipeline {
-    private client: GoogleGenAI | null = null;
+    private provider: IEmbeddingProvider | null = null;
     private db: Database.Database;
     private vectorStore: VectorStore;
     private isProcessing = false;
+    private initPromise: Promise<void> | null = null;
 
     constructor(db: Database.Database, vectorStore: VectorStore) {
         this.db = db;
@@ -34,32 +33,81 @@ export class EmbeddingPipeline {
     }
 
     /**
-     * Initialize with API key 
+     * Initialize with provider config (picks best available provider)
      */
-    initialize(apiKey: string): void {
-        if (!apiKey) {
-            console.log('[EmbeddingPipeline] No API key provided, embeddings disabled');
-            return;
-        }
-        this.client = new GoogleGenAI({ apiKey });
-        console.log('[EmbeddingPipeline] Initialized with Gemini embedding model: ' + EMBEDDING_MODEL);
+    async initialize(config: AppAPIConfig): Promise<void> {
+        console.log('[EmbeddingPipeline] Initializing with config:', config);
+        this.initPromise = this._doInitialize(config);
+        return this.initPromise;
+    }
 
-        // Debug: List models to find valid embedding model
-        // We use the REST API because the SDK list method is elusive or failing
-        fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`)
-            .then(res => res.json())
-            .then((data: any) => {
-                const models = data.models?.filter((m: any) => m.supportedGenerationMethods?.includes('embedContent'));
-                console.log('[EmbeddingPipeline] Available embedding models:', models?.map((m: any) => m.name));
-            })
-            .catch(err => console.error('[EmbeddingPipeline] Failed to list models:', err));
+    private async _doInitialize(config: AppAPIConfig): Promise<void> {
+        try {
+            this.provider = await EmbeddingProviderResolver.resolve(config);
+            console.log(`[EmbeddingPipeline] Ready with provider: ${this.provider.name} (${this.provider.dimensions}d)`);
+
+            // Check for previous provider mismatches
+            const stateRow = this.db.prepare("SELECT value FROM app_state WHERE key = 'last_embedding_provider'").get() as any;
+            const lastProvider = stateRow?.value;
+
+            if (lastProvider && lastProvider !== this.provider.name) {
+                const count = this.vectorStore.getIncompatibleMeetingsCount(this.provider.name);
+                if (count > 0) {
+                    console.log(`[EmbeddingPipeline] Found ${count} incompatible meetings from ${lastProvider}.`);
+                    const { BrowserWindow } = require('electron');
+                    BrowserWindow.getAllWindows().forEach((win: any) => {
+                        if (!win.isDestroyed()) {
+                            win.webContents.send('embedding:incompatible-provider-warning', {
+                                count,
+                                oldProvider: lastProvider,
+                                newProvider: this.provider!.name
+                            });
+                        }
+                    });
+                }
+            }
+
+            // Save new provider
+            this.db.prepare("INSERT OR REPLACE INTO app_state (key, value) VALUES ('last_embedding_provider', ?)").run(this.provider.name);
+
+        } catch (err) {
+            console.error('[EmbeddingPipeline] Failed to initialize any provider:', err);
+            throw err;
+        }
     }
 
     /**
      * Check if pipeline is ready
      */
     isReady(): boolean {
-        return this.client !== null;
+        return this.provider !== null;
+    }
+
+    /**
+     * Wait for the pipeline to finish initializing.
+     * Safe to call multiple times — resolves immediately if already ready.
+     * Throws if initialization failed entirely.
+     */
+    async waitForReady(timeoutMs: number = 15000): Promise<void> {
+        if (this.provider) return; // already ready
+        if (this.initPromise) {
+            // Race against a timeout so we don't hang forever
+            await Promise.race([
+                this.initPromise,
+                new Promise<void>((_, reject) =>
+                    setTimeout(() => reject(new Error(`Embedding pipeline initialization timed out after ${timeoutMs}ms`)), timeoutMs)
+                )
+            ]);
+            return;
+        }
+        throw new Error('Embedding pipeline has not been initialized');
+    }
+
+    /**
+     * Get the currently active provider name (used for dimension safety checks)
+     */
+    getActiveProviderName(): string | undefined {
+        return this.provider?.name;
     }
 
     /**
@@ -90,6 +138,11 @@ export class EmbeddingPipeline {
         });
 
         queueAll();
+        
+        // NOTE: Provider metadata is written on the first successful embedding
+        // for this meeting (inside embedChunk), not here — to avoid marking a
+        // meeting as embedded if the queue crashes before any work is done.
+
         console.log(`[EmbeddingPipeline] Queued ${chunks.length} chunks + 1 summary for meeting ${meetingId}`);
 
         // Start processing in background
@@ -107,8 +160,8 @@ export class EmbeddingPipeline {
             return;
         }
 
-        if (!this.client) {
-            console.log('[EmbeddingPipeline] No client, skipping queue processing');
+        if (!this.provider) {
+            console.log('[EmbeddingPipeline] No provider, skipping queue processing');
             return;
         }
 
@@ -169,29 +222,23 @@ export class EmbeddingPipeline {
     }
 
     /**
-     * Get embedding for text using Gemini
+     * Get embedding for a document chunk (for storage)
      */
     async getEmbedding(text: string): Promise<number[]> {
-        if (!this.client) {
-            throw new Error('Embedding client not initialized');
+        if (!this.provider) {
+            throw new Error('Embedding provider not initialized');
         }
+        return this.provider.embed(text);
+    }
 
-        // Following @google/genai v1.44.0 documentation
-        const response = await this.client.models.embedContent({
-            model: EMBEDDING_MODEL,
-            contents: [text],
-            config: {
-                outputDimensionality: 768
-            }
-        } as any);
-
-        if (!response.embeddings || !response.embeddings[0]) {
-            throw new Error('No embedding returned from API');
+    /**
+     * Get embedding for a search query (may use different prefix for asymmetric models)
+     */
+    async getEmbeddingForQuery(text: string): Promise<number[]> {
+        if (!this.provider) {
+            throw new Error('Embedding provider not initialized');
         }
-
-        // In the new SDK, embeddings[0] contains the values
-        const values = (response.embeddings[0] as any).values || response.embeddings[0];
-        return values as number[];
+        return this.provider.embedQuery(text);
     }
 
     /**
@@ -207,6 +254,20 @@ export class EmbeddingPipeline {
 
         const embedding = await this.getEmbedding(row.cleaned_text);
         this.vectorStore.storeEmbedding(chunkId, embedding);
+
+        // Record provider metadata on the meeting after first successful embedding
+        if (this.provider) {
+            try {
+                const meetingRow = this.db.prepare('SELECT meeting_id FROM chunks WHERE id = ?').get(chunkId) as any;
+                if (meetingRow) {
+                    this.db.prepare(
+                        'UPDATE meetings SET embedding_provider = ?, embedding_dimensions = ? WHERE id = ? AND embedding_provider IS NULL'
+                    ).run(this.provider.name, this.provider.dimensions, meetingRow.meeting_id);
+                }
+            } catch (e) {
+                // Non-fatal — metadata is for safety filtering, not critical path
+            }
+        }
 
         console.log(`[EmbeddingPipeline] Embedded chunk ${chunkId}`);
     }

@@ -123,7 +123,7 @@ export class DeepgramStreamingSTT extends EventEmitter {
     private connect(): void {
         const url =
             `wss://api.deepgram.com/v1/listen` +
-            `?model=nova-2` +
+            `?model=nova-3` +
             `&encoding=linear16` +
             `&sample_rate=${this.sampleRate}` +
             `&channels=${this.numChannels}` +

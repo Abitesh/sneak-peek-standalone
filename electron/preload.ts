@@ -165,6 +165,10 @@ interface ElectronAPI {
   onGroqFastTextChanged: (callback: (enabled: boolean) => void) => () => void
   onModelChanged: (callback: (modelId: string) => void) => () => void
 
+  // Ollama
+  onOllamaPullProgress: (callback: (data: { status: string; percent: number }) => void) => () => void
+  onOllamaPullComplete: (callback: () => void) => () => void
+
   // Theme API
   getThemeMode: () => Promise<{ mode: 'system' | 'light' | 'dark', resolved: 'light' | 'dark' }>
   setThemeMode: (mode: 'system' | 'light' | 'dark') => Promise<void>
@@ -727,6 +731,22 @@ contextBridge.exposeInMainWorld("electronAPI", {
     }
   },
 
+  onOllamaPullProgress: (callback: (data: { status: string; percent: number }) => void) => {
+    const subscription = (_: any, data: any) => callback(data)
+    ipcRenderer.on('ollama:pull-progress', subscription)
+    return () => {
+      ipcRenderer.removeListener('ollama:pull-progress', subscription)
+    }
+  },
+
+  onOllamaPullComplete: (callback: () => void) => {
+    const subscription = () => callback()
+    ipcRenderer.on('ollama:pull-complete', subscription)
+    return () => {
+      ipcRenderer.removeListener('ollama:pull-complete', subscription)
+    }
+  },
+
   // Theme API
   getThemeMode: () => ipcRenderer.invoke('theme:get-mode'),
   setThemeMode: (mode: 'system' | 'light' | 'dark') => ipcRenderer.invoke('theme:set-mode', mode),
@@ -801,6 +821,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
   ragIsMeetingProcessed: (meetingId: string) => ipcRenderer.invoke('rag:is-meeting-processed', meetingId),
   ragGetQueueStatus: () => ipcRenderer.invoke('rag:get-queue-status'),
   ragRetryEmbeddings: () => ipcRenderer.invoke('rag:retry-embeddings'),
+  
+  onIncompatibleProviderWarning: (callback: (data: { count: number, oldProvider: string, newProvider: string }) => void) => {
+    const subscription = (_: any, data: any) => callback(data)
+    ipcRenderer.on('embedding:incompatible-provider-warning', subscription)
+    return () => {
+      ipcRenderer.removeListener('embedding:incompatible-provider-warning', subscription)
+    }
+  },
+  reindexIncompatibleMeetings: () => ipcRenderer.invoke('rag:reindex-incompatible-meetings'),
 
   onRAGStreamChunk: (callback: (data: { meetingId?: string; global?: boolean; chunk: string }) => void) => {
     const subscription = (_: any, data: any) => callback(data)
@@ -858,6 +887,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Google Search API
   setGoogleSearchApiKey: (apiKey: string) => ipcRenderer.invoke('set-google-search-api-key', apiKey),
   setGoogleSearchCseId: (cseId: string) => ipcRenderer.invoke('set-google-search-cse-id', cseId),
+
+  // Dynamic Model Discovery
+  fetchProviderModels: (provider: 'gemini' | 'groq' | 'openai' | 'claude', apiKey: string) => ipcRenderer.invoke('fetch-provider-models', provider, apiKey),
+  setProviderPreferredModel: (provider: 'gemini' | 'groq' | 'openai' | 'claude', modelId: string) => ipcRenderer.invoke('set-provider-preferred-model', provider, modelId),
 
   // License Management
   licenseActivate: (key: string) => ipcRenderer.invoke('license:activate', key),

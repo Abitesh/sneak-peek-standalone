@@ -83,12 +83,16 @@ export class ProcessingHelper {
     // This fixes the issue where buttons don't work in production because of late key loading
     this.appState.getIntelligenceManager().initializeLLMs();
 
-    // CRITICAL: Initialize RAGManager (Embeddings) with loaded key
+    // CRITICAL: Initialize RAGManager (Embeddings) with loaded keys
     // This fixes "RAG unavailable" in production where process.env is empty
     const ragManager = this.appState.getRAGManager();
-    if (ragManager && geminiKey) {
-      console.log("[ProcessingHelper] Initializing RAGManager embeddings with loaded key");
-      ragManager.initializeEmbeddings(geminiKey);
+    if (ragManager) {
+      console.log("[ProcessingHelper] Initializing RAGManager embeddings with available keys");
+      ragManager.initializeEmbeddings({
+          openaiKey: openaiKey || undefined,
+          geminiKey: geminiKey || undefined,
+          // ollamaUrl is not fetched in CredentialsManager yet by default, but we pass these keys
+      });
 
       // CRITICAL: Retry pending embeddings now that we have a key
       // This ensures any meetings that failed or were queued during startup get processed

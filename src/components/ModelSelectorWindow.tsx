@@ -75,19 +75,22 @@ const ModelSelectorWindow = () => {
                 // Build the list
                 const models: ModelOption[] = [];
 
-                // Cloud Models (only if key exists)
+                // Cloud Models (only if key exists) — use dynamic preferred models
                 if (creds?.hasGeminiKey) {
-                    models.push({ id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash', type: 'cloud', provider: 'gemini' });
-                    models.push({ id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro', type: 'cloud', provider: 'gemini' });
+                    const modelId = creds.geminiPreferredModel || 'gemini-3-flash-preview';
+                    models.push({ id: modelId, name: `Gemini (${modelId})`, type: 'cloud', provider: 'gemini' });
                 }
                 if (creds?.hasOpenaiKey) {
-                    models.push({ id: 'gpt-5.2-chat-latest', name: 'GPT 5.2', type: 'cloud', provider: 'openai' });
+                    const modelId = creds.openaiPreferredModel || 'gpt-5.2-chat-latest';
+                    models.push({ id: modelId, name: `OpenAI (${modelId})`, type: 'cloud', provider: 'openai' });
                 }
                 if (creds?.hasClaudeKey) {
-                    models.push({ id: 'claude-sonnet-4-5', name: 'Sonnet 4.5', type: 'cloud', provider: 'claude' });
+                    const modelId = creds.claudePreferredModel || 'claude-sonnet-4-5';
+                    models.push({ id: modelId, name: `Claude (${modelId})`, type: 'cloud', provider: 'claude' });
                 }
                 if (creds?.hasGroqKey) {
-                    models.push({ id: 'llama-3.3-70b-versatile', name: 'Groq Llama 3.3', type: 'cloud', provider: 'groq' });
+                    const modelId = creds.groqPreferredModel || 'llama-3.3-70b-versatile';
+                    models.push({ id: modelId, name: `Groq (${modelId})`, type: 'cloud', provider: 'groq' });
                 }
 
                 // Custom Providers

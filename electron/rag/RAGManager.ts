@@ -14,7 +14,9 @@ import { buildRAGPrompt, NO_CONTEXT_FALLBACK, NO_GLOBAL_CONTEXT_FALLBACK } from 
 
 export interface RAGManagerConfig {
     db: Database.Database;
-    apiKey?: string;
+    openaiKey?: string;
+    geminiKey?: string;
+    ollamaUrl?: string;
 }
 
 /**
@@ -40,9 +42,11 @@ export class RAGManager {
         this.retriever = new RAGRetriever(this.vectorStore, this.embeddingPipeline);
         this.liveIndexer = new LiveRAGIndexer(this.vectorStore, this.embeddingPipeline);
 
-        if (config.apiKey) {
-            this.embeddingPipeline.initialize(config.apiKey);
-        }
+        this.embeddingPipeline.initialize({
+            openaiKey: config.openaiKey,
+            geminiKey: config.geminiKey,
+            ollamaUrl: config.ollamaUrl
+        });
     }
 
     /**
@@ -52,11 +56,12 @@ export class RAGManager {
         this.llmHelper = llmHelper;
     }
 
-    /**
-     * Initialize embedding pipeline with API key
-     */
-    initializeEmbeddings(apiKey: string): void {
-        this.embeddingPipeline.initialize(apiKey);
+    getEmbeddingPipeline(): EmbeddingPipeline {
+        return this.embeddingPipeline;
+    }
+
+    initializeEmbeddings(keys: { openaiKey?: string, geminiKey?: string, ollamaUrl?: string }): void {
+        this.embeddingPipeline.initialize(keys);
     }
 
     /**
@@ -398,5 +403,33 @@ export class RAGManager {
         } catch (error) {
             console.error('[RAGManager] Failed to cleanup stale queue items:', error);
         }
+    }
+
+    /**
+     * Trigger bulk re-indexing of meetings with obsolete/incompatible embedding dimensions.
+     * Deletes their unreadable geometric BLOBs and requeues them via the active EmbeddingPipeline.
+     */
+    async reindexIncompatibleMeetings(): Promise<void> {
+        const providerName = this.embeddingPipeline.getActiveProviderName();
+        if (!providerName) {
+            console.error('[RAGManager] Cannot re-index: No active embedding provider available.');
+            return;
+        }
+
+        const count = this.vectorStore.getIncompatibleMeetingsCount(providerName);
+        if (count === 0) {
+            console.log('[RAGManager] No incompatible meetings found to reindex.');
+            return;
+        }
+
+        console.log(`[RAGManager] Re-indexing ${count} incompatible meetings for ${providerName} pipeline...`);
+        const affectedMeetingIds = this.vectorStore.deleteEmbeddingsForMeetings(providerName);
+        
+        for (const meetingId of affectedMeetingIds) {
+            // Queue the re-embedding background jobs
+            await this.embeddingPipeline.queueMeeting(meetingId);
+        }
+
+        console.log(`[RAGManager] Successfully requeued ${affectedMeetingIds.length} meetings for re-embedding.`);
     }
 }

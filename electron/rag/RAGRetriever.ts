@@ -69,7 +69,7 @@ export class RAGRetriever {
         // 1. Embed the query
         let queryEmbedding: number[];
         try {
-            queryEmbedding = await this.embeddingPipeline.getEmbedding(query);
+            queryEmbedding = await this.embeddingPipeline.getEmbeddingForQuery(query);
         } catch (error) {
             console.error('[RAGRetriever] Failed to embed query:', error);
             // Return empty context on embedding failure
@@ -83,10 +83,12 @@ export class RAGRetriever {
         }
 
         // 2. Retrieve candidates (over-fetch for reranking)
-        let candidates = this.vectorStore.searchSimilar(queryEmbedding, {
+        const providerName = this.embeddingPipeline.getActiveProviderName();
+        let candidates = await this.vectorStore.searchSimilar(queryEmbedding, {
             meetingId,
             limit: topK * 2,
-            minSimilarity: 0.25
+            minSimilarity: 0.25,
+            providerName
         });
 
         if (candidates.length === 0) {
@@ -164,7 +166,7 @@ export class RAGRetriever {
         // Embed query
         let queryEmbedding: number[];
         try {
-            queryEmbedding = await this.embeddingPipeline.getEmbedding(query);
+            queryEmbedding = await this.embeddingPipeline.getEmbeddingForQuery(query);
         } catch (error) {
             console.error('[RAGRetriever] Failed to embed query:', error);
             return {
@@ -177,12 +179,14 @@ export class RAGRetriever {
         }
 
         // Search both chunks and summaries
-        const chunkResults = this.vectorStore.searchSimilar(queryEmbedding, {
+        const providerName = this.embeddingPipeline.getActiveProviderName();
+        const chunkResults = await this.vectorStore.searchSimilar(queryEmbedding, {
             limit: topK * 2,
-            minSimilarity: 0.25
+            minSimilarity: 0.25,
+            providerName
         });
 
-        const summaryResults = this.vectorStore.searchSummaries(queryEmbedding, 5);
+        const summaryResults = await this.vectorStore.searchSummaries(queryEmbedding, 5, providerName);
 
         // Get meeting IDs from top summaries
         const relevantMeetingIds = new Set(summaryResults.map(s => s.meetingId));

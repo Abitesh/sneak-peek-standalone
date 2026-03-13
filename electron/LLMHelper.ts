@@ -162,6 +162,28 @@ export class LLMHelper {
     return this.groqFastTextMode;
   }
 
+  public getAiResponseLanguage(): string {
+    return this.aiResponseLanguage;
+  }
+
+  // --- Model Type Checkers ---
+  private isOpenAiModel(modelId: string): boolean {
+    return modelId.startsWith("gpt-") || modelId.startsWith("o1-") || modelId.startsWith("o3-") || modelId.includes("openai");
+  }
+
+  private isClaudeModel(modelId: string): boolean {
+    return modelId.startsWith("claude-");
+  }
+
+  private isGroqModel(modelId: string): boolean {
+    return modelId.startsWith("llama-") || modelId.startsWith("mixtral-") || modelId.startsWith("gemma-");
+  }
+
+  private isGeminiModel(modelId: string): boolean {
+    return modelId.startsWith("gemini-") || modelId.startsWith("models/");
+  }
+  // ---------------------------
+
   private currentModelId: string = GEMINI_FLASH_MODEL;
 
   public setModel(modelId: string, customProviders: (CustomProvider | CurlProvider)[] = []) {
@@ -798,13 +820,13 @@ ANSWER DIRECTLY:`;
       }
 
       // --- Direct Routing based on Selected Model ---
-      if (this.currentModelId === OPENAI_MODEL && this.openaiClient) {
+      if (this.isOpenAiModel(this.currentModelId) && this.openaiClient) {
         return await this.generateWithOpenai(userContent, openaiSystemPrompt, imagePath);
       }
-      if (this.currentModelId === CLAUDE_MODEL && this.claudeClient) {
+      if (this.isClaudeModel(this.currentModelId) && this.claudeClient) {
         return await this.generateWithClaude(userContent, claudeSystemPrompt, imagePath);
       }
-      if (this.currentModelId === GROQ_MODEL && this.groqClient && !isMultimodal) {
+      if (this.isGroqModel(this.currentModelId) && this.groqClient && !isMultimodal) {
         return await this.generateWithGroq(combinedMessages.groq);
       }
 
@@ -925,6 +947,76 @@ ANSWER DIRECTLY:`;
       }
       return `I encountered an error: ${error.message || "Unknown error"}. Please try again.`;
     }
+  }
+
+  /**
+   * Generate content using only reasoning-capable models.
+   * Priority: OpenAI → Claude → Gemini Pro → Groq (last resort).
+   * Used for structured JSON output tasks (resume/JD/company research).
+   * NOTE: Does NOT mutate this.geminiModel — calls Gemini Pro directly to avoid race conditions.
+   */
+  public async generateContentStructured(message: string): Promise<string> {
+    type ProviderAttempt = { name: string; execute: () => Promise<string> };
+    const providers: ProviderAttempt[] = [];
+
+    // Priority 1: OpenAI
+    if (this.openaiClient) {
+      providers.push({ name: `OpenAI (${OPENAI_MODEL})`, execute: () => this.generateWithOpenai(message) });
+    }
+
+    // Priority 2: Claude
+    if (this.claudeClient) {
+      providers.push({ name: `Claude (${CLAUDE_MODEL})`, execute: () => this.generateWithClaude(message) });
+    }
+
+    // Priority 3: Gemini Pro (Skip Flash, and don't mutate this.geminiModel to avoid race conditions)
+    if (this.client) {
+      providers.push({
+        name: `Gemini Pro (${GEMINI_PRO_MODEL})`,
+        execute: async () => {
+          // Call the API directly with the Pro model instead of touching shared state
+          const response = await this.withRetry(async () => {
+            // @ts-ignore
+            const res = await this.client!.models.generateContent({
+              model: GEMINI_PRO_MODEL,
+              contents: [{ role: 'user', parts: [{ text: message }] }],
+              config: { maxOutputTokens: MAX_OUTPUT_TOKENS, temperature: 0.4 }
+            });
+            const candidate = res.candidates?.[0];
+            if (!candidate) return '';
+            if (res.text) return res.text;
+            const parts = candidate.content?.parts ?? [];
+            return (Array.isArray(parts) ? parts : [parts]).map((p: any) => p?.text ?? '').join('');
+          });
+          return response;
+        }
+      });
+    }
+
+    // Priority 4: Groq (Fallback despite JSON hallucination risks)
+    if (this.groqClient) {
+      providers.push({ name: `Groq (${GROQ_MODEL}) fallback`, execute: () => this.generateWithGroq(message) });
+    }
+
+    if (providers.length === 0) {
+      throw new Error('No reasoning model available. Please configure an OpenAI, Claude, Gemini, or Groq API key.');
+    }
+
+    for (const provider of providers) {
+      try {
+        console.log(`[LLMHelper] 🧠 Structured generation: trying ${provider.name}...`);
+        const result = await provider.execute();
+        if (result && result.trim().length > 0) {
+          console.log(`[LLMHelper] ✅ Structured generation succeeded with ${provider.name}`);
+          return result;
+        }
+        console.warn(`[LLMHelper] ⚠️ ${provider.name} returned empty response`);
+      } catch (error: any) {
+        console.warn(`[LLMHelper] ⚠️ Structured generation: ${provider.name} failed: ${error.message}`);
+      }
+    }
+
+    throw new Error('All reasoning models failed for structured generation');
   }
 
   private async generateWithGroq(fullMessage: string): Promise<string> {
@@ -1433,7 +1525,7 @@ ANSWER DIRECTLY:`;
     // 3. Cloud Provider Routing
 
     // OpenAI
-    if (this.currentModelId === OPENAI_MODEL && this.openaiClient) {
+    if (this.isOpenAiModel(this.currentModelId) && this.openaiClient) {
       const openAiSystem = systemPromptOverride || OPENAI_SYSTEM_PROMPT;
       const finalOpenAiSystem = this.injectLanguageInstruction(openAiSystem);
       if (isMultimodal && imagePath) {
@@ -1445,7 +1537,7 @@ ANSWER DIRECTLY:`;
     }
 
     // Claude
-    if (this.currentModelId === CLAUDE_MODEL && this.claudeClient) {
+    if (this.isClaudeModel(this.currentModelId) && this.claudeClient) {
       const claudeSystem = systemPromptOverride || CLAUDE_SYSTEM_PROMPT;
       const finalClaudeSystem = this.injectLanguageInstruction(claudeSystem);
       if (isMultimodal && imagePath) {
@@ -1457,7 +1549,7 @@ ANSWER DIRECTLY:`;
     }
 
     // Groq (Text Only)
-    if (this.currentModelId === GROQ_MODEL && this.groqClient && !isMultimodal) {
+    if (this.isGroqModel(this.currentModelId) && this.groqClient && !isMultimodal) {
       // Build Groq message
       const groqSystem = systemPromptOverride ? baseSystemPrompt : GROQ_SYSTEM_PROMPT;
       const finalGroqSystem = this.injectLanguageInstruction(groqSystem);
@@ -1469,14 +1561,9 @@ ANSWER DIRECTLY:`;
     // 4. Gemini Routing & Fallback
     if (this.client) {
       // Direct model use if specified
-      if (this.currentModelId === GEMINI_PRO_MODEL) {
+      if (this.isGeminiModel(this.currentModelId)) {
         const fullMsg = `${finalSystemPrompt}\n\n${userContent}`;
-        yield* this.streamWithGeminiModel(fullMsg, GEMINI_PRO_MODEL, imagePath);
-        return;
-      }
-      if (this.currentModelId === GEMINI_FLASH_MODEL) {
-        const fullMsg = `${finalSystemPrompt}\n\n${userContent}`;
-        yield* this.streamWithGeminiModel(fullMsg, GEMINI_FLASH_MODEL, imagePath);
+        yield* this.streamWithGeminiModel(fullMsg, this.currentModelId, imagePath);
         return;
       }
 
@@ -1897,16 +1984,30 @@ ANSWER DIRECTLY:`;
   }
 
   public async getOllamaModels(): Promise<string[]> {
-    // Note: We checking if URL is accessible, ignoring useOllama flag for the check itself to be useful in settings
+    const baseUrl = (this.ollamaUrl || "http://127.0.0.1:11434").replace('localhost', '127.0.0.1');
+    
     try {
-      const response = await fetch(`${this.ollamaUrl}/api/tags`);
-      if (!response.ok) throw new Error('Failed to fetch models');
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 1000); // Fast 1s timeout
 
-      const data = await response.json();
-      return data.models?.map((model: any) => model.name) || [];
-    } catch (error) {
-      console.warn("[LLMHelper] Error fetching Ollama models:", error);
-      return [];
+        const response = await fetch(`${baseUrl}/api/tags`, {
+            signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+
+        if (!response.ok) return [];
+
+        const data = await response.json();
+        if (data && data.models) {
+            return data.models.map((m: any) => m.name);
+        }
+        
+        return [];
+    } catch (error: any) {
+        // Silently catch connection refused/timeout errors. 
+        // OllamaManager handles logging the startup status.
+        return [];
     }
   }
 
@@ -1927,96 +2028,15 @@ ANSWER DIRECTLY:`;
         // Ignore unless it's a real error
       }
 
-      // 2. Start Ollama serve
-      console.log("[LLMHelper] Starting ollama serve...");
-      // We use exec but don't await the result endlessly as it's a server
-      const child = exec('ollama serve');
-      child.unref(); // Detach
-      this.ollamaStartedByApp = true;
-
-      // 3. Wait a bit for it to come up
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      // 2. Restart Ollama through the Manager (which handles polling and background spawn)
+      // We don't want to use exec('ollama serve') here directly anymore to avoid duplicate tracking
+      const { OllamaManager } = require('./services/OllamaManager');
+      await OllamaManager.getInstance().init();
 
       return true;
     } catch (error) {
       console.error("[LLMHelper] Failed to restart Ollama:", error);
       return false;
-    }
-  }
-
-  /**
-   * Smart Startup: Check if running -> Connect. If not -> Start.
-   */
-  public async ensureOllamaRunning(): Promise<{ success: boolean; message: string }> {
-    try {
-      // 1. Fast Check
-      const isRunning = await this.checkOllamaAvailable();
-      if (isRunning) {
-        console.log("[LLMHelper] Ollama is already running. Connecting immediately.");
-        return { success: true, message: "already-running" };
-      }
-
-      // 2. Not running - Start it
-      console.log("[LLMHelper] Ollama not detected. Starting 'ollama serve'...");
-      const child = exec('ollama serve');
-      child.unref(); // Detach process so it persists
-      this.ollamaStartedByApp = true;
-
-      // 3. Wait/Poll for it to come up (max 5s)
-      for (let i = 0; i < 10; i++) {
-        await this.delay(500); // 500ms * 10 = 5s
-        const available = await this.checkOllamaAvailable();
-        if (available) {
-          console.log("[LLMHelper] Ollama started successfully.");
-          return { success: true, message: "started" };
-        }
-      }
-
-      console.warn("[LLMHelper] Ollama started but did not respond within 5s.");
-      return { success: false, message: "timeout" };
-
-    } catch (error: any) {
-      console.error("[LLMHelper] Failed to ensure Ollama running:", error);
-      return { success: false, message: error.message };
-    }
-  }
-
-  /**
-   * Check if Ollama is running on app start. If not, start it.
-   */
-  public async checkAndStartOllamaOnAppStart(): Promise<void> {
-    try {
-      const isRunning = await this.checkOllamaAvailable();
-      if (isRunning) {
-        console.log("[LLMHelper] Ollama was already running on app start. App will not manage its lifecycle.");
-        this.ollamaStartedByApp = false;
-        return;
-      }
-      console.log("[LLMHelper] Ollama not running on app start. Starting and managing its lifecycle.");
-      await this.ensureOllamaRunning();
-    } catch (e: any) {
-      console.warn("[LLMHelper] Failed to check/start Ollama on app start:", e.message);
-    }
-  }
-
-  /**
-   * Shutdown Ollama if it was started by the app
-   */
-  public async shutdownOllamaIfStartedByApp(): Promise<void> {
-    if (!this.ollamaStartedByApp) {
-      return;
-    }
-    console.log("[LLMHelper] Shutting down Ollama (started by app)...");
-    try {
-      const { stdout } = await execAsync(`lsof -t -i:11434`);
-      const pid = stdout.trim();
-      if (pid) {
-        // Send SIGTERM for graceful shutdown
-        await execAsync(`kill -15 ${pid}`);
-        console.log(`[LLMHelper] Successfully stopped Ollama (PID: ${pid})`);
-      }
-    } catch (error: any) {
-      console.log("[LLMHelper] Could not find or stop Ollama process:", error.message);
     }
   }
 

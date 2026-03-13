@@ -48,6 +48,11 @@ export interface StoredCredentials {
     // Google Custom Search
     googleSearchApiKey?: string;
     googleSearchCseId?: string;
+    // Dynamic Model Discovery – preferred models per provider
+    geminiPreferredModel?: string;
+    groqPreferredModel?: string;
+    openaiPreferredModel?: string;
+    claudePreferredModel?: string;
 }
 
 export class CredentialsManager {
@@ -296,6 +301,18 @@ export class CredentialsManager {
         this.credentials.defaultModel = model;
         this.saveCredentials();
         console.log(`[CredentialsManager] Default Model set to: ${model}`);
+    }
+
+    public getPreferredModel(provider: 'gemini' | 'groq' | 'openai' | 'claude'): string | undefined {
+        const key = `${provider}PreferredModel` as keyof StoredCredentials;
+        return this.credentials[key] as string | undefined;
+    }
+
+    public setPreferredModel(provider: 'gemini' | 'groq' | 'openai' | 'claude', modelId: string): void {
+        const key = `${provider}PreferredModel` as keyof StoredCredentials;
+        (this.credentials as any)[key] = modelId;
+        this.saveCredentials();
+        console.log(`[CredentialsManager] ${provider} preferred model set to: ${modelId}`);
     }
 
     public saveCustomProvider(provider: CustomProvider): void {

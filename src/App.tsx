@@ -10,6 +10,7 @@ import StartupSequence from "./components/StartupSequence"
 import { AnimatePresence, motion } from "framer-motion"
 import UpdateBanner from "./components/UpdateBanner"
 import { SupportToaster } from "./components/SupportToaster"
+import { AlertCircle } from "lucide-react"
 import {
   JDAwarenessToaster,
   ProfileFeatureToaster,
@@ -81,6 +82,14 @@ const App: React.FC = () => {
   const [lastMeetingEndTime, setLastMeetingEndTime] = useState<number | null>(null);
   const [isProcessingMeeting, setIsProcessingMeeting] = useState<boolean>(false);
   
+  // Ollama Auto-Pull State
+  const [ollamaPullStatus, setOllamaPullStatus] = useState<'idle' | 'downloading' | 'complete' | 'failed'>('idle');
+  const [ollamaPullPercent, setOllamaPullPercent] = useState<number>(0);
+  const [ollamaPullMessage, setOllamaPullMessage] = useState<string>('');
+
+  // Re-index State
+  const [incompatibleWarning, setIncompatibleWarning] = useState<{count: number; oldProvider: string; newProvider: string} | null>(null);
+  
   const isAppReady = !isSettingsWindow && !isOverlayWindow && !isModelSelectorWindow && !showStartup && !isSettingsOpen && isLauncherMainView;
   const { activeAd, dismissAd } = useAdCampaigns(
     isPremiumActive, 
@@ -103,12 +112,47 @@ const App: React.FC = () => {
       setLastMeetingEndTime(Date.now());
     });
 
+    // Listen for Ollama Auto-Pull Progress
+    let removeProgress: (() => void) | undefined;
+    let removeComplete: (() => void) | undefined;
+    if (window.electronAPI?.onOllamaPullProgress && window.electronAPI?.onOllamaPullComplete) {
+      removeProgress = window.electronAPI.onOllamaPullProgress((data) => {
+        setOllamaPullStatus('downloading');
+        setOllamaPullPercent(data.percent || 0);
+        setOllamaPullMessage(data.status || 'Downloading...');
+      });
+
+      removeComplete = window.electronAPI.onOllamaPullComplete(() => {
+        setOllamaPullStatus('complete');
+        setOllamaPullMessage('Local AI memory ready');
+        setOllamaPullPercent(100);
+        setTimeout(() => setOllamaPullStatus('idle'), 3000);
+      });
+    }
+
+    let removeWarning: (() => void) | undefined;
+    if (window.electronAPI?.onIncompatibleProviderWarning) {
+      removeWarning = window.electronAPI.onIncompatibleProviderWarning((data) => {
+        setIncompatibleWarning(data);
+      });
+    }
+
     return () => {
       if (removeMeetingsListener) removeMeetingsListener();
+      if (removeProgress) removeProgress();
+      if (removeComplete) removeComplete();
+      if (removeWarning) removeWarning();
     }
   }, []);
 
   // Handlers
+  const handleReindex = async () => {
+    if (window.electronAPI?.reindexIncompatibleMeetings) {
+      setIncompatibleWarning(null);
+      await window.electronAPI.reindexIncompatibleMeetings();
+    }
+  };
+
   const handleStartMeeting = async () => {
     try {
       localStorage.setItem('natively_last_meeting_start', Date.now().toString());
@@ -248,6 +292,9 @@ const App: React.FC = () => {
                     setIsSettingsOpen(true);
                   }}
                   onPageChange={setIsLauncherMainView}
+                  ollamaPullStatus={ollamaPullStatus}
+                  ollamaPullPercent={ollamaPullPercent}
+                  ollamaPullMessage={ollamaPullMessage}
                 />
                 <SettingsOverlay
                   isOpen={isSettingsOpen}
@@ -262,6 +309,45 @@ const App: React.FC = () => {
           </motion.div>
         )}
       </AnimatePresence>
+
+
+      <AnimatePresence>
+        {incompatibleWarning && isDefault && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95, y: 20 }}
+            className="fixed bottom-6 right-6 z-50 pointer-events-auto"
+          >
+            <div className="bg-[#1A1A1A] border border-[#ff3333]/30 shadow-2xl rounded-2xl p-5 max-w-[340px] flex flex-col gap-3">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-[#ff3333] shrink-0 mt-0.5" />
+                <div>
+                  <h3 className="text-[#E0E0E0] font-medium text-sm">Provider Changed</h3>
+                  <p className="text-[#A0A0A0] text-xs mt-1 leading-relaxed">
+                    ⚠ {incompatibleWarning.count} meetings used your previous AI provider ({incompatibleWarning.oldProvider}) and won't appear in search results under {incompatibleWarning.newProvider}.
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-2 mt-1 justify-end">
+                <button 
+                  onClick={() => setIncompatibleWarning(null)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium text-[#A0A0A0] hover:text-white hover:bg-white/5 transition-colors"
+                >
+                  Dismiss
+                </button>
+                <button 
+                  onClick={handleReindex}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#ff3333]/10 text-[#ff3333] hover:bg-[#ff3333]/20 transition-colors"
+                >
+                  Re-index automatically
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <UpdateBanner />
       <SupportToaster />
       {isLauncherMainView && !isSettingsOpen && (

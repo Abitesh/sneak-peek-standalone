@@ -281,7 +281,68 @@ export class DatabaseManager {
             this.db.pragma('user_version = 4');
         }
 
+        // Version 4 → 5: Add embedding provider and dimensions columns
+        if (version < 5) {
+            console.log('[DatabaseManager] Applying migration v4 → v5: Add embedding provider/dimensions columns');
+            const columnsToAdd = [
+                "ALTER TABLE meetings ADD COLUMN embedding_provider TEXT",
+                "ALTER TABLE meetings ADD COLUMN embedding_dimensions INTEGER"
+            ];
+            for (const sql of columnsToAdd) {
+                try { this.db.exec(sql); } catch (e) { /* Column already exists */ }
+            }
+            this.db.pragma('user_version = 5');
+        }
+
+        // Version 5 → 6: Add app_state table for KV storage (Ollama pull state, etc)
+        if (version < 6) {
+            console.log('[DatabaseManager] Applying migration v5 → v6: Add app_state table');
+            this.db.exec(`
+                CREATE TABLE IF NOT EXISTS app_state (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                );
+            `);
+            this.db.pragma('user_version = 6');
+        }
+
         console.log('[DatabaseManager] Migrations completed.');
+    }
+
+    // ============================================
+    // System KV Store (app_state)
+    // ============================================
+
+    public getAppState(key: string): string | null {
+        if (!this.db) return null;
+        try {
+            const stmt = this.db.prepare('SELECT value FROM app_state WHERE key = ?');
+            const row = stmt.get(key) as { value: string } | undefined;
+            return row ? row.value : null;
+        } catch (error) {
+            console.error(`[DatabaseManager] Failed to get app_state for key: ${key}`, error);
+            return null;
+        }
+    }
+
+    public setAppState(key: string, value: string): void {
+        if (!this.db) return;
+        try {
+            const stmt = this.db.prepare('INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)');
+            stmt.run(key, value);
+        } catch (error) {
+            console.error(`[DatabaseManager] Failed to set app_state for key: ${key}`, error);
+        }
+    }
+
+    public deleteAppState(key: string): void {
+        if (!this.db) return;
+        try {
+            const stmt = this.db.prepare('DELETE FROM app_state WHERE key = ?');
+            stmt.run(key);
+        } catch (error) {
+            console.error(`[DatabaseManager] Failed to delete app_state for key: ${key}`, error);
+        }
     }
 
     /**
