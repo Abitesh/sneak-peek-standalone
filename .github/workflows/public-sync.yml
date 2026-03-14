@@ -35,6 +35,7 @@ jobs:
       - name: Sync to Public Repository
         env:
           PUBLIC_REPO_PAT: ${{ secrets.PUBLIC_REPO_PAT }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           if [ -z "$PUBLIC_REPO_PAT" ]; then
             echo "Error: PUBLIC_REPO_PAT secret is missing. Please add it to your repository secrets."
@@ -58,6 +59,7 @@ jobs:
             --exclude 'dist-electron' \
             --exclude 'release' \
             --exclude 'native-module/target' \
+            --exclude '.github/workflows/public-sync.yml' \
             ./ public-repo/
             
           cd public-repo
@@ -67,7 +69,7 @@ jobs:
           if git diff --staged --quiet; then
              echo "No changes to sync."
           else
-             git commit -m "Auto-sync from private repo: ${{ github.sha }}"
+             git commit -m "$COMMIT_MESSAGE" -m "Auto-sync from private repo: ${{ github.sha }}"
              git push --force origin HEAD:main
              echo "Successfully synced to public repository."
           fi
