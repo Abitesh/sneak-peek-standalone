@@ -11,23 +11,14 @@ use std::time::Duration;
 use napi::bindgen_prelude::*;
 use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode, ErrorStrategy};
 use ringbuf::traits::Consumer;
-use webrtc_vad::{Vad, SampleRate as VadSampleRate, VadMode};
+use std::fs::OpenOptions;
+use std::io::Write;
 
+pub mod audio_config;
 pub mod vad; 
 pub mod microphone;
 pub mod speaker;
-pub mod streaming_resampler;
-pub mod audio_config;
-pub mod silence_suppression;
-
-// Keep old resampler module for compatibility
-pub mod resampler;
-
-use crate::streaming_resampler::StreamingResampler;
 use crate::audio_config::{FRAME_SAMPLES, DSP_POLL_MS};
-use crate::silence_suppression::{
-    SilenceSuppressor, SilenceSuppressionConfig, FrameAction, generate_silence_frame
-};
 
 // ============================================================================
 // SYSTEM AUDIO CAPTURE (ScreenCaptureKit on macOS)
@@ -105,7 +96,6 @@ impl SystemAudioCapture {
             };
             
             let mut stream = input.stream();
-            let input_sample_rate = stream.sample_rate() as f64;
             let mut consumer = match stream.take_consumer() {
                 Some(c) => c,
                 None => {
@@ -114,98 +104,51 @@ impl SystemAudioCapture {
                 }
             };
             
-            println!("[SystemAudioCapture] Background init complete. Rate: {}Hz. DSP starting.", input_sample_rate);
+            let initial_sample_rate = stream.sample_rate();
+            println!("[SystemAudioCapture] Background init complete. Initial Rate: {}Hz. DSP starting.", initial_sample_rate);
 
-            // 2. DSP loop with silence suppression
-            let mut resampler = StreamingResampler::new(input_sample_rate, 16000.0);
+            // 2. DSP loop with raw audio scaling (no resampling)
             let mut frame_buffer: Vec<i16> = Vec::with_capacity(FRAME_SAMPLES * 4);
             let mut raw_batch: Vec<f32> = Vec::with_capacity(4096);
-            
-            let mut suppressor = SilenceSuppressor::new(
-                SilenceSuppressionConfig::for_system_audio()
-            );
-
-            // WebRTC VAD for voice vs noise discrimination (created in-thread because !Send)
-            let mut webrtc_vad = Vad::new_with_rate_and_mode(
-                VadSampleRate::Rate16kHz,
-                VadMode::VeryAggressive,
-            );
-
-            // Track whether VAD confirmed any real voice since last silence period.
-            // This prevents phantom speech_ended events from non-voice noise (Bug #1).
-            let mut vad_confirmed_voice = false;
 
             loop {
                 if stop_signal.load(Ordering::Relaxed) {
                     break;
                 }
-                
-                // Drain ring buffer (lock-free)
+
+                // Drain ALL available samples from ring buffer (lock-free)
                 while let Some(sample) = consumer.try_pop() {
                     raw_batch.push(sample);
-                    if raw_batch.len() >= 480 {
-                        break;
-                    }
                 }
                 
-                // Resample
+                // Convert f32 -> i16 at Native sample rate
                 if !raw_batch.is_empty() {
-                    let resampled = resampler.resample(&raw_batch);
-                    frame_buffer.extend(resampled);
+                    for &f in &raw_batch {
+                        let scaled = (f * 32767.0).clamp(-32768.0, 32767.0);
+                        frame_buffer.push(scaled as i16);
+                    }
                     raw_batch.clear();
                 }
 
-                // Process frames with Silence Suppression
-                while frame_buffer.len() >= FRAME_SAMPLES {
-                    let frame: Vec<i16> = frame_buffer.drain(0..FRAME_SAMPLES).collect();
-                    let (action, speech_just_ended) = suppressor.process(&frame);
+                // Send chunks of exactly 4000 samples (~83ms at 48kHz). Google STT recommends ~100ms chunks.
+                let chunk_size = 4000;
+                while frame_buffer.len() >= chunk_size {
+                    let frame: Vec<i16> = frame_buffer.drain(0..chunk_size).collect();
                     
-                    match action {
-                        FrameAction::Send(ref audio) => {
-                            // Check if this is a hangover frame (below threshold but in grace period)
-                            // Hangover frames should NOT be VAD-checked — they preserve word endings (Bug #4)
-                            let rms = audio.iter().map(|&s| (s as f64) * (s as f64)).sum::<f64>() / audio.len() as f64;
-                            let is_hangover = rms.sqrt() < suppressor.adaptive_threshold() as f64;
-                            
-                            if is_hangover {
-                                // Hangover frame: send as-is to preserve trailing audio
-                                tsfn.call(audio.clone(), ThreadsafeFunctionCallMode::NonBlocking);
-                            } else {
-                                // Active speech frame: WebRTC VAD checks if it's actual human voice
-                                let is_voice = webrtc_vad.is_voice_segment(audio).unwrap_or(true);
-                                if is_voice {
-                                    vad_confirmed_voice = true;
-                                    tsfn.call(audio.clone(), ThreadsafeFunctionCallMode::NonBlocking);
-                                } else {
-                                    // RMS was high but VAD says not voice (keyboard, cough, etc.)
-                                    tsfn.call(generate_silence_frame(FRAME_SAMPLES), ThreadsafeFunctionCallMode::NonBlocking);
-                                }
-                            }
-                        },
-                        FrameAction::SendSilence => {
-                             tsfn.call(generate_silence_frame(FRAME_SAMPLES), ThreadsafeFunctionCallMode::NonBlocking);
-                        },
-                        FrameAction::Suppress => {
-                            // Do nothing (bandwidth saving)
+                    // DEBUG: Write to file
+                    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("/tmp/natively_stt_debug_rust.pcm") {
+                        let mut bytes = Vec::with_capacity(frame.len() * 2);
+                        for &sample in &frame {
+                            bytes.extend_from_slice(&sample.to_le_bytes());
                         }
+                        let _ = file.write_all(&bytes);
                     }
 
-                    // Fire speech_ended ONLY if VAD confirmed at least one real voice frame (Bug #1)
-                    if speech_just_ended && vad_confirmed_voice {
-                        if let Some(ref se_tsfn) = speech_ended_tsfn {
-                            se_tsfn.call(true, ThreadsafeFunctionCallMode::NonBlocking);
-                        }
-                        vad_confirmed_voice = false; // Reset for next speech segment
-                    } else if speech_just_ended {
-                        // Was noise, not voice — reset without firing callback
-                        vad_confirmed_voice = false;
-                    }
+                    tsfn.call(frame, ThreadsafeFunctionCallMode::NonBlocking);
                 }
                 
-                // Short sleep
-                if frame_buffer.len() < FRAME_SAMPLES {
-                    thread::sleep(Duration::from_millis(DSP_POLL_MS));
-                }
+                // Keep the sleep small so we quickly read the ring buffer
+                thread::sleep(Duration::from_millis(DSP_POLL_MS));
             }
             
             println!("[SystemAudioCapture] DSP thread stopped.");
@@ -283,102 +226,51 @@ impl MicrophoneCapture {
         self.stop_signal.store(false, Ordering::SeqCst);
         let stop_signal = self.stop_signal.clone();
         
-        let input_ref = self.input.as_mut()
+        let mut input_ref = self.input.take()
             .ok_or_else(|| napi::Error::from_reason("Input missing"))?;
         
         input_ref.play().map_err(|e| napi::Error::from_reason(format!("{}", e)))?;
         
-        let input_sample_rate = input_ref.sample_rate() as f64;
+        let initial_sample_rate = input_ref.sample_rate();
         let mut consumer = input_ref.take_consumer()
             .ok_or_else(|| napi::Error::from_reason("Failed to get consumer"))?;
 
-        // DSP thread with silence suppression
+        // DSP thread with bypass
         self.capture_thread = Some(thread::spawn(move || {
-            let mut resampler = StreamingResampler::new(input_sample_rate, 16000.0);
             let mut frame_buffer: Vec<i16> = Vec::with_capacity(FRAME_SAMPLES * 4);
             let mut raw_batch: Vec<f32> = Vec::with_capacity(4096);
-            
-            let mut suppressor = SilenceSuppressor::new(
-                SilenceSuppressionConfig::for_microphone()
-            );
 
-            // WebRTC VAD for voice vs noise discrimination (created in-thread because !Send)
-            let mut webrtc_vad = Vad::new_with_rate_and_mode(
-                VadSampleRate::Rate16kHz,
-                VadMode::VeryAggressive,
-            );
-
-            // Track whether VAD confirmed any real voice since last silence period (Bug #1)
-            let mut vad_confirmed_voice = false;
-
-            println!("[MicrophoneCapture] DSP thread started (suppression active)");
+            println!("[MicrophoneCapture] DSP thread started (suppression disabled)");
 
             loop {
                 if stop_signal.load(Ordering::Relaxed) {
                     break;
                 }
-                
-                // 1. Drain ring buffer (lock-free)
+
+                // 1. Drain ALL available samples from ring buffer (lock-free)
                 while let Some(sample) = consumer.try_pop() {
                     raw_batch.push(sample);
-                    if raw_batch.len() >= 480 {
-                        break;
-                    }
                 }
                 
-                // 2. Resample
+                // 2. Convert f32 -> i16 at Native sample rate
                 if !raw_batch.is_empty() {
-                    let resampled = resampler.resample(&raw_batch);
-                    frame_buffer.extend(resampled);
+                    for &f in &raw_batch {
+                        let scaled = (f * 32767.0).clamp(-32768.0, 32767.0);
+                        frame_buffer.push(scaled as i16);
+                    }
                     raw_batch.clear();
                 }
 
-                // 3. Process frames with Silence Suppression
-                while frame_buffer.len() >= FRAME_SAMPLES {
-                    let frame: Vec<i16> = frame_buffer.drain(0..FRAME_SAMPLES).collect();
-                    let (action, speech_just_ended) = suppressor.process(&frame);
-                    
-                    match action {
-                        FrameAction::Send(ref audio) => {
-                            // Hangover frame detection (Bug #4)
-                            let rms = audio.iter().map(|&s| (s as f64) * (s as f64)).sum::<f64>() / audio.len() as f64;
-                            let is_hangover = rms.sqrt() < suppressor.adaptive_threshold() as f64;
+                // 3. Send chunks of exactly 4000 samples (~83ms at 48kHz)
+                let chunk_size = 4000;
+                while frame_buffer.len() >= chunk_size {
+                    let frame: Vec<i16> = frame_buffer.drain(0..chunk_size).collect();
 
-                            if is_hangover {
-                                tsfn.call(audio.clone(), ThreadsafeFunctionCallMode::NonBlocking);
-                            } else {
-                                let is_voice = webrtc_vad.is_voice_segment(audio).unwrap_or(true);
-                                if is_voice {
-                                    vad_confirmed_voice = true;
-                                    tsfn.call(audio.clone(), ThreadsafeFunctionCallMode::NonBlocking);
-                                } else {
-                                    tsfn.call(generate_silence_frame(FRAME_SAMPLES), ThreadsafeFunctionCallMode::NonBlocking);
-                                }
-                            }
-                        },
-                        FrameAction::SendSilence => {
-                             tsfn.call(generate_silence_frame(FRAME_SAMPLES), ThreadsafeFunctionCallMode::NonBlocking);
-                        },
-                        FrameAction::Suppress => {
-                            // Do nothing
-                        }
-                    }
-
-                    // Fire speech_ended ONLY if VAD confirmed real voice (Bug #1)
-                    if speech_just_ended && vad_confirmed_voice {
-                        if let Some(ref se_tsfn) = speech_ended_tsfn {
-                            se_tsfn.call(true, ThreadsafeFunctionCallMode::NonBlocking);
-                        }
-                        vad_confirmed_voice = false;
-                    } else if speech_just_ended {
-                        vad_confirmed_voice = false;
-                    }
+                    tsfn.call(frame, ThreadsafeFunctionCallMode::NonBlocking);
                 }
                 
                 // 4. Short sleep
-                if frame_buffer.len() < FRAME_SAMPLES {
-                    thread::sleep(Duration::from_millis(DSP_POLL_MS));
-                }
+                thread::sleep(Duration::from_millis(DSP_POLL_MS));
             }
             
             println!("[MicrophoneCapture] DSP thread stopped.");

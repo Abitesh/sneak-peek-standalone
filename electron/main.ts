@@ -671,13 +671,13 @@ export class AppState {
       // Always sync rates, even if just initialized, to ensure consistency
 
       // 1. Sync System Audio Rate
-      const sysRate = this.systemAudioCapture?.getSampleRate() || 16000;
+      const sysRate = this.systemAudioCapture?.getSampleRate() || 48000;
       console.log(`[Main] Configuring Interviewer STT to ${sysRate}Hz`);
       this.googleSTT?.setSampleRate(sysRate);
       this.googleSTT?.setAudioChannelCount?.(1);
 
       // 2. Sync Mic Rate
-      const micRate = this.microphoneCapture?.getSampleRate() || 16000;
+      const micRate = this.microphoneCapture?.getSampleRate() || 48000;
       console.log(`[Main] Configuring User STT to ${micRate}Hz`);
       this.googleSTT_User?.setSampleRate(micRate);
       this.googleSTT_User?.setAudioChannelCount?.(1);

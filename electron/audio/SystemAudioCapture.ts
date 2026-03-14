@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events';
 import { app } from 'electron';
 import path from 'path';
+import fs from 'fs';
 
 let NativeModule: any = null;
 
@@ -13,10 +14,11 @@ try {
 const { SystemAudioCapture: RustAudioCapture } = NativeModule || {};
 
 export class SystemAudioCapture extends EventEmitter {
-    private monitor: any = null;
     private isRecording: boolean = false;
     private deviceId: string | null = null;
-    private detectedSampleRate: number = 16000;
+    private detectedSampleRate: number = 48000;
+    private monitor: any = null;
+    private debugStream: any = null;
 
     constructor(deviceId?: string | null) {
         super();
@@ -31,9 +33,12 @@ export class SystemAudioCapture extends EventEmitter {
     }
 
     public getSampleRate(): number {
-        // Return 16000 default as we effectively downsample to this now
-        // Force return 16000 to avoid stale binary issues reporting device rate
-        return 16000;
+        if (this.monitor && typeof this.monitor.get_sample_rate === 'function') {
+            const nativeRate = this.monitor.get_sample_rate();
+            console.log(`[SystemAudioCapture] Real native rate: ${nativeRate}`);
+            return nativeRate;
+        }
+        return this.detectedSampleRate;
     }
 
     /**
@@ -63,6 +68,19 @@ export class SystemAudioCapture extends EventEmitter {
         try {
             console.log('[SystemAudioCapture] Starting native capture...');
 
+            try {
+                this.debugStream = fs.createWriteStream('/tmp/natively_stt_debug.pcm');
+                console.log('[SystemAudioCapture] Debug audio will be saved to /tmp/natively_stt_debug.pcm');
+            } catch (e) {
+                console.error('[SystemAudioCapture] Failed to create debug stream', e);
+            }
+            
+            // Fetch real sample rate as soon as monitor starts
+            if (typeof this.monitor.get_sample_rate === 'function') {
+                this.detectedSampleRate = this.monitor.get_sample_rate();
+                console.log(`[SystemAudioCapture] Detected sample rate: ${this.detectedSampleRate}`);
+            }
+
             this.monitor.start((chunk: Uint8Array) => {
                 // The native module sends raw PCM bytes (Uint8Array)
                 if (chunk && chunk.length > 0) {
@@ -70,6 +88,9 @@ export class SystemAudioCapture extends EventEmitter {
                     if (Math.random() < 0.05) {
                         const prefix = buffer.slice(0, 10).toString('hex');
                         console.log(`[SystemAudioCapture] Chunk: ${buffer.length}b, Rate: ${this.detectedSampleRate}, Data(hex): ${prefix}...`);
+                    }
+                    if (this.debugStream) {
+                        this.debugStream.write(buffer);
                     }
                     this.emit('data', buffer);
                 }
@@ -101,6 +122,10 @@ export class SystemAudioCapture extends EventEmitter {
 
         // Destroy monitor
         this.monitor = null;
+        if (this.debugStream) {
+            this.debugStream.end();
+            this.debugStream = null;
+        }
         this.isRecording = false;
         this.emit('stop');
     }

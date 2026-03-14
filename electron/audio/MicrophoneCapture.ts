@@ -36,8 +36,12 @@ export class MicrophoneCapture extends EventEmitter {
     }
 
     public getSampleRate(): number {
-        // Return 16000 default as we effectively downsample to this now
-        return this.monitor?.getSampleRate() || 16000;
+        if (this.monitor && typeof this.monitor.get_sample_rate === 'function') {
+            const nativeRate = this.monitor.get_sample_rate();
+            console.log(`[MicrophoneCapture] Real native rate: ${nativeRate}`);
+            return nativeRate;
+        }
+        return 48000; // Safe default for most modern mics before native initialization
     }
 
     /**
