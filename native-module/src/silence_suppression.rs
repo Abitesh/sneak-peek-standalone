@@ -87,6 +87,8 @@ pub struct SilenceSuppressor {
     noise_floor_ema: f32,
     /// Current adaptive speech threshold
     adaptive_threshold: f32,
+    /// Tracks whether we were speaking in the previous frame (for edge detection)
+    was_speaking: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -125,12 +127,15 @@ impl SilenceSuppressor {
             last_keepalive_time: now,
             frames_sent: 0,
             frames_suppressed: 0,
+            was_speaking: true, // Start as true since state starts Active
         }
     }
     
-    /// Process a frame and determine what to do with it
-    /// CRITICAL: Speech frames are NEVER delayed
-    pub fn process(&mut self, frame: &[i16]) -> FrameAction {
+    /// Process a frame and determine what to do with it.
+    /// Returns (FrameAction, speech_just_ended)
+    /// `speech_just_ended` is true on the exact frame where speech transitions to silence.
+    /// CRITICAL: Speech frames are NEVER delayed.
+    pub fn process(&mut self, frame: &[i16]) -> (FrameAction, bool) {
         let now = Instant::now();
         let rms = calculate_rms(frame);
         let has_speech = rms >= self.adaptive_threshold;
@@ -140,21 +145,28 @@ impl SilenceSuppressor {
             self.state = SuppressionState::Active;
             self.last_speech_time = now;
             self.frames_sent += 1;
-            return FrameAction::Send(frame.to_vec());
+            self.was_speaking = true;
+            return (FrameAction::Send(frame.to_vec()), false);
         }
         
         // No speech detected - check state
+        let mut speech_just_ended = false;
         match self.state {
             SuppressionState::Active | SuppressionState::Hangover => {
                 // Check if hangover period has elapsed
                 if now.duration_since(self.last_speech_time) > self.config.speech_hangover {
                     self.state = SuppressionState::Suppressed;
+                    // Detect the edge: was speaking, now suppressed
+                    if self.was_speaking {
+                        speech_just_ended = true;
+                        self.was_speaking = false;
+                    }
                     // Fall through to check keepalive
                 } else {
                     // Still in hangover - send full frame
                     self.state = SuppressionState::Hangover;
                     self.frames_sent += 1;
-                    return FrameAction::Send(frame.to_vec());
+                    return (FrameAction::Send(frame.to_vec()), false);
                 }
             }
             SuppressionState::Suppressed => {
@@ -173,10 +185,10 @@ impl SilenceSuppressor {
         if now.duration_since(self.last_keepalive_time) >= self.config.silence_keepalive_interval {
             self.last_keepalive_time = now;
             self.frames_sent += 1;
-            FrameAction::SendSilence
+            (FrameAction::SendSilence, speech_just_ended)
         } else {
             self.frames_suppressed += 1;
-            FrameAction::Suppress
+            (FrameAction::Suppress, speech_just_ended)
         }
     }
     
@@ -189,6 +201,11 @@ impl SilenceSuppressor {
     pub fn is_speech(&self) -> bool {
         matches!(self.state, SuppressionState::Active | SuppressionState::Hangover)
     }
+
+    /// Get the current adaptive speech threshold (used by VAD bypass for hangover frames)
+    pub fn adaptive_threshold(&self) -> f32 {
+        self.adaptive_threshold
+    }
     
     /// Reset state (e.g., when meeting ends)
     pub fn reset(&mut self) {
@@ -198,6 +215,7 @@ impl SilenceSuppressor {
         self.last_keepalive_time = now;
         self.noise_floor_ema = self.config.adaptive_min_floor;
         self.adaptive_threshold = self.config.speech_threshold_rms;
+        self.was_speaking = true;
     }
 }
 
@@ -232,10 +250,9 @@ mod tests {
         
         // Loud frame should be sent immediately
         let loud_frame: Vec<i16> = vec![500; 320];
-        match suppressor.process(&loud_frame) {
-            FrameAction::Send(_) => {}
-            _ => panic!("Loud frame should be sent immediately"),
-        }
+        let (action, ended) = suppressor.process(&loud_frame);
+        assert!(matches!(action, FrameAction::Send(_)));
+        assert!(!ended, "Speech should not have 'ended' on a loud frame");
         assert!(suppressor.is_speech());
     }
     
@@ -251,7 +268,33 @@ mod tests {
         });
         
         let silent_frame: Vec<i16> = vec![0; 320];
-        let action = suppressor.process(&silent_frame);
+        let (action, _ended) = suppressor.process(&silent_frame);
         assert!(matches!(action, FrameAction::SendSilence | FrameAction::Suppress));
+    }
+
+    #[test]
+    fn test_speech_ended_detection() {
+        let mut suppressor = SilenceSuppressor::new(SilenceSuppressionConfig {
+            speech_threshold_rms: 100.0,
+            speech_hangover: Duration::from_millis(0), // No hangover for faster test
+            silence_keepalive_interval: Duration::from_millis(50),
+            adaptive_multiplier: 3.0,
+            adaptive_min_floor: 20.0,
+            ema_alpha: 0.02,
+        });
+
+        // Send a loud frame (speech)
+        let loud_frame: Vec<i16> = vec![500; 320];
+        let (_, ended) = suppressor.process(&loud_frame);
+        assert!(!ended, "Speech should not end on a loud frame");
+
+        // Send a silent frame (should trigger speech_ended)
+        let silent_frame: Vec<i16> = vec![0; 320];
+        let (_, ended) = suppressor.process(&silent_frame);
+        assert!(ended, "Speech should have ended on transition to silence");
+
+        // Another silent frame should NOT trigger speech_ended again
+        let (_, ended) = suppressor.process(&silent_frame);
+        assert!(!ended, "Speech_ended should only fire once per transition");
     }
 }

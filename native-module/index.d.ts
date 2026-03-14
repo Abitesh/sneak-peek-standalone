@@ -12,12 +12,12 @@ export declare function getOutputDevices(): Array<AudioDeviceInfo>
 export declare class SystemAudioCapture {
   constructor(deviceId?: string | undefined | null)
   getSampleRate(): number
-  start(callback: (...args: any[]) => any): void
+  start(callback: (...args: any[]) => any, onSpeechEnded?: (...args: any[]) => any | undefined | null): void
   stop(): void
 }
 export declare class MicrophoneCapture {
   constructor(deviceId?: string | undefined | null)
   getSampleRate(): number
-  start(callback: (...args: any[]) => any): void
+  start(callback: (...args: any[]) => any, onSpeechEnded?: (...args: any[]) => any | undefined | null): void
   stop(): void
 }

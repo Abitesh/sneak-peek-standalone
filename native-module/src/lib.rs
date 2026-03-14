@@ -11,6 +11,7 @@ use std::time::Duration;
 use napi::bindgen_prelude::*;
 use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode, ErrorStrategy};
 use ringbuf::traits::Consumer;
+use webrtc_vad::{Vad, SampleRate as VadSampleRate, VadMode};
 
 pub mod vad; 
 pub mod microphone;
@@ -60,7 +61,7 @@ impl SystemAudioCapture {
     }
 
     #[napi]
-    pub fn start(&mut self, callback: JsFunction) -> napi::Result<()> {
+    pub fn start(&mut self, callback: JsFunction, on_speech_ended: Option<JsFunction>) -> napi::Result<()> {
         let tsfn: ThreadsafeFunction<Vec<i16>, ErrorStrategy::Fatal> = callback
             .create_threadsafe_function(0, |ctx| {
                 let vec: Vec<i16> = ctx.value;
@@ -70,6 +71,14 @@ impl SystemAudioCapture {
                 }
                 Ok(vec![pcm_bytes])
             })?;
+
+        // Optional speech-ended callback
+        let speech_ended_tsfn: Option<ThreadsafeFunction<bool, ErrorStrategy::Fatal>> = match on_speech_ended {
+            Some(f) => Some(f.create_threadsafe_function(0, |ctx| {
+                Ok(vec![ctx.value])
+            })?),
+            None => None,
+        };
 
         self.stop_signal.store(false, Ordering::SeqCst);
         let stop_signal = self.stop_signal.clone();
@@ -116,6 +125,16 @@ impl SystemAudioCapture {
                 SilenceSuppressionConfig::for_system_audio()
             );
 
+            // WebRTC VAD for voice vs noise discrimination (created in-thread because !Send)
+            let mut webrtc_vad = Vad::new_with_rate_and_mode(
+                VadSampleRate::Rate16kHz,
+                VadMode::VeryAggressive,
+            );
+
+            // Track whether VAD confirmed any real voice since last silence period.
+            // This prevents phantom speech_ended events from non-voice noise (Bug #1).
+            let mut vad_confirmed_voice = false;
+
             loop {
                 if stop_signal.load(Ordering::Relaxed) {
                     break;
@@ -139,9 +158,29 @@ impl SystemAudioCapture {
                 // Process frames with Silence Suppression
                 while frame_buffer.len() >= FRAME_SAMPLES {
                     let frame: Vec<i16> = frame_buffer.drain(0..FRAME_SAMPLES).collect();
-                    match suppressor.process(&frame) {
-                        FrameAction::Send(audio) => {
-                             tsfn.call(audio, ThreadsafeFunctionCallMode::NonBlocking);
+                    let (action, speech_just_ended) = suppressor.process(&frame);
+                    
+                    match action {
+                        FrameAction::Send(ref audio) => {
+                            // Check if this is a hangover frame (below threshold but in grace period)
+                            // Hangover frames should NOT be VAD-checked — they preserve word endings (Bug #4)
+                            let rms = audio.iter().map(|&s| (s as f64) * (s as f64)).sum::<f64>() / audio.len() as f64;
+                            let is_hangover = rms.sqrt() < suppressor.adaptive_threshold() as f64;
+                            
+                            if is_hangover {
+                                // Hangover frame: send as-is to preserve trailing audio
+                                tsfn.call(audio.clone(), ThreadsafeFunctionCallMode::NonBlocking);
+                            } else {
+                                // Active speech frame: WebRTC VAD checks if it's actual human voice
+                                let is_voice = webrtc_vad.is_voice_segment(audio).unwrap_or(true);
+                                if is_voice {
+                                    vad_confirmed_voice = true;
+                                    tsfn.call(audio.clone(), ThreadsafeFunctionCallMode::NonBlocking);
+                                } else {
+                                    // RMS was high but VAD says not voice (keyboard, cough, etc.)
+                                    tsfn.call(generate_silence_frame(FRAME_SAMPLES), ThreadsafeFunctionCallMode::NonBlocking);
+                                }
+                            }
                         },
                         FrameAction::SendSilence => {
                              tsfn.call(generate_silence_frame(FRAME_SAMPLES), ThreadsafeFunctionCallMode::NonBlocking);
@@ -149,6 +188,17 @@ impl SystemAudioCapture {
                         FrameAction::Suppress => {
                             // Do nothing (bandwidth saving)
                         }
+                    }
+
+                    // Fire speech_ended ONLY if VAD confirmed at least one real voice frame (Bug #1)
+                    if speech_just_ended && vad_confirmed_voice {
+                        if let Some(ref se_tsfn) = speech_ended_tsfn {
+                            se_tsfn.call(true, ThreadsafeFunctionCallMode::NonBlocking);
+                        }
+                        vad_confirmed_voice = false; // Reset for next speech segment
+                    } else if speech_just_ended {
+                        // Was noise, not voice — reset without firing callback
+                        vad_confirmed_voice = false;
                     }
                 }
                 
@@ -211,7 +261,7 @@ impl MicrophoneCapture {
     }
 
     #[napi]
-    pub fn start(&mut self, callback: JsFunction) -> napi::Result<()> {
+    pub fn start(&mut self, callback: JsFunction, on_speech_ended: Option<JsFunction>) -> napi::Result<()> {
         let tsfn: ThreadsafeFunction<Vec<i16>, ErrorStrategy::Fatal> = callback
             .create_threadsafe_function(0, |ctx| {
                 let vec: Vec<i16> = ctx.value;
@@ -221,6 +271,14 @@ impl MicrophoneCapture {
                 }
                 Ok(vec![pcm_bytes])
             })?;
+
+        // Optional speech-ended callback
+        let speech_ended_tsfn: Option<ThreadsafeFunction<bool, ErrorStrategy::Fatal>> = match on_speech_ended {
+            Some(f) => Some(f.create_threadsafe_function(0, |ctx| {
+                Ok(vec![ctx.value])
+            })?),
+            None => None,
+        };
 
         self.stop_signal.store(false, Ordering::SeqCst);
         let stop_signal = self.stop_signal.clone();
@@ -240,10 +298,18 @@ impl MicrophoneCapture {
             let mut frame_buffer: Vec<i16> = Vec::with_capacity(FRAME_SAMPLES * 4);
             let mut raw_batch: Vec<f32> = Vec::with_capacity(4096);
             
-            // Use microphone config (standard threshold)
             let mut suppressor = SilenceSuppressor::new(
                 SilenceSuppressionConfig::for_microphone()
             );
+
+            // WebRTC VAD for voice vs noise discrimination (created in-thread because !Send)
+            let mut webrtc_vad = Vad::new_with_rate_and_mode(
+                VadSampleRate::Rate16kHz,
+                VadMode::VeryAggressive,
+            );
+
+            // Track whether VAD confirmed any real voice since last silence period (Bug #1)
+            let mut vad_confirmed_voice = false;
 
             println!("[MicrophoneCapture] DSP thread started (suppression active)");
 
@@ -253,10 +319,8 @@ impl MicrophoneCapture {
                 }
                 
                 // 1. Drain ring buffer (lock-free)
-                let mut batch_count = 0;
                 while let Some(sample) = consumer.try_pop() {
                     raw_batch.push(sample);
-                    batch_count += 1;
                     if raw_batch.len() >= 480 {
                         break;
                     }
@@ -272,16 +336,42 @@ impl MicrophoneCapture {
                 // 3. Process frames with Silence Suppression
                 while frame_buffer.len() >= FRAME_SAMPLES {
                     let frame: Vec<i16> = frame_buffer.drain(0..FRAME_SAMPLES).collect();
-                    match suppressor.process(&frame) {
-                        FrameAction::Send(audio) => {
-                             tsfn.call(audio, ThreadsafeFunctionCallMode::NonBlocking);
+                    let (action, speech_just_ended) = suppressor.process(&frame);
+                    
+                    match action {
+                        FrameAction::Send(ref audio) => {
+                            // Hangover frame detection (Bug #4)
+                            let rms = audio.iter().map(|&s| (s as f64) * (s as f64)).sum::<f64>() / audio.len() as f64;
+                            let is_hangover = rms.sqrt() < suppressor.adaptive_threshold() as f64;
+
+                            if is_hangover {
+                                tsfn.call(audio.clone(), ThreadsafeFunctionCallMode::NonBlocking);
+                            } else {
+                                let is_voice = webrtc_vad.is_voice_segment(audio).unwrap_or(true);
+                                if is_voice {
+                                    vad_confirmed_voice = true;
+                                    tsfn.call(audio.clone(), ThreadsafeFunctionCallMode::NonBlocking);
+                                } else {
+                                    tsfn.call(generate_silence_frame(FRAME_SAMPLES), ThreadsafeFunctionCallMode::NonBlocking);
+                                }
+                            }
                         },
                         FrameAction::SendSilence => {
                              tsfn.call(generate_silence_frame(FRAME_SAMPLES), ThreadsafeFunctionCallMode::NonBlocking);
                         },
-                         FrameAction::Suppress => {
+                        FrameAction::Suppress => {
                             // Do nothing
                         }
+                    }
+
+                    // Fire speech_ended ONLY if VAD confirmed real voice (Bug #1)
+                    if speech_just_ended && vad_confirmed_voice {
+                        if let Some(ref se_tsfn) = speech_ended_tsfn {
+                            se_tsfn.call(true, ThreadsafeFunctionCallMode::NonBlocking);
+                        }
+                        vad_confirmed_voice = false;
+                    } else if speech_just_ended {
+                        vad_confirmed_voice = false;
                     }
                 }
                 

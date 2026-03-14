@@ -167,6 +167,7 @@ impl SpeakerInput {
         Ok(Self { cfg, filter })
     }
 
+    #[allow(dead_code)]
     pub fn sample_rate(&self) -> f64 {
         self.cfg.sample_rate() as f64
     }

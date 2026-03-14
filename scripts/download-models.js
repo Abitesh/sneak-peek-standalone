@@ -3,26 +3,28 @@ const path = require('path');
 const fs = require('fs');
 
 async function downloadModels() {
-    const modelOutDir = path.join(__dirname, '../resources/models/all-MiniLM-L6-v2');
+    const modelsDir = path.join(__dirname, '../resources/models');
     
     // Ensure the directory exists
-    if (!fs.existsSync(modelOutDir)) {
-        fs.mkdirSync(modelOutDir, { recursive: true });
+    if (!fs.existsSync(modelsDir)) {
+        fs.mkdirSync(modelsDir, { recursive: true });
     }
 
-    console.log('[download-models] Downloading Xenova/all-MiniLM-L6-v2...');
-
     // Let Transformers.js handle the download but specify the local directory cache
-    env.cacheDir = path.join(__dirname, '../resources/models');
+    env.cacheDir = modelsDir;
     
     try {
-        const pipe = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
-        console.log('[download-models] Download complete!');
-        
-        // transformers.js will have downloaded it into the `xenova/all-MiniLM-L6-v2` structure
-        // Let's actually use the specific script method provided by transformers.js or just pre-load it.
-        // Wait, the python/CLI `npx @xenova/transformers download all-MiniLM-L6-v2 --output ...` format is natively simpler maybe? 
-        // We'll leave this simple cache warming script to ensure files exist.
+        // 1. Embedding model (RAG)
+        console.log('[download-models] Downloading Xenova/all-MiniLM-L6-v2...');
+        await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+        console.log('[download-models] all-MiniLM-L6-v2 downloaded.');
+
+        // 2. Zero-shot classification model (Intent Classifier)
+        console.log('[download-models] Downloading Xenova/mobilebert-uncased-mnli...');
+        await pipeline('zero-shot-classification', 'Xenova/mobilebert-uncased-mnli');
+        console.log('[download-models] mobilebert-uncased-mnli downloaded.');
+
+        console.log('[download-models] All models downloaded successfully!');
     } catch (e) {
         console.error('[download-models] Error downloading model:', e);
         process.exit(1);
@@ -30,3 +32,4 @@ async function downloadModels() {
 }
 
 downloadModels();
+

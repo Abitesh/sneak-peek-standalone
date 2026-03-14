@@ -74,6 +74,9 @@ export class MicrophoneCapture extends EventEmitter {
                     }
                     this.emit('data', Buffer.from(chunk));
                 }
+            }, () => {
+                // Speech-ended callback from Rust SilenceSuppressor
+                this.emit('speech_ended');
             });
 
             this.isRecording = true;

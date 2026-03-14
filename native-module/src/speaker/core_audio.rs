@@ -1,23 +1,15 @@
 use anyhow::Result;
 use cidre::{arc, av, cat, cf, core_audio as ca, ns, os};
 use ringbuf::{traits::{Producer, Split}, HeapProd, HeapRb, HeapCons};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::{Arc, Mutex};
-use std::task::{Waker};
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 use ca::aggregate_device_keys as agg_keys;
-
-struct WakerState {
-    waker: Option<Waker>,
-    has_data: bool,
-}
 
 struct Ctx {
     format: arc::R<av::AudioFormat>,
     producer: HeapProd<f32>,
-    waker_state: Arc<Mutex<WakerState>>,
+    channels: u32,
     current_sample_rate: Arc<AtomicU32>,
-    consecutive_drops: Arc<AtomicU32>,
-    should_terminate: Arc<AtomicBool>,
 }
 
 pub struct SpeakerInput {
@@ -49,7 +41,6 @@ impl SpeakerInput {
         );
 
         // Create global tap (mono for STT processing)
-        // NOTE: Using mono tap. If audio quality issues persist, revisit this.
         let tap_desc = ca::TapDesc::with_mono_global_tap_excluding_processes(&ns::Array::new());
         let tap = tap_desc.create_process_tap()?;
         println!("[CoreAudioTap] Tap created: {:?}", tap.uid());
@@ -102,9 +93,14 @@ impl SpeakerInput {
             _output_time: &cat::AudioTimeStamp,
             ctx: Option<&mut Ctx>,
         ) -> os::Status {
+            // -------------------------------------------------------
+            // This runs on a REAL-TIME CoreAudio thread.
+            // Rules: NO locks, NO allocations, NO syscalls.
+            // Only lock-free ring buffer push + atomics.
+            // -------------------------------------------------------
             let ctx = ctx.unwrap();
 
-            // Update sample rate if needed
+            // Update sample rate atomically (lock-free)
             ctx.current_sample_rate.store(
                 device
                     .actual_sample_rate()
@@ -112,12 +108,14 @@ impl SpeakerInput {
                 Ordering::Release,
             );
 
+            let channels = ctx.channels;
+
             // Extract audio data
             if let Some(view) =
                 av::AudioPcmBuf::with_buf_list_no_copy(&ctx.format, input_data, None)
             {
                 if let Some(data) = view.data_f32_at(0) {
-                     process_audio_data(ctx, data);
+                     push_audio(ctx, data, channels);
                 }
             } else if ctx.format.common_format() == av::audio::CommonFormat::PcmF32 {
                 let first_buffer = &input_data.buffers[0];
@@ -128,7 +126,7 @@ impl SpeakerInput {
                     let data = unsafe {
                         std::slice::from_raw_parts(first_buffer.data as *const f32, float_count)
                     };
-                    process_audio_data(ctx, data);
+                    push_audio(ctx, data, channels);
                 }
             }
 
@@ -144,29 +142,24 @@ impl SpeakerInput {
     }
 
     pub fn stream(self) -> SpeakerStream {
-         let asbd = self.tap.asbd().expect("Failed to get ASBD from tap");
+        let asbd = self.tap.asbd().expect("Failed to get ASBD from tap");
         
         let format = av::AudioFormat::with_asbd(&asbd).unwrap();
-        println!("[CoreAudioTap] Format: {}Hz, {}ch", asbd.sample_rate, asbd.channels_per_frame);
+        let channels = asbd.channels_per_frame;
+        println!("[CoreAudioTap] Format: {}Hz, {}ch", asbd.sample_rate, channels);
 
-        let buffer_size = 1024 * 128; // ~340ms at 48k
+        // Use the standard ring buffer size from audio_config
+        let buffer_size = 1024 * 128;
         let rb = HeapRb::<f32>::new(buffer_size);
         let (producer, consumer) = rb.split();
-
-        let waker_state = Arc::new(Mutex::new(WakerState {
-            waker: None,
-            has_data: false,
-        }));
 
         let current_sample_rate = Arc::new(AtomicU32::new(asbd.sample_rate as u32));
 
         let mut ctx = Box::new(Ctx {
             format,
             producer,
-            waker_state: waker_state.clone(),
+            channels,
             current_sample_rate: current_sample_rate.clone(),
-            consecutive_drops: Arc::new(AtomicU32::new(0)),
-            should_terminate: Arc::new(AtomicBool::new(false)),
         });
 
         // Start!
@@ -182,55 +175,37 @@ impl SpeakerInput {
     }
 }
 
-fn process_audio_data(ctx: &mut Ctx, data: &[f32]) {
-    // Debug Logging for signal analysis
-    static mut LOG_COUNTER: usize = 0;
-    unsafe {
-        LOG_COUNTER += 1;
-        if LOG_COUNTER % 100 == 0 { // Log every ~100th callback (approx every 1-2 sec)
-            let mut min = 0.0;
-            let mut max = 0.0;
-            let mut sum_sq = 0.0;
-            for &s in data {
-                if s < min { min = s; }
-                if s > max { max = s; }
-                sum_sq += s * s;
-            }
-            let rms = (sum_sq / data.len() as f32).sqrt();
-            println!("[CoreAudioTap] Chunk: {} samples, Min: {:.4}, Max: {:.4}, RMS: {:.4}", data.len(), min, max, rms);
-        }
-    }
-
-    // Processing Logic
-    let buffer_size = data.len();
-    let pushed = ctx.producer.push_slice(data);
-
-    if pushed < buffer_size {
-        let consecutive = ctx.consecutive_drops.fetch_add(1, Ordering::AcqRel) + 1;
-        if consecutive == 25 {
-            eprintln!("Warning: Audio buffer experiencing drops - system may be overloaded");
-        }
-        if consecutive > 50 {
-            eprintln!("Critical: Audio buffer overflow - capture stopping");
-            ctx.should_terminate.store(true, Ordering::Release);
-            return;
-        }
+/// Push audio data to the ring buffer, downmixing to mono if needed.
+/// 
+/// SAFETY: This is called from a real-time CoreAudio thread.
+/// It MUST NOT lock, allocate, or make syscalls.
+#[inline(always)]
+fn push_audio(ctx: &mut Ctx, data: &[f32], channels: u32) {
+    if channels <= 1 {
+        // Already mono — push directly (lock-free ring buffer write)
+        let _pushed = ctx.producer.push_slice(data);
+        // If _pushed < data.len(), the ring buffer was full.
+        // This means the consumer isn't draining fast enough.
+        // We silently drop the overflow — this is the correct real-time
+        // behavior. The alternative (blocking) would cause CoreAudio
+        // to drop the ENTIRE callback, which is worse.
     } else {
-        ctx.consecutive_drops.store(0, Ordering::Release);
-    }
-
-    let should_wake = {
-        let mut waker_state = ctx.waker_state.lock().unwrap();
-        if !waker_state.has_data {
-            waker_state.has_data = true;
-            waker_state.waker.take()
-        } else {
-            None
+        // Interleaved stereo (or more): downmix to mono in-place.
+        // For N channels interleaved as [L R L R ...], average each frame.
+        let ch = channels as usize;
+        let frame_count = data.len() / ch;
+        // We can't allocate here (RT thread), so push sample-by-sample.
+        // ringbuf's push() is still O(1) lock-free.
+        for i in 0..frame_count {
+            let base = i * ch;
+            let mut sum: f32 = 0.0;
+            for c in 0..ch {
+                sum += data[base + c];
+            }
+            let mono = sum / channels as f32;
+            // push returns None if buffer is full — we accept the drop
+            let _ = ctx.producer.try_push(mono);
         }
-    };
-
-    if let Some(waker) = should_wake {
-        waker.wake();
     }
 }
 
@@ -252,12 +227,9 @@ impl SpeakerStream {
     }
 }
 
-
-
 impl Drop for SpeakerStream {
     fn drop(&mut self) {
-        self._ctx.should_terminate.store(true, Ordering::Release);
+        // Device is stopped automatically when _device is dropped
+        // (ca::hardware::StartedDevice implements Drop)
     }
 }
-
-

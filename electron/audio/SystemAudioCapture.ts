@@ -73,6 +73,9 @@ export class SystemAudioCapture extends EventEmitter {
                     }
                     this.emit('data', buffer);
                 }
+            }, () => {
+                // Speech-ended callback from Rust SilenceSuppressor
+                this.emit('speech_ended');
             });
 
             this.isRecording = true;

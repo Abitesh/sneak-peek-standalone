@@ -275,7 +275,7 @@ export class IntelligenceEngine extends EventEmitter {
             );
 
             const lastInterviewerTurn = this.session.getLastInterviewerTurn();
-            const intentResult = classifyIntent(
+            const intentResult = await classifyIntent(
                 lastInterviewerTurn,
                 preparedTranscript,
                 this.session.getAssistantResponseHistory().length

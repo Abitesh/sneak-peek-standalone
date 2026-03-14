@@ -111,8 +111,9 @@ const PROVIDER_CONFIGS: Record<RestSttProvider, ProviderConfigFactory> = {
 // 16kHz * 2 bytes/sample * 1 channel * 0.5 seconds = 16000 bytes
 const MIN_BUFFER_BYTES = 16000;
 
-// Upload interval in milliseconds
-const UPLOAD_INTERVAL_MS = 3000;
+// Safety-net upload interval (ms). Primary flush is triggered by speech_ended events.
+// This only fires if speech_ended somehow doesn't trigger (e.g. streaming providers).
+const UPLOAD_INTERVAL_MS = 5000;
 
 // Silence threshold - if RMS is below this, skip the upload
 const SILENCE_RMS_THRESHOLD = 50;
@@ -128,6 +129,8 @@ export class RestSTT extends EventEmitter {
     private uploadTimer: NodeJS.Timeout | null = null;
     private isActive = false;
     private isUploading = false;
+    private flushPending = false;  // Bug #2 fix: queue flush when upload in progress
+    private speechEndedDebounce: NodeJS.Timeout | null = null;  // Bug #3 fix
 
     // Audio config (must match SystemAudioCapture output)
     private sampleRate = 16000;
@@ -218,6 +221,11 @@ export class RestSTT extends EventEmitter {
             this.uploadTimer = null;
         }
 
+        if (this.speechEndedDebounce) {
+            clearTimeout(this.speechEndedDebounce);
+            this.speechEndedDebounce = null;
+        }
+
         // Flush remaining audio
         this.flushAndUpload();
     }
@@ -232,12 +240,45 @@ export class RestSTT extends EventEmitter {
     }
 
     /**
+     * Called when the native SilenceSuppressor detects speech has ended.
+     * Debounced at 200ms to avoid flooding on rapid speech-pause-speech patterns (Bug #3).
+     */
+    public notifySpeechEnded(): void {
+        if (!this.isActive) return;
+
+        // Clear any pending debounce
+        if (this.speechEndedDebounce) {
+            clearTimeout(this.speechEndedDebounce);
+        }
+
+        // Debounce: wait 200ms before flushing to batch rapid transitions
+        this.speechEndedDebounce = setTimeout(() => {
+            this.speechEndedDebounce = null;
+            console.log(`[RestSTT] Speech ended detected — flushing buffer immediately`);
+            this.flushAndUpload();
+        }, 200);
+    }
+
+    /**
      * Concatenate buffered chunks, add WAV header, and upload to REST API
      */
     private async flushAndUpload(): Promise<void> {
-        // Skip if no data or already uploading
+        // Skip if no data
         if (this.chunks.length === 0 || this.totalBufferedBytes < MIN_BUFFER_BYTES) return;
-        if (this.isUploading) return;
+
+        // Bug #2 fix: if currently uploading, queue a flush for when it completes
+        if (this.isUploading) {
+            this.flushPending = true;
+            return;
+        }
+
+        // Reset the safety-net timer to prevent double-sends
+        if (this.uploadTimer) {
+            clearInterval(this.uploadTimer);
+            this.uploadTimer = setInterval(() => {
+                this.flushAndUpload();
+            }, UPLOAD_INTERVAL_MS);
+        }
 
         // Grab current buffer and reset
         const currentChunks = this.chunks;
@@ -277,6 +318,12 @@ export class RestSTT extends EventEmitter {
             this.emit('error', err instanceof Error ? err : new Error(String(err)));
         } finally {
             this.isUploading = false;
+
+            // Bug #2 fix: if a flush was requested while we were uploading, process it now
+            if (this.flushPending) {
+                this.flushPending = false;
+                this.flushAndUpload();
+            }
         }
     }
 

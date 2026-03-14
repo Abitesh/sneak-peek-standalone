@@ -80,6 +80,7 @@ import { SonioxStreamingSTT } from "./audio/SonioxStreamingSTT"
 import { ThemeManager } from "./ThemeManager"
 import { RAGManager } from "./rag/RAGManager"
 import { DatabaseManager } from "./db/DatabaseManager"
+import { warmupIntentClassifier } from "./llm"
 
 /** Unified type for all STT providers with optional extended capabilities */
 type STTProvider = (GoogleSTT | RestSTT | DeepgramStreamingSTT | SonioxStreamingSTT) & {
@@ -229,6 +230,9 @@ export class AppState {
 
     this.setupIntelligenceEvents()
 
+    // Pre-warm the zero-shot intent classifier in background
+    warmupIntentClassifier();
+
     // Setup Ollama IPC
     this.setupOllamaIpcHandlers()
 
@@ -267,7 +271,7 @@ export class AppState {
            const { CredentialsManager } = require('./services/CredentialsManager');
            const cm = CredentialsManager.getInstance();
            this.ragManager.initializeEmbeddings({
-              openaiKey: cm.getOpenAiApiKey() || process.env.OPENAI_API_KEY || undefined,
+              openaiKey: cm.getOpenaiApiKey() || process.env.OPENAI_API_KEY || undefined,
               geminiKey: cm.getGeminiApiKey() || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || undefined,
               ollamaUrl: process.env.OLLAMA_URL || "http://localhost:11434"
            });
@@ -286,7 +290,7 @@ export class AppState {
       if (sqliteDb) {
         const { CredentialsManager } = require('./services/CredentialsManager');
         const cm = CredentialsManager.getInstance();
-        const openaiKey = cm.getOpenAiApiKey() || process.env.OPENAI_API_KEY;
+        const openaiKey = cm.getOpenaiApiKey() || process.env.OPENAI_API_KEY;
         const geminiKey = cm.getGeminiApiKey() || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
         
         this.ragManager = new RAGManager({ 
@@ -633,6 +637,9 @@ export class AppState {
         this.systemAudioCapture.on('data', (chunk: Buffer) => {
           this.googleSTT?.write(chunk);
         });
+        this.systemAudioCapture.on('speech_ended', () => {
+          (this.googleSTT as any)?.notifySpeechEnded?.();
+        });
         this.systemAudioCapture.on('error', (err: Error) => {
           console.error('[Main] SystemAudioCapture Error:', err);
         });
@@ -640,9 +647,11 @@ export class AppState {
 
       if (!this.microphoneCapture) {
         this.microphoneCapture = new MicrophoneCapture();
-        // Wire Capture -> STT
         this.microphoneCapture.on('data', (chunk: Buffer) => {
           this.googleSTT_User?.write(chunk);
+        });
+        this.microphoneCapture.on('speech_ended', () => {
+          (this.googleSTT_User as any)?.notifySpeechEnded?.();
         });
         this.microphoneCapture.on('error', (err: Error) => {
           console.error('[Main] MicrophoneCapture Error:', err);
@@ -700,6 +709,9 @@ export class AppState {
         // console.log('[Main] SysAudio chunk', chunk.length);
         this.googleSTT?.write(chunk);
       });
+      this.systemAudioCapture.on('speech_ended', () => {
+        (this.googleSTT as any)?.notifySpeechEnded?.();
+      });
       this.systemAudioCapture.on('error', (err: Error) => {
         console.error('[Main] SystemAudioCapture Error:', err);
       });
@@ -714,6 +726,9 @@ export class AppState {
 
         this.systemAudioCapture.on('data', (chunk: Buffer) => {
           this.googleSTT?.write(chunk);
+        });
+        this.systemAudioCapture.on('speech_ended', () => {
+          (this.googleSTT as any)?.notifySpeechEnded?.();
         });
         this.systemAudioCapture.on('error', (err: Error) => {
           console.error('[Main] SystemAudioCapture (Default) Error:', err);
@@ -740,6 +755,9 @@ export class AppState {
         // console.log('[Main] Mic chunk', chunk.length);
         this.googleSTT_User?.write(chunk);
       });
+      this.microphoneCapture.on('speech_ended', () => {
+        (this.googleSTT_User as any)?.notifySpeechEnded?.();
+      });
       this.microphoneCapture.on('error', (err: Error) => {
         console.error('[Main] MicrophoneCapture Error:', err);
       });
@@ -754,6 +772,9 @@ export class AppState {
 
         this.microphoneCapture.on('data', (chunk: Buffer) => {
           this.googleSTT_User?.write(chunk);
+        });
+        this.microphoneCapture.on('speech_ended', () => {
+          (this.googleSTT_User as any)?.notifySpeechEnded?.();
         });
         this.microphoneCapture.on('error', (err: Error) => {
           console.error('[Main] MicrophoneCapture (Default) Error:', err);

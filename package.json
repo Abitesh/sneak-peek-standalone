@@ -47,6 +47,10 @@
       {
         "from": "resources/models/xenova/all-MiniLM-L6-v2",
         "to": "models/all-MiniLM-L6-v2"
+      },
+      {
+        "from": "resources/models/xenova/mobilebert-uncased-mnli",
+        "to": "models/mobilebert-uncased-mnli"
       }
     ],
     "mac": {

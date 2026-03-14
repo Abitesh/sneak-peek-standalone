@@ -22,7 +22,8 @@ export {
 export type { TemporalContext, AssistantResponse } from "./TemporalContextBuilder";
 export {
     classifyIntent,
-    getAnswerShapeGuidance
+    getAnswerShapeGuidance,
+    warmupIntentClassifier
 } from "./IntentClassifier";
 export type { ConversationIntent, IntentResult } from "./IntentClassifier";
 export { MODE_CONFIGS } from "./types";
