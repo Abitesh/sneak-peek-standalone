@@ -226,12 +226,12 @@ impl MicrophoneCapture {
         self.stop_signal.store(false, Ordering::SeqCst);
         let stop_signal = self.stop_signal.clone();
         
-        let mut input_ref = self.input.take()
+        let input_ref = self.input.as_mut()
             .ok_or_else(|| napi::Error::from_reason("Input missing"))?;
         
         input_ref.play().map_err(|e| napi::Error::from_reason(format!("{}", e)))?;
         
-        let initial_sample_rate = input_ref.sample_rate();
+        let _initial_sample_rate = input_ref.sample_rate();
         let mut consumer = input_ref.take_consumer()
             .ok_or_else(|| napi::Error::from_reason("Failed to get consumer"))?;
 
