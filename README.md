@@ -88,7 +88,7 @@ _The privacy-first AI assistant for meetings._
   <a href="https://github.com/evinjohnn/natively-cluely-ai-assistant/releases/latest">
     <img src="https://img.shields.io/badge/Download-macOS-000000?style=for-the-badge&logo=apple&logoColor=white" />
   </a>
-  <a href="https://github.com/evinjohnn/natively-cluely-ai-assistant/releases/tag/v2.0.3">
+  <a href="https://github.com/evinjohnn/natively-cluely-ai-assistant/releases/tag/v2.0.4">
     <img src="https://img.shields.io/badge/Download-Windows-0078D4?style=for-the-badge&logo=windows&logoColor=white" />
   </a>
 </p>
@@ -123,13 +123,13 @@ _The privacy-first AI assistant for meetings._
 >     2. Install the natively.dmg
 >     3. Open Terminal and run: `xattr -cr /Applications/Natively.app`
 
-### What's New in v2.0.3
+### What's New in v2.0.4
 
-- **Dynamic AI Model Selection**: Your preferred models synced from providers (like OpenAI, Anthropic, Google) now automatically appear across the entire app.
-- **Multimodal Resilience**: Added a "Smart Dynamic Fallback" using Groq Llama 4 Scout. If default vision models fail during screen analysis, Natively instantly reroutes the image to ensure uninterrupted performance.
-- **Multiple Screenshot Support**: The interface can now handle and process multiple attached screenshots simultaneously.
-- **Improved Embeddings Architecture**: Migrated to a completely new, more robust local embedding architecture for semantic search.
-- **Settings UX & Fixes**: API keys now auto-save after 5 seconds, Claude context limitations are fixed, and UI state syncs instantly without reloads.
+- **Two-Stage Silence Processing**: Replaced basic RMS noise gating with a two-stage pipeline combining an adaptive RMS threshold and WebRTC Machine Learning VAD. Rejects typing, fan noise, and non-speech sounds before they bill STT APIs.
+- **Zero-Copy ABI Transfers**: Transitioned the `ThreadsafeFunction` bridging to direct `napi::Buffer` (Uint8Array) allocations, completely eliminating V8 garbage collection pressure during continuous capture.
+- **Latency & Responsiveness Tuning**: Stripped redundant TS debouncing, slashed `MIN_BUFFER_BYTES`, and reduced native hangover, achieving a ~300ms reduction in end-to-end transcription latency.
+- **Sliding-Window RAG**: Implemented a 50-token semantic overlap in `SemanticChunker.ts` to prevent conversational context loss across chunk boundaries.
+- **Critical Bug Fixes**: Fixed lying hardware sample rates, resolved the "Input missing" silent crash bug on microphone restart, integrated `f64` stepping for 44.1kHz external USB microphones, and restored the 10s continuous speech backstop for REST APIs.
 
 ---
 
