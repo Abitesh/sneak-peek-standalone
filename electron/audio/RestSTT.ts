@@ -108,12 +108,14 @@ const PROVIDER_CONFIGS: Record<RestSttProvider, ProviderConfigFactory> = {
 };
 
 // Minimum buffer size before sending (avoid sending tiny fragments)
-// 16kHz * 2 bytes/sample * 1 channel * 0.5 seconds = 16000 bytes
-const MIN_BUFFER_BYTES = 16000;
+// 16kHz * 2 bytes/sample * 1 channel * 0.125 seconds = 4000 bytes
+// Lowered from 16000 to allow short command utterances ("Yes", "Stop") to flush instantly.
+const MIN_BUFFER_BYTES = 4000;
 
 // Safety-net upload interval (ms). Primary flush is triggered by speech_ended events.
-// This only fires if speech_ended somehow doesn't trigger (e.g. streaming providers).
-const UPLOAD_INTERVAL_MS = 5000;
+// This fires as a backstop if someone talks continuously for >10s without any pause,
+// preventing unbounded buffer growth and Whisper API timeouts.
+const SAFETY_NET_INTERVAL_MS = 10000;
 
 // Silence threshold - if RMS is below this, skip the upload
 const SILENCE_RMS_THRESHOLD = 50;
@@ -126,11 +128,10 @@ export class RestSTT extends EventEmitter {
 
     private chunks: Buffer[] = [];
     private totalBufferedBytes = 0;
-    private uploadTimer: NodeJS.Timeout | null = null;
+    private safetyNetTimer: NodeJS.Timeout | null = null;
     private isActive = false;
     private isUploading = false;
     private flushPending = false;  // Bug #2 fix: queue flush when upload in progress
-    private speechEndedDebounce: NodeJS.Timeout | null = null;  // Bug #3 fix
 
     // Audio config (must match SystemAudioCapture output)
     private sampleRate = 16000;
@@ -202,9 +203,12 @@ export class RestSTT extends EventEmitter {
         this.chunks = [];
         this.totalBufferedBytes = 0;
 
-        this.uploadTimer = setInterval(() => {
+        // Safety-net timer: flush even during continuous speech to prevent
+        // unbounded buffer growth and Whisper API file-size/timeout errors.
+        // Primary flush is driven by Rust speech_ended events.
+        this.safetyNetTimer = setInterval(() => {
             this.flushAndUpload();
-        }, UPLOAD_INTERVAL_MS);
+        }, SAFETY_NET_INTERVAL_MS);
     }
 
     /**
@@ -216,14 +220,9 @@ export class RestSTT extends EventEmitter {
         console.log(`[RestSTT] Stopping (${this.provider})...`);
         this.isActive = false;
 
-        if (this.uploadTimer) {
-            clearInterval(this.uploadTimer);
-            this.uploadTimer = null;
-        }
-
-        if (this.speechEndedDebounce) {
-            clearTimeout(this.speechEndedDebounce);
-            this.speechEndedDebounce = null;
+        if (this.safetyNetTimer) {
+            clearInterval(this.safetyNetTimer);
+            this.safetyNetTimer = null;
         }
 
         // Flush remaining audio
@@ -241,22 +240,14 @@ export class RestSTT extends EventEmitter {
 
     /**
      * Called when the native SilenceSuppressor detects speech has ended.
-     * Debounced at 200ms to avoid flooding on rapid speech-pause-speech patterns (Bug #3).
+     * The internal Rust engine already applies a 150-200ms VAD hangover to avoid
+     * word-breaks, so we flush immediately without adding redundant TS debouncing.
      */
     public notifySpeechEnded(): void {
         if (!this.isActive) return;
 
-        // Clear any pending debounce
-        if (this.speechEndedDebounce) {
-            clearTimeout(this.speechEndedDebounce);
-        }
-
-        // Debounce: wait 200ms before flushing to batch rapid transitions
-        this.speechEndedDebounce = setTimeout(() => {
-            this.speechEndedDebounce = null;
-            console.log(`[RestSTT] Speech ended detected — flushing buffer immediately`);
-            this.flushAndUpload();
-        }, 200);
+        console.log(`[RestSTT] Speech ended detected by native VAD — flushing buffer immediately`);
+        this.flushAndUpload();
     }
 
     /**
@@ -272,12 +263,12 @@ export class RestSTT extends EventEmitter {
             return;
         }
 
-        // Reset the safety-net timer to prevent double-sends
-        if (this.uploadTimer) {
-            clearInterval(this.uploadTimer);
-            this.uploadTimer = setInterval(() => {
+        // Reset safety-net timer to prevent double-flush
+        if (this.safetyNetTimer) {
+            clearInterval(this.safetyNetTimer);
+            this.safetyNetTimer = setInterval(() => {
                 this.flushAndUpload();
-            }, UPLOAD_INTERVAL_MS);
+            }, SAFETY_NET_INTERVAL_MS);
         }
 
         // Grab current buffer and reset

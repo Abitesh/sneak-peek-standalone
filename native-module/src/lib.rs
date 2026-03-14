@@ -4,31 +4,48 @@
 extern crate napi_derive;
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::thread;
 use std::time::Duration;
 
 use napi::bindgen_prelude::*;
 use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode, ErrorStrategy};
 use ringbuf::traits::Consumer;
-use std::fs::OpenOptions;
-use std::io::Write;
 
 pub mod audio_config;
-pub mod vad; 
 pub mod microphone;
 pub mod speaker;
-use crate::audio_config::{FRAME_SAMPLES, DSP_POLL_MS};
+pub mod silence_suppression;
+
+use crate::audio_config::DSP_POLL_MS;
+use crate::silence_suppression::{SilenceSuppressor, SilenceSuppressionConfig, FrameAction};
 
 // ============================================================================
-// SYSTEM AUDIO CAPTURE (ScreenCaptureKit on macOS)
+// HELPERS — i16 slice → zero-copy LE bytes
+// ============================================================================
+
+/// Convert an i16 slice to little-endian bytes.
+/// Returns a Vec<u8> suitable for wrapping in napi::Buffer.
+#[inline]
+fn i16_slice_to_le_bytes(samples: &[i16]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(samples.len() * 2);
+    for &s in samples {
+        bytes.extend_from_slice(&s.to_le_bytes());
+    }
+    bytes
+}
+
+// ============================================================================
+// SYSTEM AUDIO CAPTURE (CoreAudio Tap / ScreenCaptureKit on macOS)
 // ============================================================================
 
 #[napi]
 pub struct SystemAudioCapture {
     stop_signal: Arc<AtomicBool>,
     capture_thread: Option<thread::JoinHandle<()>>,
-    sample_rate: u32,
+    /// Shared atomic sample rate — updated by the background thread once the
+    /// native device is initialized. Callers always get the real hardware rate.
+    sample_rate: Arc<AtomicU32>,
     device_id: Option<String>,
 }
 
@@ -41,26 +58,24 @@ impl SystemAudioCapture {
         Ok(SystemAudioCapture {
             stop_signal: Arc::new(AtomicBool::new(false)),
             capture_thread: None,
-            sample_rate: 16000,
+            // Default to 48000 until the background thread reports the real rate.
+            // 48kHz is the standard macOS CoreAudio rate.
+            sample_rate: Arc::new(AtomicU32::new(48000)),
             device_id,
         })
     }
 
     #[napi]
     pub fn get_sample_rate(&self) -> u32 {
-        self.sample_rate
+        self.sample_rate.load(Ordering::Acquire)
     }
 
     #[napi]
     pub fn start(&mut self, callback: JsFunction, on_speech_ended: Option<JsFunction>) -> napi::Result<()> {
-        let tsfn: ThreadsafeFunction<Vec<i16>, ErrorStrategy::Fatal> = callback
+        // Zero-copy: TSFN sends Buffer (Uint8Array) directly — no V8 Array allocation
+        let tsfn: ThreadsafeFunction<Buffer, ErrorStrategy::Fatal> = callback
             .create_threadsafe_function(0, |ctx| {
-                let vec: Vec<i16> = ctx.value;
-                let mut pcm_bytes = Vec::with_capacity(vec.len() * 2);
-                for sample in vec {
-                    pcm_bytes.extend_from_slice(&sample.to_le_bytes());
-                }
-                Ok(vec![pcm_bytes])
+                Ok(vec![ctx.value])
             })?;
 
         // Optional speech-ended callback
@@ -74,10 +89,10 @@ impl SystemAudioCapture {
         self.stop_signal.store(false, Ordering::SeqCst);
         let stop_signal = self.stop_signal.clone();
         let device_id = self.device_id.take();
+        let sample_rate_shared = self.sample_rate.clone();
         
         // ★ ALL init + DSP runs in background thread — start() returns INSTANTLY
         // This prevents the 5-7 second main-thread block from SCK initialization.
-        // GCD completion handlers in SpeakerInput::new() work from background threads.
         self.capture_thread = Some(thread::spawn(move || {
             // 1. SCK Init (takes 5-7 seconds — runs OFF main thread)
             println!("[SystemAudioCapture] Background init starting...");
@@ -104,11 +119,20 @@ impl SystemAudioCapture {
                 }
             };
             
-            let initial_sample_rate = stream.sample_rate();
-            println!("[SystemAudioCapture] Background init complete. Initial Rate: {}Hz. DSP starting.", initial_sample_rate);
+            let native_rate = stream.sample_rate();
+            // Publish the real native rate so JS can read it via get_sample_rate()
+            sample_rate_shared.store(native_rate, Ordering::Release);
+            println!("[SystemAudioCapture] Background init complete. Initial Rate: {}Hz. DSP starting.", native_rate);
 
-            // 2. DSP loop with raw audio scaling (no resampling)
-            let mut frame_buffer: Vec<i16> = Vec::with_capacity(FRAME_SAMPLES * 4);
+            // 2. DSP loop with silence suppression + WebRTC VAD
+            let mut suppressor = SilenceSuppressor::new(SilenceSuppressionConfig {
+                native_sample_rate: native_rate,
+                ..SilenceSuppressionConfig::for_system_audio()
+            });
+
+            // 20ms chunks at native rate (e.g. 960 samples at 48kHz)
+            let chunk_size = (native_rate as usize / 1000) * 20;
+            let mut frame_buffer: Vec<i16> = Vec::with_capacity(chunk_size * 4);
             let mut raw_batch: Vec<f32> = Vec::with_capacity(4096);
 
             loop {
@@ -121,7 +145,7 @@ impl SystemAudioCapture {
                     raw_batch.push(sample);
                 }
                 
-                // Convert f32 -> i16 at Native sample rate
+                // Convert f32 -> i16 at native sample rate
                 if !raw_batch.is_empty() {
                     for &f in &raw_batch {
                         let scaled = (f * 32767.0).clamp(-32768.0, 32767.0);
@@ -130,21 +154,33 @@ impl SystemAudioCapture {
                     raw_batch.clear();
                 }
 
-                // Send chunks of exactly 4000 samples (~83ms at 48kHz). Google STT recommends ~100ms chunks.
-                let chunk_size = 4000;
+                // Process in 20ms chunks through the two-stage gate
                 while frame_buffer.len() >= chunk_size {
                     let frame: Vec<i16> = frame_buffer.drain(0..chunk_size).collect();
                     
-                    // DEBUG: Write to file
-                    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("/tmp/natively_stt_debug_rust.pcm") {
-                        let mut bytes = Vec::with_capacity(frame.len() * 2);
-                        for &sample in &frame {
-                            bytes.extend_from_slice(&sample.to_le_bytes());
+                    let (action, speech_ended) = suppressor.process(&frame);
+
+                    match action {
+                        FrameAction::Send(data) => {
+                            let bytes = i16_slice_to_le_bytes(&data);
+                            tsfn.call(Buffer::from(bytes), ThreadsafeFunctionCallMode::NonBlocking);
                         }
-                        let _ = file.write_all(&bytes);
+                        FrameAction::SendSilence => {
+                            // Send zero-filled buffer to keep streaming APIs alive
+                            let silence = vec![0u8; chunk_size * 2];
+                            tsfn.call(Buffer::from(silence), ThreadsafeFunctionCallMode::NonBlocking);
+                        }
+                        FrameAction::Suppress => {
+                            // Do nothing — bandwidth saving
+                        }
                     }
 
-                    tsfn.call(frame, ThreadsafeFunctionCallMode::NonBlocking);
+                    // Fire speech_ended callback on the exact transition frame
+                    if speech_ended {
+                        if let Some(ref se_tsfn) = speech_ended_tsfn {
+                            se_tsfn.call(true, ThreadsafeFunctionCallMode::NonBlocking);
+                        }
+                    }
                 }
                 
                 // Keep the sleep small so we quickly read the ring buffer
@@ -169,13 +205,21 @@ impl SystemAudioCapture {
 
 // ============================================================================
 // MICROPHONE CAPTURE (CPAL)
+//
+// Design: The MicrophoneStream (CPAL handle) is recreated on every start()
+// call. This guarantees the ring buffer consumer is always fresh, allowing
+// seamless stop→start restart cycles (e.g. between meetings).
 // ============================================================================
 
 #[napi]
 pub struct MicrophoneCapture {
     stop_signal: Arc<AtomicBool>,
     capture_thread: Option<thread::JoinHandle<()>>,
-    sample_rate: u32,
+    /// Shared atomic sample rate — updated once the CPAL device is opened.
+    sample_rate: Arc<AtomicU32>,
+    /// Stores the requested device ID for recreation on restart.
+    device_id: Option<String>,
+    /// Holds the live CPAL stream. Recreated on each start().
     input: Option<microphone::MicrophoneStream>,
 }
 
@@ -183,36 +227,36 @@ pub struct MicrophoneCapture {
 impl MicrophoneCapture {
     #[napi(constructor)]
     pub fn new(device_id: Option<String>) -> napi::Result<Self> {
-        let input = match microphone::MicrophoneStream::new(device_id) {
+        // Eagerly create the stream to detect device errors early and read the
+        // native sample rate.
+        let input = match microphone::MicrophoneStream::new(device_id.clone()) {
             Ok(i) => i,
             Err(e) => return Err(napi::Error::from_reason(format!("Failed: {}", e))),
         };
         
-        let sample_rate = 16000;
+        let native_rate = input.sample_rate();
+        println!("[MicrophoneCapture] Initialized. Device: {:?}, Rate: {}Hz", device_id, native_rate);
 
         Ok(MicrophoneCapture {
             stop_signal: Arc::new(AtomicBool::new(false)),
             capture_thread: None,
-            sample_rate,
+            sample_rate: Arc::new(AtomicU32::new(native_rate)),
+            device_id,
             input: Some(input),
         })
     }
 
     #[napi]
     pub fn get_sample_rate(&self) -> u32 {
-        self.sample_rate
+        self.sample_rate.load(Ordering::Acquire)
     }
 
     #[napi]
     pub fn start(&mut self, callback: JsFunction, on_speech_ended: Option<JsFunction>) -> napi::Result<()> {
-        let tsfn: ThreadsafeFunction<Vec<i16>, ErrorStrategy::Fatal> = callback
+        // Zero-copy: TSFN sends Buffer (Uint8Array) directly
+        let tsfn: ThreadsafeFunction<Buffer, ErrorStrategy::Fatal> = callback
             .create_threadsafe_function(0, |ctx| {
-                let vec: Vec<i16> = ctx.value;
-                let mut pcm_bytes = Vec::with_capacity(vec.len() * 2);
-                for sample in vec {
-                    pcm_bytes.extend_from_slice(&sample.to_le_bytes());
-                }
-                Ok(vec![pcm_bytes])
+                Ok(vec![ctx.value])
             })?;
 
         // Optional speech-ended callback
@@ -226,21 +270,48 @@ impl MicrophoneCapture {
         self.stop_signal.store(false, Ordering::SeqCst);
         let stop_signal = self.stop_signal.clone();
         
+        // If the stream was consumed by a previous start() cycle, recreate it.
+        // This is the fix for the one-shot take_consumer() bug.
+        if self.input.is_none() {
+            println!("[MicrophoneCapture] Recreating CPAL stream for restart...");
+            match microphone::MicrophoneStream::new(self.device_id.clone()) {
+                Ok(i) => {
+                    let rate = i.sample_rate();
+                    self.sample_rate.store(rate, Ordering::Release);
+                    self.input = Some(i);
+                }
+                Err(e) => {
+                    return Err(napi::Error::from_reason(
+                        format!("[MicrophoneCapture] Failed to recreate stream: {}", e)
+                    ));
+                }
+            }
+        }
+
         let input_ref = self.input.as_mut()
             .ok_or_else(|| napi::Error::from_reason("Input missing"))?;
         
         input_ref.play().map_err(|e| napi::Error::from_reason(format!("{}", e)))?;
         
-        let _initial_sample_rate = input_ref.sample_rate();
+        let native_rate = input_ref.sample_rate();
+        self.sample_rate.store(native_rate, Ordering::Release);
+
         let mut consumer = input_ref.take_consumer()
             .ok_or_else(|| napi::Error::from_reason("Failed to get consumer"))?;
 
-        // DSP thread with bypass
+        // DSP thread with silence suppression + WebRTC VAD
         self.capture_thread = Some(thread::spawn(move || {
-            let mut frame_buffer: Vec<i16> = Vec::with_capacity(FRAME_SAMPLES * 4);
+            let mut suppressor = SilenceSuppressor::new(SilenceSuppressionConfig {
+                native_sample_rate: native_rate,
+                ..SilenceSuppressionConfig::for_microphone()
+            });
+
+            // 20ms chunks at native rate
+            let chunk_size = (native_rate as usize / 1000) * 20;
+            let mut frame_buffer: Vec<i16> = Vec::with_capacity(chunk_size * 4);
             let mut raw_batch: Vec<f32> = Vec::with_capacity(4096);
 
-            println!("[MicrophoneCapture] DSP thread started (suppression disabled)");
+            println!("[MicrophoneCapture] DSP thread started (VAD + suppression active, rate={}Hz, chunk={})", native_rate, chunk_size);
 
             loop {
                 if stop_signal.load(Ordering::Relaxed) {
@@ -252,7 +323,7 @@ impl MicrophoneCapture {
                     raw_batch.push(sample);
                 }
                 
-                // 2. Convert f32 -> i16 at Native sample rate
+                // 2. Convert f32 -> i16 at native sample rate
                 if !raw_batch.is_empty() {
                     for &f in &raw_batch {
                         let scaled = (f * 32767.0).clamp(-32768.0, 32767.0);
@@ -261,12 +332,31 @@ impl MicrophoneCapture {
                     raw_batch.clear();
                 }
 
-                // 3. Send chunks of exactly 4000 samples (~83ms at 48kHz)
-                let chunk_size = 4000;
+                // 3. Process in 20ms chunks through the two-stage gate
                 while frame_buffer.len() >= chunk_size {
                     let frame: Vec<i16> = frame_buffer.drain(0..chunk_size).collect();
+                    
+                    let (action, speech_ended) = suppressor.process(&frame);
 
-                    tsfn.call(frame, ThreadsafeFunctionCallMode::NonBlocking);
+                    match action {
+                        FrameAction::Send(data) => {
+                            let bytes = i16_slice_to_le_bytes(&data);
+                            tsfn.call(Buffer::from(bytes), ThreadsafeFunctionCallMode::NonBlocking);
+                        }
+                        FrameAction::SendSilence => {
+                            let silence = vec![0u8; chunk_size * 2];
+                            tsfn.call(Buffer::from(silence), ThreadsafeFunctionCallMode::NonBlocking);
+                        }
+                        FrameAction::Suppress => {
+                            // Do nothing
+                        }
+                    }
+
+                    if speech_ended {
+                        if let Some(ref se_tsfn) = speech_ended_tsfn {
+                            se_tsfn.call(true, ThreadsafeFunctionCallMode::NonBlocking);
+                        }
+                    }
                 }
                 
                 // 4. Short sleep
@@ -285,9 +375,11 @@ impl MicrophoneCapture {
         if let Some(handle) = self.capture_thread.take() {
             let _ = handle.join();
         }
-        if let Some(input) = self.input.as_ref() {
+        // Pause and destroy the CPAL stream so start() recreates it fresh.
+        if let Some(ref input) = self.input {
             let _ = input.pause();
         }
+        self.input = None;
     }
 }
 

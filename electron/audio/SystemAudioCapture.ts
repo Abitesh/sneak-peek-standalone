@@ -1,7 +1,6 @@
 import { EventEmitter } from 'events';
 import { app } from 'electron';
 import path from 'path';
-import fs from 'fs';
 
 let NativeModule: any = null;
 
@@ -18,7 +17,6 @@ export class SystemAudioCapture extends EventEmitter {
     private deviceId: string | null = null;
     private detectedSampleRate: number = 48000;
     private monitor: any = null;
-    private debugStream: any = null;
 
     constructor(deviceId?: string | null) {
         super();
@@ -35,7 +33,10 @@ export class SystemAudioCapture extends EventEmitter {
     public getSampleRate(): number {
         if (this.monitor && typeof this.monitor.get_sample_rate === 'function') {
             const nativeRate = this.monitor.get_sample_rate();
-            console.log(`[SystemAudioCapture] Real native rate: ${nativeRate}`);
+            if (nativeRate !== this.detectedSampleRate) {
+                console.log(`[SystemAudioCapture] Real native rate: ${nativeRate}`);
+                this.detectedSampleRate = nativeRate;
+            }
             return nativeRate;
         }
         return this.detectedSampleRate;
@@ -67,13 +68,6 @@ export class SystemAudioCapture extends EventEmitter {
 
         try {
             console.log('[SystemAudioCapture] Starting native capture...');
-
-            try {
-                this.debugStream = fs.createWriteStream('/tmp/natively_stt_debug.pcm');
-                console.log('[SystemAudioCapture] Debug audio will be saved to /tmp/natively_stt_debug.pcm');
-            } catch (e) {
-                console.error('[SystemAudioCapture] Failed to create debug stream', e);
-            }
             
             // Fetch real sample rate as soon as monitor starts
             if (typeof this.monitor.get_sample_rate === 'function') {
@@ -82,16 +76,9 @@ export class SystemAudioCapture extends EventEmitter {
             }
 
             this.monitor.start((chunk: Uint8Array) => {
-                // The native module sends raw PCM bytes (Uint8Array)
+                // The native module sends raw PCM bytes (Uint8Array) via zero-copy napi::Buffer
                 if (chunk && chunk.length > 0) {
                     const buffer = Buffer.from(chunk);
-                    if (Math.random() < 0.05) {
-                        const prefix = buffer.slice(0, 10).toString('hex');
-                        console.log(`[SystemAudioCapture] Chunk: ${buffer.length}b, Rate: ${this.detectedSampleRate}, Data(hex): ${prefix}...`);
-                    }
-                    if (this.debugStream) {
-                        this.debugStream.write(buffer);
-                    }
                     this.emit('data', buffer);
                 }
             }, () => {
@@ -120,12 +107,8 @@ export class SystemAudioCapture extends EventEmitter {
             console.error('[SystemAudioCapture] Error stopping:', e);
         }
 
-        // Destroy monitor
+        // Destroy monitor so it's recreated fresh on next start()
         this.monitor = null;
-        if (this.debugStream) {
-            this.debugStream.end();
-            this.debugStream = null;
-        }
         this.isRecording = false;
         this.emit('stop');
     }

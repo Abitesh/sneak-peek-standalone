@@ -61,6 +61,15 @@ export class GoogleSTT extends EventEmitter {
         }
     }
 
+    /**
+     * No-op for GoogleSTT — Google handles VAD server-side.
+     * This method exists for interface consistency with RestSTT so that
+     * main.ts can call notifySpeechEnded() without type-casting to `any`.
+     */
+    public notifySpeechEnded(): void {
+        // Intentionally empty. Google STT detects speech boundaries server-side.
+    }
+
     public setAudioChannelCount(count: number): void {
         if (this.audioChannelCount === count) return;
         console.log(`[GoogleSTT] Updating Channel Count to: ${count}`);

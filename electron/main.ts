@@ -86,6 +86,7 @@ import { warmupIntentClassifier } from "./llm"
 type STTProvider = (GoogleSTT | RestSTT | DeepgramStreamingSTT | SonioxStreamingSTT) & {
   finalize?: () => void;
   setAudioChannelCount?: (count: number) => void;
+  notifySpeechEnded?: () => void;
 };
 
 // Premium: Knowledge modules loaded conditionally
@@ -638,7 +639,7 @@ export class AppState {
           this.googleSTT?.write(chunk);
         });
         this.systemAudioCapture.on('speech_ended', () => {
-          (this.googleSTT as any)?.notifySpeechEnded?.();
+          this.googleSTT?.notifySpeechEnded?.();
         });
         this.systemAudioCapture.on('error', (err: Error) => {
           console.error('[Main] SystemAudioCapture Error:', err);
@@ -651,7 +652,7 @@ export class AppState {
           this.googleSTT_User?.write(chunk);
         });
         this.microphoneCapture.on('speech_ended', () => {
-          (this.googleSTT_User as any)?.notifySpeechEnded?.();
+          this.googleSTT_User?.notifySpeechEnded?.();
         });
         this.microphoneCapture.on('error', (err: Error) => {
           console.error('[Main] MicrophoneCapture Error:', err);
@@ -710,7 +711,7 @@ export class AppState {
         this.googleSTT?.write(chunk);
       });
       this.systemAudioCapture.on('speech_ended', () => {
-        (this.googleSTT as any)?.notifySpeechEnded?.();
+        this.googleSTT?.notifySpeechEnded?.();
       });
       this.systemAudioCapture.on('error', (err: Error) => {
         console.error('[Main] SystemAudioCapture Error:', err);
@@ -728,7 +729,7 @@ export class AppState {
           this.googleSTT?.write(chunk);
         });
         this.systemAudioCapture.on('speech_ended', () => {
-          (this.googleSTT as any)?.notifySpeechEnded?.();
+          this.googleSTT?.notifySpeechEnded?.();
         });
         this.systemAudioCapture.on('error', (err: Error) => {
           console.error('[Main] SystemAudioCapture (Default) Error:', err);
@@ -756,7 +757,7 @@ export class AppState {
         this.googleSTT_User?.write(chunk);
       });
       this.microphoneCapture.on('speech_ended', () => {
-        (this.googleSTT_User as any)?.notifySpeechEnded?.();
+        this.googleSTT_User?.notifySpeechEnded?.();
       });
       this.microphoneCapture.on('error', (err: Error) => {
         console.error('[Main] MicrophoneCapture Error:', err);
@@ -774,7 +775,7 @@ export class AppState {
           this.googleSTT_User?.write(chunk);
         });
         this.microphoneCapture.on('speech_ended', () => {
-          (this.googleSTT_User as any)?.notifySpeechEnded?.();
+          this.googleSTT_User?.notifySpeechEnded?.();
         });
         this.microphoneCapture.on('error', (err: Error) => {
           console.error('[Main] MicrophoneCapture (Default) Error:', err);

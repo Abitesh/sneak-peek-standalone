@@ -456,7 +456,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose, init
     const [selectedInput, setSelectedInput] = useState('');
     const [selectedOutput, setSelectedOutput] = useState('');
     const [micLevel, setMicLevel] = useState(0);
-    const [useLegacyAudio, setUseLegacyAudio] = useState(false);
+    const [useExperimentalSck, setUseExperimentalSck] = useState(false);
 
     // STT Provider settings
     const [sttProvider, setSttProvider] = useState<'google' | 'groq' | 'openai' | 'deepgram' | 'elevenlabs' | 'azure' | 'ibmwatson' | 'soniox'>('google');
@@ -797,9 +797,9 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose, init
             };
             loadDevices();
 
-            // Load Legacy Audio pref
-            const savedLegacy = localStorage.getItem('useLegacyAudioBackend') === 'true';
-            setUseLegacyAudio(savedLegacy);
+            // Load Experimental SCK pref
+            const savedSck = localStorage.getItem('useExperimentalSckBackend') === 'true';
+            setUseExperimentalSck(savedSck);
 
             // Load Calendar Status
             if (window.electronAPI?.getCalendarStatus) {
@@ -2329,7 +2329,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose, init
 
                                             <div className="h-px bg-border-subtle my-2" />
 
-                                            {/* CoreAudio Beta Toggle */}
+                                            {/* SCK Backend Toggle */}
                                             <div className="bg-amber-500/5 rounded-xl border border-amber-500/20 p-4">
                                                 <div className="flex items-center justify-between">
                                                     <div className="flex items-start gap-3">
@@ -2338,23 +2338,23 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose, init
                                                         </div>
                                                         <div>
                                                             <div className="flex items-center gap-2 mb-0.5">
-                                                                <h3 className="text-sm font-bold text-text-primary">CoreAudio Backend</h3>
-                                                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-600 uppercase tracking-wide">Beta</span>
+                                                                <h3 className="text-sm font-bold text-text-primary">SCK Backend</h3>
+                                                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-500/20 text-indigo-400 uppercase tracking-wide">Alternative</span>
                                                             </div>
                                                             <p className="text-xs text-text-secondary leading-relaxed max-w-[300px]">
-                                                                Legacy audio capture method. Use only if you experience issues with the default engine.
+                                                                Use the ScreenCaptureKit backend. An optimized alternative to CoreAudio if you experience any capture issues.
                                                             </p>
                                                         </div>
                                                     </div>
                                                     <div
                                                         onClick={() => {
-                                                            const newState = !useLegacyAudio;
-                                                            setUseLegacyAudio(newState);
-                                                            window.localStorage.setItem('useLegacyAudioBackend', newState ? 'true' : 'false');
+                                                            const newState = !useExperimentalSck;
+                                                            setUseExperimentalSck(newState);
+                                                            window.localStorage.setItem('useExperimentalSckBackend', newState ? 'true' : 'false');
                                                         }}
-                                                        className={`w-11 h-6 rounded-full relative cursor-pointer transition-colors shrink-0 ${useLegacyAudio ? 'bg-amber-500' : 'bg-bg-toggle-switch border border-border-muted'}`}
+                                                        className={`w-11 h-6 rounded-full relative cursor-pointer transition-colors shrink-0 ${useExperimentalSck ? 'bg-amber-500' : 'bg-bg-toggle-switch border border-border-muted'}`}
                                                     >
-                                                        <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${useLegacyAudio ? 'translate-x-5' : 'translate-x-0'}`} />
+                                                        <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${useExperimentalSck ? 'translate-x-5' : 'translate-x-0'}`} />
                                                     </div>
                                                 </div>
                                             </div>

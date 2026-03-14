@@ -101,6 +101,9 @@ const App: React.FC = () => {
   );
 
   useEffect(() => {
+    // Clean up old local storage
+    localStorage.removeItem('useLegacyAudioBackend');
+
     // Basic status check for campaign targeting
     window.electronAPI?.profileGetStatus?.().then(s => setHasProfile(s?.hasProfile || false)).catch(() => {});
     window.electronAPI?.licenseCheckPremium?.().then(setIsPremiumActive).catch(() => {});
@@ -158,15 +161,15 @@ const App: React.FC = () => {
       localStorage.setItem('natively_last_meeting_start', Date.now().toString());
       const inputDeviceId = localStorage.getItem('preferredInputDeviceId');
       let outputDeviceId = localStorage.getItem('preferredOutputDeviceId');
-      const useLegacyAudio = localStorage.getItem('useLegacyAudioBackend') === 'true';
+      const useExperimentalSck = localStorage.getItem('useExperimentalSckBackend') === 'true';
 
       // Override output device ID to force SCK if experimental mode is enabled
-      // Default to SCK unless legacy is enabled
-      if (!useLegacyAudio) {
-        console.log("[App] Using ScreenCaptureKit backend (Default).");
+      // Default to CoreAudio unless experimental is enabled
+      if (useExperimentalSck) {
+        console.log("[App] Using ScreenCaptureKit backend (Experimental).");
         outputDeviceId = "sck";
       } else {
-        console.log("[App] Using Legacy CoreAudio backend (User Preference).");
+        console.log("[App] Using CoreAudio backend (Default).");
       }
 
       const result = await window.electronAPI.startMeeting({

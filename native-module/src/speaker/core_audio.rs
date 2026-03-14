@@ -147,7 +147,7 @@ extern "C" fn proc(
         Ordering::Release,
     );
 
-    let channels = ctx.channels;
+    let _channels = ctx.channels;
 
     if let Some(view) =
         av::AudioPcmBuf::with_buf_list_no_copy(&ctx.format, input_data, None)
