@@ -60,6 +60,7 @@ jobs:
             --exclude 'release' \
             --exclude 'native-module/target' \
             --exclude '.github/workflows/public-sync.yml' \
+            --exclude '.github/workflows/public-sync.yml' \
             ./ public-repo/
             
           cd public-repo
