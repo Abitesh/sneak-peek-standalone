@@ -134,7 +134,7 @@ export class AppState {
 
   private hasDebugged: boolean = false
   private isMeetingActive: boolean = false; // Guard for session state leaks
-  private visibilityMode: 'normal' | 'stealth' = 'normal';
+
 
   // Processing events
   public readonly PROCESSING_EVENTS = {
@@ -1482,13 +1482,6 @@ export class AppState {
     this.windowHelper.setContentProtection(state)
     this.settingsWindowHelper.setContentProtection(state)
 
-    // Apply or revert disguise based on new state
-    if (state && this.disguiseMode !== 'none') {
-      this._applyDisguise(this.disguiseMode);
-    } else if (!state) {
-      this._applyDisguise('none');
-    }
-
     // Broadcast state change to all relevant windows
     const mainWindow = this.windowHelper.getMainWindow();
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -1506,8 +1499,48 @@ export class AppState {
       settingsWin.webContents.send('undetectable-changed', state);
     }
 
+    // --- STEALTH MODE LOGIC (restored from working version a820380) ---
     if (process.platform === 'darwin') {
-      this.applyVisibilityMode(state ? 'stealth' : 'normal');
+      const activeWindow = this.windowHelper.getMainWindow();
+
+      // Determine the truly active window to restore focus to
+      const settingsWindow = this.settingsWindowHelper.getSettingsWindow();
+      let targetFocusWindow = activeWindow;
+
+      if (settingsWindow && !settingsWindow.isDestroyed() && settingsWindow.isVisible()) {
+        targetFocusWindow = settingsWindow;
+      }
+
+      // Temporarily ignore blur to prevent settings from closing during dock hide/show
+      if (targetFocusWindow && (targetFocusWindow === settingsWindow)) {
+        this.settingsWindowHelper.setIgnoreBlur(true);
+      }
+
+      if (state) {
+        app.dock.hide();
+        this.hideTray();
+
+        // Force focus back to the active window to prevent it from being backgrounded
+        if (targetFocusWindow && !targetFocusWindow.isDestroyed() && targetFocusWindow.isVisible()) {
+          targetFocusWindow.show();
+          targetFocusWindow.focus();
+        }
+      } else {
+        app.dock.show();
+        this.showTray();
+
+        // Restore focus when coming back to foreground/dock mode
+        if (targetFocusWindow && !targetFocusWindow.isDestroyed() && targetFocusWindow.isVisible()) {
+          targetFocusWindow.focus();
+        }
+      }
+
+      // Re-enable blur handling after the transition logic has settled
+      if (targetFocusWindow && (targetFocusWindow === settingsWindow)) {
+        setTimeout(() => {
+          this.settingsWindowHelper.setIgnoreBlur(false);
+        }, 500);
+      }
     }
   }
 
@@ -1518,11 +1551,10 @@ export class AppState {
   public setDisguise(mode: 'terminal' | 'settings' | 'activity' | 'none'): void {
     this.disguiseMode = mode;
 
-    // Only apply the disguise if we are currently in undetectable mode
-    // Otherwise, just save the preference for later
-    if (this.isUndetectable) {
-      this._applyDisguise(mode);
-    }
+    // Apply the disguise regardless of undetectable state
+    // (disguise affects Activity Monitor name via process.title,
+    //  dock icon only updates when NOT in stealth)
+    this._applyDisguise(mode);
   }
 
   private _applyDisguise(mode: 'terminal' | 'settings' | 'activity' | 'none'): void {
@@ -1561,13 +1593,8 @@ export class AppState {
     // 1. Update process title (affects Activity Monitor / Task Manager)
     process.title = appName;
 
-    // 1b. Update app name (critical for macOS Dock / Activity Monitor display)
-    // Dynamic changes to app.setName after launch cause multiple Dock icons/processes on macOS.
-    if (!app.isReady()) {
-      app.setName(appName);
-    }
-
-    // 2. Update CFBundleName (helps with some macOS API interactions)
+    // 2. Update app name (affects macOS Menu / Dock)
+    app.setName(appName);
     if (process.platform === 'darwin') {
       process.env.CFBundleName = appName.trim();
     }
@@ -1582,10 +1609,7 @@ export class AppState {
       const image = nativeImage.createFromPath(iconPath);
 
       if (process.platform === 'darwin') {
-        // Only set dock icon if NOT in stealth/accessory mode
-        if (!this.isUndetectable) {
-          app.dock.setIcon(image);
-        }
+        app.dock.setIcon(image);
       } else {
         // Windows/Linux: Update all window icons
         this.windowHelper.getLauncherWindow()?.setIcon(image);
@@ -1615,10 +1639,10 @@ export class AppState {
       settingsWin.webContents.send('disguise-changed', mode);
     }
 
-    // Force periodic updates as seen in reference to ensure it sticks
+    // Force periodic updates to ensure process title sticks
     const forceUpdate = () => {
       process.title = appName;
-      if (process.platform === 'darwin' && !app.isReady()) {
+      if (process.platform === 'darwin') {
         app.setName(appName);
       }
     };
@@ -1630,44 +1654,6 @@ export class AppState {
 
   public getDisguise(): string {
     return this.disguiseMode;
-  }
-
-  private applyVisibilityMode(mode: 'normal' | 'stealth') {
-    if (process.platform !== 'darwin') return;
-
-    if (mode === 'stealth') {
-      app.dock.hide();
-
-      // Microtask delay to allow macOS to process policy change
-      setTimeout(() => {
-        const win = this.getMainWindow();
-        if (win && !win.isDestroyed()) {
-          // Explicitly active the app and focus the window
-          // This prevents the window from losing focus when dock icon disappears
-          app.focus({ steal: true });
-          win.focus();
-        }
-      }, 10);
-
-      this.hideTray();
-
-    } else {
-      try {
-        const p = app.dock.show() as any;
-        if (p && typeof p.catch === 'function') {
-          p.catch((e: any) => console.log(e));
-        }
-      } catch(e) {}
-      // No delay needed for regular mode, but good practice to ensure focus
-      const win = this.getMainWindow();
-      if (win && !win.isDestroyed()) {
-        win.show();
-        win.focus();
-      }
-      this.showTray();
-    }
-
-    this.visibilityMode = mode;
   }
 }
 
@@ -1752,24 +1738,16 @@ async function initializeApp() {
     appState.createWindow()
 
     // Apply initial stealth state based on isUndetectable setting
-    if (process.platform === 'darwin') {
-      if (appState.getUndetectable()) {
+    if (appState.getUndetectable()) {
+      // Stealth mode: hide dock and tray
+      if (process.platform === 'darwin') {
         app.dock.hide();
-      } else {
-        try {
-          const p = app.dock.show() as any;
-          if (p && typeof p.catch === 'function') {
-            p.catch((e: any) => console.log(e));
-          }
-        } catch(e) {}
-        appState.showTray();
       }
     } else {
-      // Non-macOS explicit handling if needed (mostly handled via window skipTaskbar)
-      if (appState.getUndetectable()) {
-        // ...
-      } else {
-        appState.showTray();
+      // Normal mode: show dock and tray
+      appState.showTray();
+      if (process.platform === 'darwin') {
+        app.dock.show();
       }
     }
     // Register global shortcuts using KeybindManager
@@ -1814,7 +1792,11 @@ async function initializeApp() {
 
   app.on("activate", () => {
     console.log("App activated")
-    console.log("App activated")
+    if (process.platform === 'darwin') {
+      if (!appState.getUndetectable()) {
+        app.dock.show();
+      }
+    }
     if (appState.getMainWindow() === null) {
       appState.createWindow()
     }
