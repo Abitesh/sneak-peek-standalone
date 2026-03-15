@@ -1,4 +1,4 @@
 declare module 'natively-audio' {
     export function getHardwareId(): string;
-    export function verifyGumroadKey(key: string): string;
+    export function verifyGumroadKey(key: string): Promise<string>;
 }
