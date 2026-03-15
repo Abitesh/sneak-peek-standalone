@@ -100,6 +100,7 @@ try {
 }
 
 import { CredentialsManager } from "./services/CredentialsManager"
+import { SettingsManager } from "./services/SettingsManager"
 import { ReleaseNotesManager } from "./update/ReleaseNotesManager"
 import { OllamaManager } from './services/OllamaManager'
 
@@ -166,6 +167,15 @@ export class AppState {
 
     // Initialize ProcessingHelper
     this.processingHelper = new ProcessingHelper(this)
+
+    // Load initial stealth state from SettingsManager (boot-critical)
+    const settingsManager = SettingsManager.getInstance();
+    this.isUndetectable = settingsManager.get('isUndetectable') || false;
+    
+    // Non-boot settings still come from CredentialsManager
+    this.windowHelper.setContentProtection(this.isUndetectable);
+    this.settingsWindowHelper.setContentProtection(this.isUndetectable);
+    this.modelSelectorWindowHelper.setContentProtection(this.isUndetectable);
 
     // Initialize KeybindManager
     const keybindManager = KeybindManager.getInstance();
@@ -949,6 +959,7 @@ export class AppState {
       const { CredentialsManager } = require('./services/CredentialsManager');
       const cm = CredentialsManager.getInstance();
       const defaultModel = cm.getDefaultModel();
+      
       // Re-fetch custom providers to ensure context correctness
       const curlProviders = cm.getCurlProviders();
       const legacyProviders = cm.getCustomProviders();
@@ -1486,6 +1497,9 @@ export class AppState {
     this.settingsWindowHelper.setContentProtection(state)
     this.modelSelectorWindowHelper.setContentProtection(state)
 
+    // Persist state via SettingsManager
+    SettingsManager.getInstance().set('isUndetectable', state);
+
     // Cancel all pending disguise timers to prevent their app.setName() calls
     // from re-registering the dock icon after we hide it
     if (state) {
@@ -1724,13 +1738,16 @@ function setMacDockIcon() {
 }
 
 async function initializeApp() {
+  // 2. Wait for app to be ready
   await app.whenReady()
 
+  // 3. Initialize Managers
   // Initialize CredentialsManager and load keys explicitly
   // This fixes the issue where keys (especially in production) aren't loaded in time for RAG/LLM
   const { CredentialsManager } = require('./services/CredentialsManager');
   CredentialsManager.getInstance().init();
 
+  // 4. Initialize State
   const appState = AppState.getInstance()
 
   // Explicitly load credentials into helpers
