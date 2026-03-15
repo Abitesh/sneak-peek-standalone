@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.0.5] - 2026-03-15
+
+### Improvements
+
+- **Stealth Mode UI**: The Process Disguise selector is now visually disabled and locked while Undetectable mode is active, preventing accidental state mismatches.
+- **State Synchronization**: Greatly improved internal state synchronization across all application windows (Settings, Launcher, Overlay).
+
+### Fixes
+
+- **Infinite Feedback Loops**: Completely eliminated the bug where toggling Undetectable mode would sometimes cause the app to rapidly toggle itself on and off.
+- **Delayed Dock Reappearance**: Fixed a regression where the macOS dock icon would mysteriously reappear several seconds after entering stealth mode if a disguise had recently been changed.
+- **Initial State Loading**: Fixed an issue where the Settings UI would briefly show incorrect toggle states when first opened.
+- **macOS OS-level Events**: Hardened the app against macOS `activate` events (like clicking the app in Finder) accidentally breaking stealth mode.
+
+### Technical
+
+- Refactored IPC (Inter-Process Communication) listeners for `SettingsPopup` and `SettingsOverlay` to use a strict one-way (receive-only) data binding pattern.
+- Added strict management and cancellation of `forceUpdate` timeouts during stealth mode transitions.
+- Added explicit type safety for the new getters in `electron.d.ts`.
+
 ## [2.0.3] - 2026-03-13
 
 ### What's New
