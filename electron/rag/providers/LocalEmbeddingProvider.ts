@@ -16,7 +16,7 @@ export class LocalEmbeddingProvider implements IEmbeddingProvider {
     // This path is baked in at build time via electron-builder extraResources
     this.modelPath = path.join(
       app.isPackaged ? process.resourcesPath : path.join(__dirname, '../../resources'),
-      'models/all-MiniLM-L6-v2'
+      'models'
     );
   }
 
@@ -49,7 +49,7 @@ export class LocalEmbeddingProvider implements IEmbeddingProvider {
       env.allowRemoteModels = false;
       env.localModelPath = this.modelPath;
 
-      this.pipe = await pipeline('feature-extraction', 'all-MiniLM-L6-v2', {
+      this.pipe = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
         local_files_only: true,
       });
     })();

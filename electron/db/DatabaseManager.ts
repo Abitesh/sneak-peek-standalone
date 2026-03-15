@@ -81,7 +81,16 @@ export class DatabaseManager {
 
             // Load sqlite-vec extension for native vector search
             try {
-                sqliteVec.load(this.db);
+                // 1. sqlite-vec's getLoadablePath() returns a path inside app.asar
+                //    (e.g. .../app.asar/node_modules/sqlite-vec-darwin-arm64/vec0.dylib)
+                //    but dlopen() needs real files on disk, not files inside the asar archive.
+                //    electron-builder's asarUnpack puts them in app.asar.unpacked instead.
+                // 2. better-sqlite3's loadExtension() auto-appends the platform extension
+                //    (.dylib/.so/.dll), so we strip it to avoid vec0.dylib.dylib.
+                let extPath = sqliteVec.getLoadablePath();
+                extPath = extPath.replace('app.asar', 'app.asar.unpacked');
+                extPath = extPath.replace(/\.(dylib|so|dll)$/, '');
+                this.db.loadExtension(extPath);
                 console.log('[DatabaseManager] sqlite-vec extension loaded successfully');
             } catch (extErr) {
                 console.error('[DatabaseManager] Failed to load sqlite-vec extension:', extErr);

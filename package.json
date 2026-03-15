@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "npm run clean && tsc && vite build",
     "preview": "vite preview",
-    "postinstall": "cross-env SHARP_IGNORE_GLOBAL_LIBVIPS=1 npm rebuild sharp && node scripts/download-models.js",
+    "postinstall": "cross-env SHARP_IGNORE_GLOBAL_LIBVIPS=1 npm rebuild sharp && node scripts/download-models.js && node scripts/ensure-sqlite-vec.js",
     "electron:dev": "tsc -p electron/tsconfig.json && cross-env NODE_ENV=development electron .",
     "electron:build": "tsc -p electron/tsconfig.json && cross-env NODE_ENV=production electron .",
     "app:dev": "concurrently \"npm run dev -- --port 5180\" \"wait-on http://localhost:5180 && npm run electron:dev\"",
@@ -16,7 +16,7 @@
     "watch": "tsc -p electron/tsconfig.json --watch",
     "start": "npm run app:dev",
     "dist": "npm run app:build",
-    "build:native": "cd native-module && npx napi build --platform --release"
+    "build:native": "node scripts/build-native.js"
   },
   "build": {
     "appId": "com.electron.meeting-notes",
@@ -30,6 +30,10 @@
       "!**/native-module/target",
       "!**/native-module/src",
       "!**/native-module/.cargo"
+    ],
+    "asarUnpack": [
+      "**/*.node",
+      "**/*.dylib"
     ],
     "directories": {
       "output": "release",
@@ -45,12 +49,8 @@
         "to": "natively.icns"
       },
       {
-        "from": "resources/models/xenova/all-MiniLM-L6-v2",
-        "to": "models/all-MiniLM-L6-v2"
-      },
-      {
-        "from": "resources/models/xenova/mobilebert-uncased-mnli",
-        "to": "models/mobilebert-uncased-mnli"
+        "from": "resources/models/",
+        "to": "models/"
       }
     ],
     "mac": {
@@ -217,6 +217,8 @@
     "ws": "^8.19.0"
   },
   "optionalDependencies": {
-    "natively-audio": "file:./native-module"
+    "natively-audio": "file:./native-module",
+    "sqlite-vec-darwin-arm64": "^0.1.7-alpha.2",
+    "sqlite-vec-darwin-x64": "^0.1.7-alpha.2"
   }
 }

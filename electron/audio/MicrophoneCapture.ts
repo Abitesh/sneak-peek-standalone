@@ -56,7 +56,6 @@ export class MicrophoneCapture extends EventEmitter {
         }
 
         // Monitor should be ready from constructor
-        // Monitor should be ready from constructor
         if (!this.monitor) {
             console.log('[MicrophoneCapture] Monitor not initialized. Re-initializing...');
             try {
