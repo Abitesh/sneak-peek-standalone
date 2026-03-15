@@ -1,7 +1,7 @@
 <div align="center">
   <img src="assets/icon.png" width="150" alt="Natively AI Assistant Logo">
 
-# Natively – Open Source AI Meeting Assistant & Cluely Alternative
+# **Natively – Open Source AI Meeting Assistant & Cluely Alternative**
 
 [![License](https://img.shields.io/badge/License-AGPL--3.0-blue?style=flat-square)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Windows-blueviolet?style=flat-square)](https://github.com/evinjohnn/natively-cluely-ai-assistant/releases)
@@ -79,14 +79,14 @@ This demo shows **a complete live meeting scenario**:
 _The privacy-first AI assistant for meetings._
 
 <p align="center">
-  <a href="https://nativelyai.vercel.app">
-    <img src="https://img.shields.io/badge/Visit%20Website-nativelyai.vercel.app-0A0A0A?style=for-the-badge&logo=vercel&logoColor=white" />
+  <a href="https://natively.software">
+    <img src="https://img.shields.io/badge/Visit%20Website-22C55E?style=for-the-badge&logo=vercel&logoColor=white" />
   </a>
 </p>
 
 <p align="center">
   <a href="https://github.com/evinjohnn/natively-cluely-ai-assistant/releases/latest">
-    <img src="https://img.shields.io/badge/Download-macOS-000000?style=for-the-badge&logo=apple&logoColor=white" />
+    <img src="https://img.shields.io/badge/Download-macOS-007AFF?style=for-the-badge&logo=apple&logoColor=white" />
   </a>
   <a href="https://github.com/evinjohnn/natively-cluely-ai-assistant/releases/tag/v2.0.5">
     <img src="https://img.shields.io/badge/Download-Windows-0078D4?style=for-the-badge&logo=windows&logoColor=white" />
