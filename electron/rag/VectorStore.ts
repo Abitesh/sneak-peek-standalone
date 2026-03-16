@@ -22,9 +22,12 @@ export interface ScoredChunk extends StoredChunk {
  * 
  * Uses sqlite-vec extension for native vector similarity search (O(1) per query via ANN).
  * Falls back to pure JS cosine similarity if sqlite-vec is unavailable.
+ * Native sqlite-vec queries are offloaded to a worker thread to avoid blocking the main thread.
  */
 export class VectorStore {
     private db: Database.Database;
+    private dbPath: string;
+    private extPath: string;
     private useNativeVec: boolean;
     private worker: Worker | null = null;
     private requestId = 0;
@@ -32,8 +35,10 @@ export class VectorStore {
 
     private static readonly WORKER_TIMEOUT_MS = 30_000; // 30s deadman switch
 
-    constructor(db: Database.Database) {
+    constructor(db: Database.Database, dbPath: string, extPath: string) {
         this.db = db;
+        this.dbPath = dbPath;
+        this.extPath = extPath;
         this.useNativeVec = this.detectVecSupport();
     }
 
@@ -230,7 +235,8 @@ export class VectorStore {
     }
 
     /**
-     * Native vec0 search — pushes similarity math into SQLite's C layer
+     * Native vec0 search — now fully offloaded to the worker thread to avoid
+     * blocking the Electron main event loop during expensive ANN queries.
      */
     private async searchSimilarNative(
         queryEmbedding: number[],
@@ -240,71 +246,20 @@ export class VectorStore {
         providerName?: string
     ): Promise<ScoredChunk[]> {
         const queryBlob = this.embeddingToBlob(queryEmbedding);
-
         try {
-            // Fetch top-K from vec0, then join with chunks for metadata
-            // We fetch more than limit to allow post-filtering by meetingId, minSimilarity, and provider
-            const fetchLimit = (meetingId || providerName) ? limit * 4 : limit;
-
-            const vecRows = this.db.prepare(`
-                SELECT chunk_id, distance
-                FROM vec_chunks
-                WHERE embedding MATCH ?
-                ORDER BY distance
-                LIMIT ?
-            `).all(queryBlob, fetchLimit) as any[];
-
-            if (vecRows.length === 0) return [];
-
-            // Batch-fetch chunk metadata for matched IDs
-            const chunkIds = vecRows.map(r => r.chunk_id);
-            const placeholders = chunkIds.map(() => '?').join(',');
-
-            let chunkQuery = `
-                SELECT c.* 
-                FROM chunks c
-                JOIN meetings m ON c.meeting_id = m.id
-                WHERE c.id IN (${placeholders})
-            `;
-            const params: any[] = [...chunkIds];
-
-            if (meetingId) {
-                chunkQuery += ' AND c.meeting_id = ?';
-                params.push(meetingId);
-            }
-            if (providerName) {
-                chunkQuery += ' AND m.embedding_provider = ?';
-                params.push(providerName);
-            }
-
-            const chunkRows = this.db.prepare(chunkQuery).all(...params) as any[];
-
-            // Build a lookup map for chunk data
-            const chunkMap = new Map<number, any>();
-            for (const row of chunkRows) {
-                chunkMap.set(row.id, row);
-            }
-
-            // Combine distance scores with chunk data
-            const scored: ScoredChunk[] = [];
-            for (const vecRow of vecRows) {
-                const chunkData = chunkMap.get(vecRow.chunk_id);
-                if (!chunkData) continue;
-
-                const similarity = 1 - vecRow.distance;
-                if (similarity >= minSimilarity) {
-                    scored.push({
-                        ...this.rowToChunk(chunkData),
-                        similarity
-                    });
-                }
-            }
-
-            // Already ordered by distance (ascending = best first)
-            return scored.slice(0, limit);
-
+            return await this.postToWorker<ScoredChunk[]>({
+                type: 'nativeVecSearch',
+                dbPath: this.dbPath,
+                extPath: this.extPath,
+                queryBlob,
+                meetingId,
+                providerName,
+                limit,
+                minSimilarity,
+                fetchMultiplier: 4
+            });
         } catch (e) {
-            console.error('[VectorStore] Native vec search failed, falling back to JS:', e);
+            console.error('[VectorStore] Native vec search (worker) failed, falling back to JS:', e);
             return this.searchSimilarJSWorker(queryEmbedding, meetingId, limit, minSimilarity, providerName);
         }
     }
@@ -479,7 +434,7 @@ export class VectorStore {
     }
 
     /**
-     * Native vec0 summary search
+     * Native vec0 summary search — fully offloaded to the worker thread.
      */
     private async searchSummariesNative(
         queryEmbedding: number[],
@@ -487,58 +442,17 @@ export class VectorStore {
         providerName?: string
     ): Promise<{ meetingId: string; summaryText: string; similarity: number }[]> {
         const queryBlob = this.embeddingToBlob(queryEmbedding);
-
         try {
-            const fetchLimit = providerName ? limit * 4 : limit;
-            const vecRows = this.db.prepare(`
-                SELECT summary_id, distance
-                FROM vec_summaries
-                WHERE embedding MATCH ?
-                ORDER BY distance
-                LIMIT ?
-            `).all(queryBlob, fetchLimit) as any[];
-
-            if (vecRows.length === 0) return [];
-
-            const ids = vecRows.map(r => r.summary_id);
-            const placeholders = ids.map(() => '?').join(',');
-
-            let summaryQuery = `
-                SELECT s.* 
-                FROM chunk_summaries s
-                JOIN meetings m ON s.meeting_id = m.id
-                WHERE s.id IN (${placeholders})
-            `;
-            const params: any[] = [...ids];
-
-            if (providerName) {
-                summaryQuery += ' AND m.embedding_provider = ?';
-                params.push(providerName);
-            }
-
-            const summaryRows = this.db.prepare(summaryQuery).all(...params) as any[];
-
-            const summaryMap = new Map<number, any>();
-            for (const row of summaryRows) {
-                summaryMap.set(row.id, row);
-            }
-
-            const results: { meetingId: string; summaryText: string; similarity: number }[] = [];
-            for (const vecRow of vecRows) {
-                const summaryData = summaryMap.get(vecRow.summary_id);
-                if (!summaryData) continue;
-
-                results.push({
-                    meetingId: summaryData.meeting_id,
-                    summaryText: summaryData.summary_text,
-                    similarity: 1 - vecRow.distance
-                });
-            }
-
-            return results.slice(0, limit);
-
+            return await this.postToWorker<{ meetingId: string; summaryText: string; similarity: number }[]>({
+                type: 'nativeVecSearchSummaries',
+                dbPath: this.dbPath,
+                extPath: this.extPath,
+                queryBlob,
+                providerName,
+                limit
+            });
         } catch (e) {
-            console.error('[VectorStore] Native summary search failed, falling back to JS:', e);
+            console.error('[VectorStore] Native summary search (worker) failed, falling back to JS:', e);
             return this.searchSummariesJSWorker(queryEmbedding, limit, providerName);
         }
     }

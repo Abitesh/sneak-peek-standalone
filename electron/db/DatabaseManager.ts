@@ -38,6 +38,7 @@ export class DatabaseManager {
     private static instance: DatabaseManager;
     private db: Database.Database | null = null;
     private dbPath: string;
+    private resolvedExtPath: string = '';
 
     private constructor() {
         const userDataPath = app.getPath('userData');
@@ -91,6 +92,7 @@ export class DatabaseManager {
                 extPath = extPath.replace('app.asar', 'app.asar.unpacked');
                 extPath = extPath.replace(/\.(dylib|so|dll)$/, '');
                 this.db.loadExtension(extPath);
+                this.resolvedExtPath = extPath; // Store for worker thread access
                 console.log('[DatabaseManager] sqlite-vec extension loaded successfully');
             } catch (extErr) {
                 console.error('[DatabaseManager] Failed to load sqlite-vec extension:', extErr);
@@ -315,6 +317,20 @@ export class DatabaseManager {
             this.db.pragma('user_version = 6');
         }
 
+        // Version 6 → 7: Add indexes on transcripts and ai_interactions meeting_id
+        // (Previously missing — causes O(N) full-table scans when fetching meeting details)
+        if (version < 7) {
+            console.log('[DatabaseManager] Applying migration v6 → v7: Add meeting_id indexes');
+            try {
+                this.db.exec('CREATE INDEX IF NOT EXISTS idx_transcripts_meeting ON transcripts(meeting_id);');
+                this.db.exec('CREATE INDEX IF NOT EXISTS idx_ai_interactions_meeting ON ai_interactions(meeting_id, timestamp);');
+                console.log('[DatabaseManager] Meeting ID indexes created successfully');
+            } catch (e) {
+                console.error('[DatabaseManager] Failed to create indexes (non-fatal):', e);
+            }
+            this.db.pragma('user_version = 7');
+        }
+
         console.log('[DatabaseManager] Migrations completed.');
     }
 
@@ -436,6 +452,19 @@ export class DatabaseManager {
      */
     public getDb(): Database.Database | null {
         return this.db;
+    }
+
+    /** Path to the SQLite database file on disk. Used by worker threads. */
+    public getDbPath(): string {
+        return this.dbPath;
+    }
+
+    /**
+     * Resolved sqlite-vec extension path (without platform file suffix).
+     * Used by worker threads that open their own DB connection.
+     */
+    public getExtPath(): string {
+        return this.resolvedExtPath;
     }
 
     public saveMeeting(meeting: Meeting, startTimeMs: number, durationMs: number) {
@@ -660,7 +689,7 @@ export class DatabaseManager {
                         // Special case: for 'followup_questions', earlier we treated 'answer' as the array in memory
                         // UI expects appropriate field. If type is 'followup_questions', usually answer is null and items has the questions.
                     }
-                } catch (e) { }
+                } catch (e) { console.warn('[DatabaseManager] Failed to parse metadata_json for interaction:', row?.id, e); }
             }
 
             return {
@@ -740,13 +769,17 @@ export class DatabaseManager {
         if (!this.db) return false;
 
         try {
-            // Clear all tables (order matters due to foreign keys, but SQLite handles with ON DELETE CASCADE)
-            this.db.exec('DELETE FROM embedding_queue');
-            this.db.exec('DELETE FROM chunk_summaries');
-            this.db.exec('DELETE FROM chunks');
-            this.db.exec('DELETE FROM ai_interactions');
-            this.db.exec('DELETE FROM transcripts');
-            this.db.exec('DELETE FROM meetings');
+            // Clear all tables atomically (order matters due to foreign keys,
+            // but SQLite handles cascades). Using a transaction ensures we never
+            // end up in a half-cleared state if one statement fails.
+            this.db.transaction(() => {
+                this.db!.exec('DELETE FROM embedding_queue');
+                this.db!.exec('DELETE FROM chunk_summaries');
+                this.db!.exec('DELETE FROM chunks');
+                this.db!.exec('DELETE FROM ai_interactions');
+                this.db!.exec('DELETE FROM transcripts');
+                this.db!.exec('DELETE FROM meetings');
+            })();
 
             console.log('[DatabaseManager] All data cleared from database.');
             return true;

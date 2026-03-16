@@ -303,6 +303,7 @@ Version 2.0.5 delivers major reliability fixes to Stealth Mode and Process Disgu
 - [AI Providers](#ai-providers)
 - [Key Features](#key-features)
 - [Meeting Intelligence Dashboard](#meeting-intelligence-dashboard)
+- [Roadmap](#roadmap)
 - [Use Cases](#use-cases)
 - [Technical Details](#technical-details)
 - [Known Limitations](#known-limitations)
@@ -600,6 +601,32 @@ Natively includes a powerful, local-first meeting management system to review, s
 - **Usage Statistics:** Track your token usage and API costs in real-time. Know exactly how much you are spending on Gemini, OpenAI, or Claude.
 - **Audio Separation:** Distinct controls for **System Audio** (what they say) vs. **Microphone** (what you dictate).
 - **Session Management:** Rename, organize, or delete past sessions to keep your workspace clean.
+
+---
+
+## Roadmap
+
+```mermaid
+timeline
+    title Natively Product Roadmap
+    section Short-term (1-3 mos)
+        System Design : Visualization MVP
+        Personas : Basic system (3-5 personas)
+        Tokens : Integration POC
+    section Medium-term (3-6 mos)
+        Personas : Full library
+        System Design : Advanced diagram types
+        Tokens : Community features
+        Platform : Mobile app development
+    section Long-term (6+ mos)
+        Collaboration : Collaborative features
+        Ecosystem : Plugin ecosystem
+        Platform : Multi-language support
+```
+
+<div align="center">
+  <em>For detailed feature descriptions, see our full <a href="ROADMAP.md">ROADMAP.md</a>.</em>
+</div>
 
 ---
 

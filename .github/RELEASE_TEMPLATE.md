@@ -44,3 +44,5 @@ If you see "App is damaged":
      ```
   2. Install the natively.dmg
   3. Open Terminal and run: `xattr -cr /Applications/Natively.app`
+
+\\ refer to change.md for detailed changes
