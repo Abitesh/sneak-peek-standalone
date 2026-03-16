@@ -121,21 +121,22 @@ This demo shows **a complete live meeting scenario**:
 
 ## Full comparison
 
-| Feature                  | Natively               | Cluely               | Pluely     | LockedIn AI      | Final Round AI         |
-| :----------------------- | :--------------------- | :------------------- | :--------- | :--------------- | :--------------------- |
-| **Price**                | ✅ Free (BYOK)         | ⚠️ $20/mo            | ✅ Free    | ❌ $55–70/mo     | ❌ $149/mo             |
-| **Open source**          | ✅ AGPL-3.0            | ❌                   | ✅         | ❌               | ❌                     |
-| **Local data / private** | ✅ Yes                 | ❌ Cloud servers     | ✅ Yes     | ❌ Cloud servers | ❌ Cloud servers       |
-| **Any LLM (BYOK)**       | ✅ Yes                 | ❌ Vendor-locked     | ⚠️ Limited | ❌ Vendor-locked | ❌ Vendor-locked       |
-| **Local AI (Ollama)**    | ✅ Yes                 | ❌                   | ❌         | ❌               | ❌                     |
-| **Real-time <500ms**     | ✅ Yes                 | ⚠️ 5–90s lag         | ✅ Yes     | ✅ ~116ms        | ⚠️ Slowest             |
-| **Dual audio channels**  | ✅ System + Mic        | ❌ Single stream     | ❌         | ❌               | ❌                     |
-| **Local RAG memory**     | ✅ SQLite + sqlite-vec | ❌                   | ❌         | ❌               | ❌                     |
-| **Meeting history**      | ✅ Full dashboard      | ⚠️ Limited           | ❌         | ❌               | ⚠️ Limited             |
-| **Screenshot OCR**       | ✅ Yes                 | ⚠️ Limited           | ❌         | ✅ Yes           | ⚠️ Limited             |
-| **Stealth mode**         | ✅ Undetectable        | ❌                   | ❌         | ❌               | ❌ Visible to proctors |
-| **Resume & context**     | ✅ Pro                 | ❌                   | ❌         | ✅ Yes           | ✅ Yes                 |
-| **Data breach history**  | ✅ None                | ❌ 83k users exposed | ✅ None    | ✅ None          | ✅ None                |
+| Feature                  | Natively                   | Cluely               | Pluely     | LockedIn AI      | Final Round AI         |
+| :----------------------- | :------------------------- | :------------------- | :--------- | :--------------- | :--------------------- |
+| **Price**                | ✅ Free (BYOK)             | ⚠️ $20/mo            | ✅ Free    | ❌ $55–70/mo     | ❌ $149/mo             |
+| **Open source**          | ✅ AGPL-3.0                | ❌                   | ✅         | ❌               | ❌                     |
+| **Local data / private** | ✅ Yes                     | ❌ Cloud servers     | ✅ Yes     | ❌ Cloud servers | ❌ Cloud servers       |
+| **Any LLM (BYOK)**       | ✅ Yes                     | ❌ Vendor-locked     | ⚠️ Limited | ❌ Vendor-locked | ❌ Vendor-locked       |
+| **Local AI (Ollama)**    | ✅ Yes                     | ❌                   | ❌         | ❌               | ❌                     |
+| **Real-time <500ms**     | ✅ Yes                     | ⚠️ 5–90s lag         | ✅ Yes     | ✅ ~116ms        | ⚠️ Slowest             |
+| **Dual audio channels**  | ✅ System + Mic            | ❌ Single stream     | ❌         | ❌               | ❌                     |
+| **Local RAG memory**     | ✅ SQLite + sqlite-vec     | ❌                   | ❌         | ❌               | ❌                     |
+| **Meeting history**      | ✅ Full dashboard          | ⚠️ Limited           | ❌         | ❌               | ⚠️ Limited             |
+| **Screenshot OCR**       | ✅ Yes                     | ⚠️ Limited           | ❌         | ✅ Yes           | ⚠️ Limited             |
+| **Stealth mode**         | ✅ Undetectable            | ❌                   | ❌         | ❌               | ❌ Visible to proctors |
+| **Process Disguise**     | ✅ Terminal, Settings, etc | ❌                   | ❌         | ❌               | ❌                     |
+| **Resume & context**     | ✅ Pro                     | ❌                   | ❌         | ✅ Yes           | ✅ Yes                 |
+| **Data breach history**  | ✅ None                    | ❌ 83k users exposed | ✅ None    | ✅ None          | ✅ None                |
 
 > **Legend:** ✅ Full support · ⚠️ Partial or limited · ❌ Not available
 
@@ -179,11 +180,15 @@ But Pluely is a basic overlay. It has no local RAG, no meeting history, no dual 
 
 ## Why Natively?
 
-While other tools focus on being "lightweight" wrappers, Natively is a complete intelligence system — a no subscription interview AI that gives you everything for free.
+While other tools act as simple API wrappers, Natively is a complete, native intelligence system designed specifically for high-stakes meetings and interviews.
 
-- **Local Vector Database (RAG):** We embed your meetings locally so you can ask, "What did John say about the API last week?"
-- **Rich Dashboard:** A full UI to manage, search, and export your history—not just a floating window.
+- **Native Audio Capture (<500ms):** Built with Rust and Zero-Copy ABI transfers, bypassing generic web-audio limitations for ultra-low latency.
+- **Dual-Channel Intelligence:** Distinct pipelines for system audio (what they say) and your microphone (what you dictate) ensuring perfect transcription without room noise.
+- **Battle-Tested Stealth Mode:** Completely undetectable. Hides from the dock, disables popups, and disguises the process during screen sharing.
 - **Rolling Context:** We don't just transcribe; we maintain a "memory window" of the conversation for smarter answers.
+- **Local RAG Memory:** We embed your meetings locally using SQLite vector search so you can ask, "What did John say about the API last week?"
+- **Rich Dashboard:** A full UI to manage, search, and export your history—not just a floating window.
+- **Fully Offline Capable:** Don't trust the cloud? Run Natively 100% offline using local Ollama models with zero telemetry.
 
 ---
 
@@ -247,7 +252,7 @@ Version 2.0.5 delivers major reliability fixes to Stealth Mode and Process Disgu
 - [Why Natively wins](#why-natively-wins)
 - [Where we're not there yet](#where-were-not-there-yet)
 - [Why Natively?](#why-natively)
-- [💎 Natively Pro](#-natively-pro)
+- [Natively Pro](#natively-pro)
 - [Privacy & Security](#privacy--security-core-design-principle)
 - [Installation (Developers)](#installation-developers--contributors)
 - [AI Providers](#ai-providers)
@@ -354,14 +359,14 @@ Connect **any** speech provider and **any** LLM. No subscriptions, no markups, n
 
 Connect Natively to **any** leading model or local inference engine.
 
-| Provider                   | Best For                                                    |
-| :------------------------- | :---------------------------------------------------------- |
-| **Gemini 3.1 Pro/Flash**   | Recommended: Massive context window (2M tokens) & low cost. |
-| **OpenAI (GPT-5.2)**       | High reasoning capabilities.                                |
-| **Anthropic (Claude 4.5)** | Coding & complex nuanced tasks.                             |
-| **Groq / Llama 3.3**       | Insane speed (near-instant answers).                        |
-| **Ollama / LocalAI**       | 100% Offline & Private (No API keys needed).                |
-| **OpenAI-Compatible**      | Connect to _any_ custom endpoint (vLLM, LM Studio, etc.)    |
+| Provider                     | Best For                                                    |
+| :--------------------------- | :---------------------------------------------------------- |
+| **Gemini 3.1 Series**        | Recommended: Massive context window (2M tokens) & low cost. |
+| **OpenAI (GPT-5.4 & o3)**    | High reasoning capabilities.                                |
+| **Anthropic (Claude 4.6)**   | Coding & complex nuanced tasks.                             |
+| **Groq (Llama 3.3/Scout 4)** | Insane speed (near-instant answers) & screenshot analysis.  |
+| **Ollama / LocalAI**         | 100% Offline & Private (No API keys needed).                |
+| **OpenAI-Compatible**        | Connect to _any_ custom endpoint (vLLM, LM Studio, etc.)    |
 
 > **Note:** You only need ONE speech provider to get started. We recommend **Google STT** ,**Groq** or **Deepgram** for the fastest real-time performance.
 
@@ -456,10 +461,10 @@ npm run dist
 - **Custom (BYO Endpoint):** Paste any cURL command to use OpenRouter, DeepSeek, or private endpoints.
 - **Ollama (Local):** Zero-setup detection of local models (Llama 3, Mistral, Gemma).
 - **Dynamic Model Selection:** Preferred models (OpenAI, Anthropic, Google) now automatically appear across the app.
-- **Google Gemini:** First-class support for Gemini 1.5 Pro/Flash.
-- **OpenAI:** GPT-5.2 support with optimized system prompts.
-- **Anthropic:** Claude 3.5/4.5 Sonnet support with corrected max_tokens.
-- **Groq:** Ultra-fast inference with Llama 3.3 models.
+- **Google Gemini:** First-class support for the Gemini 3.1 series.
+- **OpenAI:** GPT-5.4 and o3 series support with optimized system prompts.
+- **Anthropic:** Claude 4.6 series support with corrected max_tokens.
+- **Groq:** Ultra-fast text inference with Llama 3.3, and screenshot analysis using Llama 4 Scout.
 
 ---
 
@@ -474,7 +479,7 @@ npm run dist
 ### Real-time Interview Copilot & Coding Help
 
 - Real-time speech-to-text (**<500ms latency**)
-- **Fast Response Mode**: Ultra-fast text responses using Groq Llama 3.
+- **Fast Response Mode**: Ultra-fast text responses using Groq Llama 3.3.
 - **Multilingual Support**: Choose from various response languages, and set speech recognition matching specific accents and dialects.
 - **Anti-Chatbot / Human Persona System**: Refined system prompts and negative constraints ensure responses are concise, conversational, and indistinguishable from a real candidate (no robotic preambles or lectures).
 - Context-aware Memory (RAG) for Past Meetings
@@ -533,7 +538,7 @@ Natively understands that _listening_ to a meeting and _talking_ to an AI are di
 
 - **Undetectable Mode:** Instantly hide from dock/taskbar with visually locked selector to prevent state mismatches.
 - **Cross-Window State Sync**: Real-time state synchronization across Settings, Launcher, and Overlay windows.
-- **Masquerading:** Disguise process names and window titles as harmless system utilities.
+- **Process Disguise (Masquerading):** Instantly change the app to look like Terminal, System Settings, Activity Monitor, or other harmless utilities to completely evade detection during screen sharing.
 - **Security Hardening**: API keys are scrubbed from memory on app quit and credentials manager overwrites key data before disposal.
 - **API Rate Limiting**: Token-bucket algorithm (burst/refill) to prevent 429 errors on free-tier providers.
 - **Local-Only Processing:** All data stays on your machine.
@@ -595,11 +600,11 @@ No raw audio, screenshots, or transcripts are stored or transmitted unless expli
 
 ### Supported Models
 
-- **Gemini 3.1** (Flash / Pro)
-- **OpenAI** (GPT-5.3)
-- **Claude** (Sonnet 4.6)
+- **Gemini 3.1 Series**
+- **OpenAI** (GPT-5.4, o3 series)
+- **Claude** (4.6 series)
 - **Ollama** (Llama, Mistral, CodeLlama)
-- **Groq** (Llama, Mixtral)
+- **Groq** (Llama 3.3 for text, Llama 4 Scout for OCR)
 
 ### System Requirements
 
@@ -638,7 +643,7 @@ This project does not encourage misuse or deception.
 
 ## Contributing
 
-Contributions are welcome:
+Contributions are welcome! Please see our [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines on how to get started.
 
 - Bug fixes
 - Feature improvements
@@ -748,3 +753,8 @@ Creator rewards help cover **AI/API bills** and ongoing development costs.
    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=evinjohnn/natively-cluely-ai-assistant&type=Date" />
  </picture>
 </a>
+
+<!-- SEO keywords: free ai interview copilot · open source cluely · cluely alternative · cluely clone · interview coder alternative · final round ai alternative · lockedin ai alternative · free interview cheating tool · ai interview assistant · real-time interview ai · undetectable interview ai · best ai interview tool 2025 2026 · free cluely · open source interview ai · ai meeting assistant local · byok ai assistant · ollama interview assistant · stealth interview ai · interview cheating software · ai copilot interview -->
+<sub>
+free-ai-interview-copilot · open-source-cluely · cluely-alternative · cluely-clone · interview-coder-alternative · final-round-ai-alternative · lockedin-ai-alternative · ai-interview-assistant · real-time-interview-ai · undetectable-interview-ai · stealth-mode · local-ai · ollama · byok · rag · electron · rust · privacy-first · meeting-assistant · interview-helper · open-source-interview-ai
+</sub>
