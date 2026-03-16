@@ -63,10 +63,23 @@ export class ModelSelectorWindowHelper {
 
         // Standard dropdown positioning
         this.window.setPosition(Math.round(x), Math.round(y))
-
         this.ensureVisibleOnScreen();
-        this.window.show()
-        this.window.focus()
+
+        if (process.platform === 'win32' && this.contentProtection) {
+            this.window.setOpacity(0);
+            this.window.show();
+            this.window.setContentProtection(true);
+            setTimeout(() => {
+                if (this.window && !this.window.isDestroyed()) {
+                    this.window.setOpacity(1);
+                    this.window.focus();
+                }
+            }, 60);
+        } else {
+            this.window.setContentProtection(this.contentProtection);
+            this.window.show();
+            this.window.focus();
+        }
     }
 
     public hideWindow(): void {
@@ -149,7 +162,7 @@ export class ModelSelectorWindowHelper {
 
         this.window.once('ready-to-show', () => {
             if (showWhenReady) {
-                this.window?.show()
+                this.showWindow(this.window?.getBounds().x || 0, this.window?.getBounds().y || 0)
             }
         })
 
