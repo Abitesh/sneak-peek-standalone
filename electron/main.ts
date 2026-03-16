@@ -1582,11 +1582,11 @@ export class AppState {
         if (isWin) {
           iconPath = app.isPackaged
             ? path.join(process.resourcesPath, "assets/fakeicon/win/terminal.png")
-            : path.resolve(__dirname, "../assets/fakeicon/win/terminal.png");
+            : path.join(app.getAppPath(), "assets/fakeicon/win/terminal.png");
         } else {
           iconPath = app.isPackaged
             ? path.join(process.resourcesPath, "assets/fakeicon/mac/terminal.png")
-            : path.resolve(__dirname, "../assets/fakeicon/mac/terminal.png");
+            : path.join(app.getAppPath(), "assets/fakeicon/mac/terminal.png");
         }
         break;
       case 'settings':
@@ -1594,11 +1594,11 @@ export class AppState {
         if (isWin) {
           iconPath = app.isPackaged
             ? path.join(process.resourcesPath, "assets/fakeicon/win/settings.png")
-            : path.resolve(__dirname, "../assets/fakeicon/win/settings.png");
+            : path.join(app.getAppPath(), "assets/fakeicon/win/settings.png");
         } else {
           iconPath = app.isPackaged
             ? path.join(process.resourcesPath, "assets/fakeicon/mac/settings.png")
-            : path.resolve(__dirname, "../assets/fakeicon/mac/settings.png");
+            : path.join(app.getAppPath(), "assets/fakeicon/mac/settings.png");
         }
         break;
       case 'activity':
@@ -1606,11 +1606,11 @@ export class AppState {
         if (isWin) {
           iconPath = app.isPackaged
             ? path.join(process.resourcesPath, "assets/fakeicon/win/activity.png")
-            : path.resolve(__dirname, "../assets/fakeicon/win/activity.png");
+            : path.join(app.getAppPath(), "assets/fakeicon/win/activity.png");
         } else {
           iconPath = app.isPackaged
             ? path.join(process.resourcesPath, "assets/fakeicon/mac/activity.png")
-            : path.resolve(__dirname, "../assets/fakeicon/mac/activity.png");
+            : path.join(app.getAppPath(), "assets/fakeicon/mac/activity.png");
         }
         break;
       case 'none':
@@ -1618,15 +1618,15 @@ export class AppState {
         if (isMac) {
           iconPath = app.isPackaged
             ? path.join(process.resourcesPath, "natively.icns")
-            : path.resolve(__dirname, "../assets/natively.icns");
+            : path.join(app.getAppPath(), "assets/natively.icns");
         } else if (isWin) {
           iconPath = app.isPackaged
             ? path.join(process.resourcesPath, "assets/icons/win/icon.ico")
-            : path.resolve(__dirname, "../assets/icons/win/icon.ico");
+            : path.join(app.getAppPath(), "assets/icons/win/icon.ico");
         } else {
           iconPath = app.isPackaged
             ? path.join(process.resourcesPath, "icon.png")
-            : path.resolve(__dirname, "../assets/icon.png");
+            : path.join(app.getAppPath(), "assets/icon.png");
         }
         break;
     }
