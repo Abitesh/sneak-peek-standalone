@@ -4,6 +4,7 @@ import OpenAI from "openai"
 import Anthropic from "@anthropic-ai/sdk"
 import fs from "fs"
 import sharp from "sharp"
+import { ModelVersionManager, ModelFamily, TextModelFamily } from './services/ModelVersionManager'
 import {
   HARD_SYSTEM_PROMPT, GROQ_SYSTEM_PROMPT, OPENAI_SYSTEM_PROMPT, CLAUDE_SYSTEM_PROMPT,
   UNIVERSAL_SYSTEM_PROMPT, UNIVERSAL_ANSWER_PROMPT, UNIVERSAL_WHAT_TO_ANSWER_PROMPT,
@@ -61,11 +62,17 @@ export class LLMHelper {
   // Rate limiters per provider to prevent 429 errors on free tiers
   private rateLimiters: ReturnType<typeof createProviderRateLimiters>;
 
+  // Self-improving model version manager for vision analysis
+  private modelVersionManager: ModelVersionManager;
+
   constructor(apiKey?: string, useOllama: boolean = false, ollamaModel?: string, ollamaUrl?: string, groqApiKey?: string, openaiApiKey?: string, claudeApiKey?: string) {
     this.useOllama = useOllama
 
     // Initialize rate limiters
     this.rateLimiters = createProviderRateLimiters();
+
+    // Initialize model version manager
+    this.modelVersionManager = new ModelVersionManager();
 
     // Initialize Groq client if API key provided
     if (groqApiKey) {
@@ -135,6 +142,22 @@ export class LLMHelper {
   }
 
   /**
+   * Initialize the self-improving model version manager.
+   * Should be called after all API keys are configured.
+   * Triggers initial model discovery and starts background scheduler.
+   */
+  public async initModelVersionManager(): Promise<void> {
+    this.modelVersionManager.setApiKeys({
+      openai: this.openaiApiKey,
+      gemini: this.apiKey,
+      claude: this.claudeApiKey,
+      groq: this.groqApiKey,
+    });
+    await this.modelVersionManager.initialize();
+    console.log(this.modelVersionManager.getSummary());
+  }
+
+  /**
    * Scrub all API keys from memory to minimize exposure window.
    * Called on app quit.
    */
@@ -151,6 +174,8 @@ export class LLMHelper {
     if (this.rateLimiters) {
       Object.values(this.rateLimiters).forEach(rl => rl.destroy());
     }
+    // Stop model version manager background scheduler
+    this.modelVersionManager.stopScheduler();
     console.log('[LLMHelper] Keys scrubbed from memory');
   }
 
@@ -479,30 +504,14 @@ export class LLMHelper {
 
   public async extractProblemFromImages(imagePaths: string[]) {
     try {
-      // Build content parts with images
-      const parts: any[] = []
-
-      for (const imagePath of imagePaths) {
-        const imageData = await fs.promises.readFile(imagePath)
-        parts.push({
-          inlineData: {
-            data: imageData.toString("base64"),
-            mimeType: "image/png"
-          }
-        })
-      }
-
-      const prompt = `${IMAGE_ANALYSIS_PROMPT}\n\nYou are a wingman. Please analyze these images and extract the following information in JSON format:\n{
+      const prompt = `You are a wingman. Please analyze these images and extract the following information in JSON format:\n{
   "problem_statement": "A clear statement of the problem or situation depicted in the images.",
   "context": "Relevant background or context from the images.",
   "suggested_responses": ["First possible answer or action", "Second possible answer or action", "..."],
   "reasoning": "Explanation of why these suggestions are appropriate."
 }\nImportant: Return ONLY the JSON object, without any markdown formatting or code blocks.`
 
-      parts.push({ text: prompt })
-
-      // Use Flash for multimodal (images)
-      const text = await this.generateWithFlash(parts)
+      const text = await this.generateWithVisionFallback(IMAGE_ANALYSIS_PROMPT, prompt, imagePaths)
       return JSON.parse(this.cleanJsonResponse(text))
     } catch (error) {
       // console.error("Error extracting problem from images:", error)
@@ -511,7 +520,7 @@ export class LLMHelper {
   }
 
   public async generateSolution(problemInfo: any) {
-    const prompt = `${IMAGE_ANALYSIS_PROMPT}\n\nGiven this problem or situation:\n${JSON.stringify(problemInfo, null, 2)}\n\nPlease provide your response in the following JSON format:\n{
+    const prompt = `Given this problem or situation:\n${JSON.stringify(problemInfo, null, 2)}\n\nPlease provide your response in the following JSON format:\n{
   "solution": {
     "code": "The code or main answer here.",
     "problem_statement": "Restate the problem or situation.",
@@ -521,35 +530,18 @@ export class LLMHelper {
   }
 }\nImportant: Return ONLY the JSON object, without any markdown formatting or code blocks.`
 
-    // console.log("[LLMHelper] Calling Gemini LLM for solution...");
     try {
-      // Use Flash as default (Pro is experimental)
-      const text = await this.generateWithFlash([{ text: prompt }])
-      // console.log("[LLMHelper] Gemini LLM returned result.");
+      const text = await this.generateWithVisionFallback(IMAGE_ANALYSIS_PROMPT, prompt)
       const parsed = JSON.parse(this.cleanJsonResponse(text))
-      // console.log("[LLMHelper] Parsed LLM response:", parsed)
       return parsed
     } catch (error) {
-      // console.error("[LLMHelper] Error in generateSolution:", error);
       throw error;
     }
   }
 
   public async debugSolutionWithImages(problemInfo: any, currentCode: string, debugImagePaths: string[]) {
     try {
-      const parts: any[] = []
-
-      for (const imagePath of debugImagePaths) {
-        const imageData = await fs.promises.readFile(imagePath)
-        parts.push({
-          inlineData: {
-            data: imageData.toString("base64"),
-            mimeType: "image/png"
-          }
-        })
-      }
-
-      const prompt = `${IMAGE_ANALYSIS_PROMPT}\n\nYou are a wingman. Given:\n1. The original problem or situation: ${JSON.stringify(problemInfo, null, 2)}\n2. The current response or approach: ${currentCode}\n3. The debug information in the provided images\n\nPlease analyze the debug information and provide feedback in this JSON format:\n{
+      const prompt = `You are a wingman. Given:\n1. The original problem or situation: ${JSON.stringify(problemInfo, null, 2)}\n2. The current response or approach: ${currentCode}\n3. The debug information in the provided images\n\nPlease analyze the debug information and provide feedback in this JSON format:\n{
   "solution": {
     "code": "The code or main answer here.",
     "problem_statement": "Restate the problem or situation.",
@@ -559,15 +551,10 @@ export class LLMHelper {
   }
 }\nImportant: Return ONLY the JSON object, without any markdown formatting or code blocks.`
 
-      parts.push({ text: prompt })
-
-      // Use Flash for multimodal (images)
-      const text = await this.generateWithFlash(parts)
+      const text = await this.generateWithVisionFallback(IMAGE_ANALYSIS_PROMPT, prompt, debugImagePaths)
       const parsed = JSON.parse(this.cleanJsonResponse(text))
-      // console.log("[LLMHelper] Parsed debug LLM response:", parsed)
       return parsed
     } catch (error) {
-      // console.error("Error debugging solution with images:", error)
       throw error
     }
   }
@@ -612,28 +599,8 @@ export class LLMHelper {
 
   public async analyzeImageFiles(imagePaths: string[]) {
     try {
-      // Build prompt
-      const prompt = `${HARD_SYSTEM_PROMPT}\n\nDescribe the content of ${imagePaths.length > 1 ? 'these images' : 'this image'} in a short, concise answer. If it contains code or a problem, solve it.`;
-
-      const contents: any[] = [
-        { role: "user", parts: [{ text: prompt }] },
-      ];
-
-      // Add all images as inline data parts
-      const imageParts: any[] = [];
-      for (const p of imagePaths) {
-        if (fs.existsSync(p)) {
-          const { mimeType, data } = await this.processImage(p);
-          imageParts.push({ inlineData: { mimeType, data } });
-        }
-      }
-
-      if (imageParts.length > 0) {
-        contents.push({ role: "user", parts: imageParts });
-      }
-
-      // Use Flash for multimodal
-      const text = await this.generateWithFlash(contents);
+      const prompt = `Describe the content of ${imagePaths.length > 1 ? 'these images' : 'this image'} in a short, concise answer. If it contains code or a problem, solve it.`;
+      const text = await this.generateWithVisionFallback(HARD_SYSTEM_PROMPT, prompt, imagePaths);
 
       return { text: text, timestamp: Date.now() };
 
@@ -827,7 +794,10 @@ ANSWER DIRECTLY:`;
       if (this.isClaudeModel(this.currentModelId) && this.claudeClient) {
         return await this.generateWithClaude(userContent, claudeSystemPrompt, imagePaths);
       }
-      if (this.isGroqModel(this.currentModelId) && this.groqClient && !isMultimodal) {
+      if (this.isGroqModel(this.currentModelId) && this.groqClient) {
+        if (isMultimodal && imagePaths) {
+          return await this.generateWithGroqMultimodal(userContent, imagePaths, openaiSystemPrompt);
+        }
         return await this.generateWithGroq(combinedMessages.groq);
       }
 
@@ -842,23 +812,24 @@ ANSWER DIRECTLY:`;
       type ProviderAttempt = { name: string; execute: () => Promise<string> };
       const providers: ProviderAttempt[] = [];
 
+      // Get auto-discovered text model IDs from ModelVersionManager
+      const textOpenAI = this.modelVersionManager.getTextTieredModels(TextModelFamily.OPENAI).tier1;
+      const textGeminiFlash = this.modelVersionManager.getTextTieredModels(TextModelFamily.GEMINI_FLASH).tier1;
+      const textGeminiPro = this.modelVersionManager.getTextTieredModels(TextModelFamily.GEMINI_PRO).tier1;
+      const textClaude = this.modelVersionManager.getTextTieredModels(TextModelFamily.CLAUDE).tier1;
+      const textGroq = this.modelVersionManager.getTextTieredModels(TextModelFamily.GROQ).tier1;
+
       if (isMultimodal) {
-        // MULTIMODAL: Only vision-capable providers (NO Groq)
-        if (this.client) {
-          providers.push({ name: `Gemini Flash`, execute: () => this.tryGenerateResponse(combinedMessages.gemini, imagePaths) });
-        }
+        // MULTIMODAL PROVIDER ORDER: OpenAI -> Gemini Flash -> Claude -> Gemini Pro -> Groq -> Custom/Ollama
         if (this.openaiClient) {
-          providers.push({ name: `OpenAI (${OPENAI_MODEL})`, execute: () => this.generateWithOpenai(userContent, openaiSystemPrompt, imagePaths) });
-        }
-        if (this.claudeClient) {
-          providers.push({ name: `Claude (${CLAUDE_MODEL})`, execute: () => this.generateWithClaude(userContent, claudeSystemPrompt, imagePaths) });
+          providers.push({ name: `OpenAI (${textOpenAI})`, execute: () => this.generateWithOpenai(userContent, openaiSystemPrompt, imagePaths) });
         }
         if (this.client) {
           providers.push({
-            name: `Gemini Pro`,
+            name: `Gemini Flash (${textGeminiFlash})`,
             execute: async () => {
               const orig = this.geminiModel;
-              this.geminiModel = GEMINI_PRO_MODEL;
+              this.geminiModel = textGeminiFlash;
               try {
                 const r = await this.tryGenerateResponse(combinedMessages.gemini, imagePaths);
                 this.geminiModel = orig;
@@ -870,18 +841,58 @@ ANSWER DIRECTLY:`;
             }
           });
         }
+        if (this.claudeClient) {
+          providers.push({ name: `Claude (${textClaude})`, execute: () => this.generateWithClaude(userContent, claudeSystemPrompt, imagePaths) });
+        }
+        if (this.client) {
+          providers.push({
+            name: `Gemini Pro (${textGeminiPro})`,
+            execute: async () => {
+              const orig = this.geminiModel;
+              this.geminiModel = textGeminiPro;
+              try {
+                const r = await this.tryGenerateResponse(combinedMessages.gemini, imagePaths);
+                this.geminiModel = orig;
+                return r;
+              } catch (e) {
+                this.geminiModel = orig;
+                throw e;
+              }
+            }
+          });
+        }
+        if (this.groqClient) {
+          providers.push({
+            name: `Groq (meta-llama/llama-4-scout-17b-16e-instruct)`,
+            execute: () => this.generateWithGroqMultimodal(userContent, imagePaths!, openaiSystemPrompt)
+          });
+        }
       } else {
         // TEXT-ONLY: All providers including Groq
         if (this.groqClient) {
-          providers.push({ name: `Groq (${GROQ_MODEL})`, execute: () => this.generateWithGroq(combinedMessages.groq) });
+          providers.push({ name: `Groq (${textGroq})`, execute: () => this.generateWithGroq(combinedMessages.groq) });
         }
         if (this.client) {
-          providers.push({ name: `Gemini Flash`, execute: () => this.tryGenerateResponse(combinedMessages.gemini) });
           providers.push({
-            name: `Gemini Pro`,
+            name: `Gemini Flash (${textGeminiFlash})`,
             execute: async () => {
               const orig = this.geminiModel;
-              this.geminiModel = GEMINI_PRO_MODEL;
+              this.geminiModel = textGeminiFlash;
+              try {
+                const r = await this.tryGenerateResponse(combinedMessages.gemini);
+                this.geminiModel = orig;
+                return r;
+              } catch (e) {
+                this.geminiModel = orig;
+                throw e;
+              }
+            }
+          });
+          providers.push({
+            name: `Gemini Pro (${textGeminiPro})`,
+            execute: async () => {
+              const orig = this.geminiModel;
+              this.geminiModel = textGeminiPro;
               try {
                 const r = await this.tryGenerateResponse(combinedMessages.gemini);
                 this.geminiModel = orig;
@@ -894,10 +905,10 @@ ANSWER DIRECTLY:`;
           });
         }
         if (this.openaiClient) {
-          providers.push({ name: `OpenAI (${OPENAI_MODEL})`, execute: () => this.generateWithOpenai(userContent, openaiSystemPrompt) });
+          providers.push({ name: `OpenAI (${textOpenAI})`, execute: () => this.generateWithOpenai(userContent, openaiSystemPrompt) });
         }
         if (this.claudeClient) {
-          providers.push({ name: `Claude (${CLAUDE_MODEL})`, execute: () => this.generateWithClaude(userContent, claudeSystemPrompt) });
+          providers.push({ name: `Claude (${textClaude})`, execute: () => this.generateWithClaude(userContent, claudeSystemPrompt) });
         }
       }
 
@@ -1311,6 +1322,282 @@ ANSWER DIRECTLY:`;
   }
 
 
+  /**
+   * Non-streaming multimodal response from Groq using Llama 4 Scout
+   */
+  private async generateWithGroqMultimodal(userMessage: string, imagePaths: string[], systemPrompt?: string): Promise<string> {
+    if (!this.groqClient) throw new Error("Groq client not initialized");
+
+    const messages: any[] = [];
+    if (systemPrompt) {
+      messages.push({ role: "system", content: systemPrompt });
+    }
+
+    const contentParts: any[] = [{ type: "text", text: userMessage }];
+    for (const p of imagePaths) {
+      if (fs.existsSync(p)) {
+        const imageData = await fs.promises.readFile(p);
+        contentParts.push({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${imageData.toString("base64")}` } });
+      }
+    }
+    messages.push({ role: "user", content: contentParts });
+
+    const response = await this.groqClient.chat.completions.create({
+      model: "meta-llama/llama-4-scout-17b-16e-instruct",
+      messages,
+      temperature: 1,
+      max_completion_tokens: 1024,
+      top_p: 1,
+      stream: false,
+      stop: null
+    });
+
+    return response.choices[0]?.message?.content || "";
+  }
+
+  /**
+   * Universal non-streaming fallback helper for internal operations (screenshot analysis, problem extraction, etc.)
+   *
+   * THREE-TIER RETRY ROTATION (self-improving):
+   *   Tier 1: Pinned stable models (promoted only when 2+ minor versions behind)
+   *   Tier 2: Latest auto-discovered models (updated every ~14 days) — 1st retry
+   *   Tier 3: Same as Tier 2 — 2nd retry (with backoff between tiers)
+   *
+   * Provider order per tier: OpenAI -> Gemini Flash -> Claude -> Gemini Pro -> Groq Scout
+   * After all cloud tiers: Custom Provider -> cURL Provider -> Ollama
+   */
+  private async generateWithVisionFallback(systemPrompt: string, userPrompt: string, imagePaths: string[] = []): Promise<string> {
+    type ProviderAttempt = { name: string; execute: () => Promise<string> };
+    const isMultimodal = imagePaths.length > 0;
+
+    // Helper: build a provider attempt for a given family + model ID
+    const buildProviderForFamily = (family: ModelFamily, modelId: string): ProviderAttempt | null => {
+      switch (family) {
+        case ModelFamily.OPENAI:
+          if (!this.openaiClient) return null;
+          return {
+            name: `OpenAI (${modelId})`,
+            execute: () => this.generateWithOpenai(userPrompt, systemPrompt, isMultimodal ? imagePaths : undefined)
+          };
+
+        case ModelFamily.GEMINI_FLASH:
+          if (!this.client) return null;
+          if (isMultimodal) {
+            return {
+              name: `Gemini Flash (${modelId})`,
+              execute: async () => {
+                const contents: any[] = [{ text: `${systemPrompt}\n\n${userPrompt}` }];
+                for (const p of imagePaths) {
+                  if (fs.existsSync(p)) {
+                    const { mimeType, data } = await this.processImage(p);
+                    contents.push({ inlineData: { mimeType, data } });
+                  }
+                }
+                return await this.generateContent(contents);
+              }
+            };
+          }
+          return {
+            name: `Gemini Flash (${modelId})`,
+            execute: () => this.generateContent([{ text: `${systemPrompt}\n\n${userPrompt}` }])
+          };
+
+        case ModelFamily.CLAUDE:
+          if (!this.claudeClient) return null;
+          return {
+            name: `Claude (${modelId})`,
+            execute: () => this.generateWithClaude(userPrompt, systemPrompt, isMultimodal ? imagePaths : undefined)
+          };
+
+        case ModelFamily.GEMINI_PRO:
+          if (!this.client) return null;
+          if (isMultimodal) {
+            return {
+              name: `Gemini Pro (${modelId})`,
+              execute: async () => {
+                const orig = this.geminiModel;
+                this.geminiModel = modelId;
+                try {
+                  const contents: any[] = [{ text: `${systemPrompt}\n\n${userPrompt}` }];
+                  for (const p of imagePaths) {
+                    if (fs.existsSync(p)) {
+                      const { mimeType, data } = await this.processImage(p);
+                      contents.push({ inlineData: { mimeType, data } });
+                    }
+                  }
+                  const r = await this.generateContent(contents);
+                  this.geminiModel = orig;
+                  return r;
+                } catch (e) {
+                  this.geminiModel = orig;
+                  throw e;
+                }
+              }
+            };
+          }
+          return {
+            name: `Gemini Pro (${modelId})`,
+            execute: async () => {
+              const orig = this.geminiModel;
+              this.geminiModel = modelId;
+              try {
+                const r = await this.generateContent([{ text: `${systemPrompt}\n\n${userPrompt}` }]);
+                this.geminiModel = orig;
+                return r;
+              } catch (e) {
+                this.geminiModel = orig;
+                throw e;
+              }
+            }
+          };
+
+        case ModelFamily.GROQ_LLAMA:
+          if (!this.groqClient) return null;
+          if (isMultimodal) {
+            return {
+              name: `Groq (${modelId})`,
+              execute: () => this.generateWithGroqMultimodal(userPrompt, imagePaths, systemPrompt)
+            };
+          }
+          return {
+            name: `Groq (${modelId})`,
+            execute: () => this.generateWithGroq(`${systemPrompt}\n\n${userPrompt}`)
+          };
+
+        default:
+          return null;
+      }
+    };
+
+    // ──────────────────────────────────────────────────────────────────
+    // Build 3-tier retry rotation from ModelVersionManager
+    // ──────────────────────────────────────────────────────────────────
+    const allTiers = this.modelVersionManager.getAllVisionTiers();
+
+    const buildTierProviders = (tierKey: 'tier1' | 'tier2' | 'tier3'): ProviderAttempt[] => {
+      const result: ProviderAttempt[] = [];
+      for (const entry of allTiers) {
+        const modelId = entry[tierKey];
+        const attempt = buildProviderForFamily(entry.family, modelId);
+        if (attempt) result.push(attempt);
+      }
+      return result;
+    };
+
+    const tier1Providers = buildTierProviders('tier1');
+    const tier2Providers = buildTierProviders('tier2');
+    const tier3Providers = buildTierProviders('tier3'); // Same as tier2 — pure retry
+
+
+    // ──────────────────────────────────────────────────────────────────
+    // Local fallback providers (appended after all cloud tiers)
+    // ──────────────────────────────────────────────────────────────────
+    const localProviders: ProviderAttempt[] = [];
+
+    if (this.customProvider) {
+      if (isMultimodal) {
+        localProviders.push({
+          name: `Custom Provider (${this.customProvider.name})`,
+          execute: () => this.executeCustomProvider(
+            this.customProvider!.curlCommand,
+            `${systemPrompt}\n\n${userPrompt}`,
+            systemPrompt,
+            userPrompt,
+            "",
+            imagePaths[0]
+          )
+        });
+      } else {
+        localProviders.push({
+          name: `Custom Provider (${this.customProvider.name})`,
+          execute: () => this.executeCustomProvider(
+            this.customProvider!.curlCommand,
+            `${systemPrompt}\n\n${userPrompt}`,
+            systemPrompt,
+            userPrompt,
+            ""
+          )
+        });
+      }
+    }
+
+    if (this.activeCurlProvider && !this.customProvider) {
+      localProviders.push({
+        name: `cURL Provider (${this.activeCurlProvider.name})`,
+        execute: () => this.chatWithCurl(userPrompt, systemPrompt)
+      });
+    }
+
+    if (this.useOllama) {
+      localProviders.push({
+        name: `Ollama (${this.ollamaModel})`,
+        execute: () => this.callOllama(`${systemPrompt}\n\n${userPrompt}`)
+      });
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Execute 3-tier rotation with exponential backoff between tiers
+    // ──────────────────────────────────────────────────────────────────
+    const tiers = [
+      { label: 'Tier 1 (Stable)', providers: tier1Providers },
+      { label: 'Tier 2 (Latest)', providers: tier2Providers },
+      { label: 'Tier 3 (Retry)', providers: tier3Providers },
+    ];
+
+    for (let tierIndex = 0; tierIndex < tiers.length; tierIndex++) {
+      const tier = tiers[tierIndex];
+
+      if (tier.providers.length === 0) continue;
+
+      // Exponential backoff between tiers (skip for first tier)
+      if (tierIndex > 0) {
+        const backoffMs = 1000 * Math.pow(2, tierIndex - 1);
+        console.log(`[LLMHelper] 🔄 Escalating to ${tier.label} after ${backoffMs}ms backoff...`);
+        await new Promise(resolve => setTimeout(resolve, backoffMs));
+      }
+
+      for (const provider of tier.providers) {
+        try {
+          const emoji = tierIndex === 0 ? '🚀' : tierIndex === 1 ? '🔁' : '🆘';
+          console.log(`[LLMHelper] ${emoji} [${tier.label}] Attempting ${provider.name}...`);
+          const result = await provider.execute();
+          if (result && result.trim().length > 0) {
+            console.log(`[LLMHelper] ✅ [${tier.label}] ${provider.name} succeeded.`);
+            return result;
+          }
+          console.warn(`[LLMHelper] ⚠️ [${tier.label}] ${provider.name} returned empty response`);
+        } catch (err: any) {
+          console.warn(`[LLMHelper] ⚠️ [${tier.label}] ${provider.name} failed: ${err.message}`);
+
+          // Event-driven discovery: trigger on 404 / model-not-found errors
+          const errMsg = (err.message || '').toLowerCase();
+          if (errMsg.includes('404') || errMsg.includes('not found') || errMsg.includes('deprecated')) {
+            this.modelVersionManager.onModelError(provider.name).catch(() => {});
+          }
+        }
+      }
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Local fallback — absolute last resort after all cloud tiers exhausted
+    // ──────────────────────────────────────────────────────────────────
+    for (const provider of localProviders) {
+      try {
+        console.log(`[LLMHelper] 🏠 [Local Fallback] Attempting ${provider.name}...`);
+        const result = await provider.execute();
+        if (result && result.trim().length > 0) {
+          console.log(`[LLMHelper] ✅ [Local Fallback] ${provider.name} succeeded.`);
+          return result;
+        }
+      } catch (err: any) {
+        console.warn(`[LLMHelper] ⚠️ [Local Fallback] ${provider.name} failed: ${err.message}`);
+      }
+    }
+
+    throw new Error("All AI providers failed across all 3 tiers and local fallbacks.");
+  }
+
+
 
   /**
    * Stream chat response with Groq-first fallback chain for text-only,
@@ -1359,7 +1646,8 @@ ANSWER DIRECTLY:`;
     }
 
     // ============================================================
-    // SMART DYNAMIC FALLBACK: Build provider list based on what's configured
+    // SMART DYNAMIC FALLBACK: Build provider list using auto-discovered
+    // text models from ModelVersionManager.
     // Multimodal requests EXCLUDE Groq (no vision support)
     // Text-only requests can use ALL providers
     // OpenAI/Claude use proper system+user message separation for quality
@@ -1371,20 +1659,26 @@ ANSWER DIRECTLY:`;
     const openaiSystemPrompt = skipSystemPrompt ? undefined : this.injectLanguageInstruction(OPENAI_SYSTEM_PROMPT);
     const claudeSystemPrompt = skipSystemPrompt ? undefined : this.injectLanguageInstruction(CLAUDE_SYSTEM_PROMPT);
 
+    // Get auto-discovered text model IDs from ModelVersionManager
+    const textOpenAI = this.modelVersionManager.getTextTieredModels(TextModelFamily.OPENAI).tier1;
+    const textGeminiFlash = this.modelVersionManager.getTextTieredModels(TextModelFamily.GEMINI_FLASH).tier1;
+    const textGeminiPro = this.modelVersionManager.getTextTieredModels(TextModelFamily.GEMINI_PRO).tier1;
+    const textClaude = this.modelVersionManager.getTextTieredModels(TextModelFamily.CLAUDE).tier1;
+    const textGroq = this.modelVersionManager.getTextTieredModels(TextModelFamily.GROQ).tier1;
+
     if (isMultimodal) {
-      // MULTIMODAL PROVIDER ORDER: Gemini Flash → OpenAI → Claude → Gemini Pro
-      // Groq does NOT support vision
-      if (this.client) {
-        providers.push({ name: `Gemini Flash (${GEMINI_FLASH_MODEL})`, execute: () => this.streamWithGeminiModel(combinedMessages.gemini, GEMINI_FLASH_MODEL, imagePaths) });
-      }
+      // MULTIMODAL PROVIDER ORDER: OpenAI -> Gemini Flash -> Claude -> Gemini Pro -> Groq Scout 4
       if (this.openaiClient) {
-        providers.push({ name: `OpenAI (${OPENAI_MODEL})`, execute: () => this.streamWithOpenaiMultimodal(userContent, imagePaths!, openaiSystemPrompt) });
+        providers.push({ name: `OpenAI (${textOpenAI})`, execute: () => this.streamWithOpenaiMultimodal(userContent, imagePaths!, openaiSystemPrompt) });
+      }
+      if (this.client) {
+        providers.push({ name: `Gemini Flash (${textGeminiFlash})`, execute: () => this.streamWithGeminiModel(combinedMessages.gemini, textGeminiFlash, imagePaths) });
       }
       if (this.claudeClient) {
-        providers.push({ name: `Claude (${CLAUDE_MODEL})`, execute: () => this.streamWithClaudeMultimodal(userContent, imagePaths!, claudeSystemPrompt) });
+        providers.push({ name: `Claude (${textClaude})`, execute: () => this.streamWithClaudeMultimodal(userContent, imagePaths!, claudeSystemPrompt) });
       }
       if (this.client) {
-        providers.push({ name: `Gemini Pro (${GEMINI_PRO_MODEL})`, execute: () => this.streamWithGeminiModel(combinedMessages.gemini, GEMINI_PRO_MODEL, imagePaths) });
+        providers.push({ name: `Gemini Pro (${textGeminiPro})`, execute: () => this.streamWithGeminiModel(combinedMessages.gemini, textGeminiPro, imagePaths) });
       }
       if (this.groqClient) {
         providers.push({ name: `Groq (meta-llama/llama-4-scout-17b-16e-instruct)`, execute: () => this.streamWithGroqMultimodal(userContent, imagePaths!, openaiSystemPrompt) });
@@ -1392,17 +1686,17 @@ ANSWER DIRECTLY:`;
     } else {
       // TEXT-ONLY PROVIDER ORDER: Groq → OpenAI → Claude → Gemini Flash → Gemini Pro
       if (this.groqClient) {
-        providers.push({ name: `Groq (${GROQ_MODEL})`, execute: () => this.streamWithGroq(combinedMessages.groq) });
+        providers.push({ name: `Groq (${textGroq})`, execute: () => this.streamWithGroq(combinedMessages.groq) });
       }
       if (this.openaiClient) {
-        providers.push({ name: `OpenAI (${OPENAI_MODEL})`, execute: () => this.streamWithOpenai(userContent, openaiSystemPrompt) });
+        providers.push({ name: `OpenAI (${textOpenAI})`, execute: () => this.streamWithOpenai(userContent, openaiSystemPrompt) });
       }
       if (this.claudeClient) {
-        providers.push({ name: `Claude (${CLAUDE_MODEL})`, execute: () => this.streamWithClaude(userContent, claudeSystemPrompt) });
+        providers.push({ name: `Claude (${textClaude})`, execute: () => this.streamWithClaude(userContent, claudeSystemPrompt) });
       }
       if (this.client) {
-        providers.push({ name: `Gemini Flash (${GEMINI_FLASH_MODEL})`, execute: () => this.streamWithGeminiModel(combinedMessages.gemini, GEMINI_FLASH_MODEL) });
-        providers.push({ name: `Gemini Pro (${GEMINI_PRO_MODEL})`, execute: () => this.streamWithGeminiModel(combinedMessages.gemini, GEMINI_PRO_MODEL) });
+        providers.push({ name: `Gemini Flash (${textGeminiFlash})`, execute: () => this.streamWithGeminiModel(combinedMessages.gemini, textGeminiFlash) });
+        providers.push({ name: `Gemini Pro (${textGeminiPro})`, execute: () => this.streamWithGeminiModel(combinedMessages.gemini, textGeminiPro) });
       }
     }
 
@@ -1556,9 +1850,16 @@ ANSWER DIRECTLY:`;
       return;
     }
 
-    // Groq (Text Only)
-    if (this.isGroqModel(this.currentModelId) && this.groqClient && !isMultimodal) {
-      // Build Groq message
+    // Groq (Text + Multimodal)
+    if (this.isGroqModel(this.currentModelId) && this.groqClient) {
+      if (isMultimodal && imagePaths) {
+        // Route multimodal to Groq Llama 4 Scout (vision-capable)
+        const groqSystem = systemPromptOverride || OPENAI_SYSTEM_PROMPT;
+        const finalGroqSystem = this.injectLanguageInstruction(groqSystem);
+        yield* this.streamWithGroqMultimodal(userContent, imagePaths, finalGroqSystem);
+        return;
+      }
+      // Text-only Groq
       const groqSystem = systemPromptOverride ? baseSystemPrompt : GROQ_SYSTEM_PROMPT;
       const finalGroqSystem = this.injectLanguageInstruction(groqSystem);
       const groqFullMessage = `${finalGroqSystem}\n\n${userContent}`;

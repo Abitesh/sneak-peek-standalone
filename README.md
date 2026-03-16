@@ -1,9 +1,14 @@
 <div align="center">
   <img src="assets/icon.png" width="150" alt="Natively AI Assistant Logo">
 
-# Natively — free, open-source AI interview copilot & meeting assistant (no subscriptions, no data breaches)
+# Natively — Free, Open-Source AI Interview Copilot & Meeting Assistant
 
-**The #1 Cluely alternative · Free interview AI assistant · Open source interview copilot · AI meeting assistant**
+**The best free alternative to Cluely, Final Round AI, LockedIn AI, and Interview Coder.**
+<br/>
+**Same UI as Cluely. More features. $0. Open source. No data breaches.**
+<br/>
+
+**#1 Cluely clone · Free Cluely alternative · Open-source interview copilot · Free Interview Coder alternative · AI coding interview assistant**
 
 <br/>
 
@@ -36,12 +41,41 @@
 
 <br/>
 
-<img src="https://img.shields.io/badge/🔥_49.4k_views-FF7518?style=for-the-badge" alt="49.4k views" />
-<img src="https://img.shields.io/badge/💸_$0_vs_$149/mo_rivals-2EA043?style=for-the-badge" alt="$0 vs $149/mo rivals" />
-<img src="https://img.shields.io/badge/⚡_%3C500ms_latency-007AFF?style=for-the-badge" alt="<500ms latency" />
-<img src="https://img.shields.io/badge/🛡️_0_data_breaches-8B5CF6?style=for-the-badge" alt="0 data breaches" />
+**<span style="color: #f97316">🔥 49.4k views</span>** &nbsp;·&nbsp; **<span style="color: #22c55e">💸 $0 vs $149/mo rivals</span>** &nbsp;·&nbsp; **<span style="color: #3b82f6">⚡ <500ms latency</span>** &nbsp;·&nbsp; **<span style="color: #a855f7">🛡️ 0 data breaches</span>**
 
 </div>
+
+---
+
+## The Free, Open-Source Cluely Clone
+
+Natively started as a pixel-perfect recreation of Cluely's interface — then kept going. If you've used Cluely, you already know how to use Natively. Same overlay, same workflow, same shortcuts. Except it's free, open-source, runs locally, supports any LLM, and has never breached a single user's data.
+
+> Looking for a **free Cluely alternative**? A **Cluely open-source clone**? You found it.
+
+---
+
+## Free AI Coding Interview Assistant — Undetectable on LeetCode, HackerRank & CoderPad
+
+Natively works as a **free, undetectable AI coding interview assistant** for standard online assessments. It captures your screen, analyzes the problem, and gives you real-time hints, solutions, and explanations — all through an invisible overlay that doesn't interfere with your coding environment.
+
+**Works undetected on:**
+
+- LeetCode (including LeetCode contests)
+- HackerRank
+- CoderPad
+- Codility
+- HackerEarth
+- Karat
+- Any browser-based coding environment
+
+**How it works:**
+
+1. Screenshot the problem with a single shortcut
+2. Natively OCRs the question and sends it to your chosen AI (GPT, Claude, Gemini, or local Ollama)
+3. Response appears in the invisible overlay — never on screen share
+
+> ⚠️ **Important:** Natively is not designed to bypass dedicated proctoring software like **Pearson VUE**, **ProctorU**, or **Respondus Lockdown Browser** — these run at the OS level and are a different category entirely. For standard online coding assessments without dedicated proctoring software, Natively's stealth mode is not detectable.
 
 ---
 
@@ -119,7 +153,7 @@ This demo shows **a complete live meeting scenario**:
 
 ---
 
-## Full comparison
+## Full Comparison: Natively vs Cluely vs Final Round AI vs LockedIn AI vs Interview Coder
 
 | Feature                  | Natively                   | Cluely               | Pluely     | LockedIn AI      | Final Round AI         |
 | :----------------------- | :------------------------- | :------------------- | :--------- | :--------------- | :--------------------- |
@@ -146,6 +180,8 @@ This demo shows **a complete live meeting scenario**:
 
 ### vs Cluely — breached 83,000 users
 
+The UI is intentionally familiar — if you've used Cluely, there's zero learning curve.
+
 Cluely's mid-2025 data breach exposed personal information, full interview transcripts, and screenshots of 83,000 users. Every word spoken during an interview was stored on their servers — and then leaked. They charge $20/month for this privilege.
 
 Natively has no backend, no servers, and no telemetry. Your transcripts, API keys, and screenshots never leave your machine. The entire codebase is open-source (AGPL-3.0) and auditable. Zero breaches, zero data collection — that is the only acceptable standard for a tool that listens to your interviews.
@@ -167,6 +203,30 @@ Natively delivers <500ms end-to-end latency using Rust-based native audio captur
 Pluely is a solid lightweight alternative (~10MB, Tauri-based) and it has Linux support, which Natively does not yet offer. Credit where it is due.
 
 But Pluely is a basic overlay. It has no local RAG, no meeting history, no dual audio channels, and no dashboard. Natively is a complete intelligence system: it remembers your past meetings via local vector search, separates system audio from your microphone, and gives you a full management dashboard with export to Markdown, JSON, and Text.
+
+### Natively vs Interview Coder — More Powerful, Completely Free
+
+Interview Coder is a paid tool focused specifically on coding interview assistance. Natively does everything Interview Coder does — and more — for free:
+
+|                                    |    Natively    | Interview Coder |
+| :--------------------------------- | :------------: | :-------------: |
+| **Price**                          | ✅ Free (BYOK) |     ❌ Paid     |
+| **Open source**                    |       ✅       |       ❌        |
+| **Works on LeetCode / HackerRank** |       ✅       |       ✅        |
+| **Screenshot + OCR analysis**      |       ✅       |       ✅        |
+| **Real-time overlay**              |       ✅       |       ✅        |
+| **Local AI / offline mode**        |   ✅ Ollama    |       ❌        |
+| **Behavioral interview support**   |       ✅       |       ❌        |
+| **System design support**          |       ✅       |       ❌        |
+| **Meeting history & RAG**          |       ✅       |       ❌        |
+| **Any LLM (BYOK)**                 |       ✅       |    ❌ Locked    |
+| **Data stored locally**            |       ✅       |    ❌ Cloud     |
+
+Natively covers the full interview loop — not just the coding round.
+
+### Natively vs Parakeet AI — Memory and History vs Stateless Overlay
+
+Parakeet AI offers basic live meeting assistance but has no persistent memory, no meeting history, and no local vector search. Natively remembers your past meetings via local RAG, lets you ask questions across all your history, and gives you a full dashboard to manage, export, and search everything.
 
 ---
 
@@ -246,27 +306,28 @@ Version 2.0.5 delivers major reliability fixes to Stealth Mode and Process Disgu
 
 ## Table of Contents
 
-- [3 things you should know](#3-things-you-should-know-before-choosing-an-interview-ai)
+- [The free Cluely clone](#the-free-open-source-cluely-clone)
+- [3 things to know](#3-things-you-should-know-before-choosing-an-interview-ai)
+- [Demo](#demo)
 - [How Natively stacks up](#how-natively-stacks-up)
-- [Full comparison](#full-comparison)
+- [Full comparison](#full-comparison-natively-vs-cluely-vs-final-round-ai-vs-lockedin-ai-vs-interview-coder)
 - [Why Natively wins](#why-natively-wins)
-- [Where we're not there yet](#where-were-not-there-yet)
 - [Why Natively?](#why-natively)
 - [Natively Pro](#natively-pro)
+- [What's New in v2.0.5](#whats-new-in-v205)
 - [Privacy & Security](#privacy--security-core-design-principle)
-- [Installation (Developers)](#installation-developers--contributors)
+- [Installation](#installation-developers--contributors)
 - [AI Providers](#ai-providers)
 - [Key Features](#key-features)
 - [Meeting Intelligence Dashboard](#meeting-intelligence-dashboard)
 - [Use Cases](#use-cases)
-- [Architecture Overview](#architecture-overview)
 - [Technical Details](#technical-details)
 - [Known Limitations](#known-limitations)
 - [Responsible Use](#responsible-use)
 - [Contributing](#contributing)
 - [License](#license)
 - [FAQ](#faq)
-- [Looking for an alternative?](#looking-for-an-alternative)
+- [Alternatives Natively replaces](#alternatives-natively-replaces)
 - [Star History](#star-history)
 
 ---
@@ -487,13 +548,13 @@ npm run dist
 - **Interim/Final Bridging**: Manual transcript finalization and interim bridging during recordings for higher accuracy.
 - Smart recap and summaries
 
-### Instant Screen & Slide Analysis (OCR)
+### Instant Screen & Slide Analysis (OCR) — AI Coding Interview Assistant
 
-- Capture any screen content
-- **Multiple Screenshot Support**: Handle and process multiple attached screenshots simultaneously.
-- Analyze slides, documents, code, or problems
-- Immediate explanations and solutions
-- **Smart Dynamic Fallback**: Multimodal resilience ensures uninterrupted performance using Groq Llama 4 Scout if default vision models fail.
+- Works on **LeetCode, HackerRank, CoderPad, Codility, HackerEarth** and any browser-based coding environment
+- Capture a coding problem with one shortcut — get a full solution, explanation, and complexity analysis instantly
+- Invisible overlay never appears on screen share or recordings
+- Multiple screenshot support for multi-part problems
+- Smart fallback to Groq Llama 4 Scout if primary vision model fails
 
 ### Premium Profile Intelligence
 
@@ -706,23 +767,39 @@ Simply install **Ollama**, run a model (e.g., `ollama run llama3`), and Natively
 
 Cluely is a $20/month cloud-based tool that stores all data on their servers. In mid-2025, Cluely suffered a data breach that exposed personal information, transcripts, and screenshots of 83,000 users. Natively is free, open-source, and stores everything locally. It supports any LLM (not just one vendor), offers local AI via Ollama, and has battle-tested stealth mode. Natively has never had a data breach because there is no server to breach.
 
+#### Is stealth mode actually undetectable?
+
+Yes. Natively hides from the dock, disguises process names as harmless system utilities (Terminal, Activity Monitor, System Settings), and syncs state across all windows. It has been hardened across five major releases and tested against screen share detection in Zoom, Teams, and Google Meet.
+
+#### Does Natively work on LeetCode and HackerRank?
+
+Yes. Natively's screenshot + OCR captures any visible coding problem and returns a full solution through the invisible overlay. It works on LeetCode, HackerRank, CoderPad, Codility, HackerEarth, Karat, and any browser-based coding environment.
+
+#### Is Natively detectable during coding interviews?
+
+For standard online assessments (LeetCode, HackerRank, CoderPad, etc.), Natively is not detectable — it runs as a disguised system process and the overlay never appears in screen recordings or screen shares. It is **not** designed to bypass dedicated proctoring software like Pearson VUE, ProctorU, or Respondus Lockdown Browser, which operate at the OS level.
+
+#### Is Natively a free alternative to Interview Coder?
+
+Yes. Natively does everything Interview Coder does — screenshot OCR, real-time coding assistance, invisible overlay — and adds behavioral interview support, system design help, local RAG memory, and any-LLM BYOK. All for free.
+
 ---
 
-# Looking for an Alternative?
+## Alternatives Natively Replaces
 
 Natively is a free, open-source alternative to:
 
-- **Cluely** — real-time AI meeting assistant
-- **Lockheed AI / Lockhead AI** — interview copilot
-- **Parakeet AI** — live meeting assistant
-- **Interview Coder** — coding interview helper
-- **Final Round AI** — interview preparation and real-time assistance
-- **Metaview** — automated meeting notes
-- **Otter.ai** — transcription and meeting summaries
-- **Fireflies.ai** — meeting recorder and AI notetaker
-- **Teal** — job search and interview assistant
-
-If you've outgrown any of these tools or want full control over your data, Natively is the privacy-first, bring-your-own-key alternative.
+| Tool                | What Natively replaces                                                              |
+| :------------------ | :---------------------------------------------------------------------------------- |
+| **Cluely**          | Real-time AI meeting copilot — without the $20/mo fee or data breach risk           |
+| **Final Round AI**  | Live AI interview copilot — without the $149/mo fee or proctor-visible taskbar icon |
+| **LockedIn AI**     | Real-time interview assistant — without cloud lock-in or $70/mo                     |
+| **Interview Coder** | AI coding interview helper — with full meeting context, not just coding rounds      |
+| **Parakeet AI**     | Live meeting assistant — with local RAG memory and full history dashboard           |
+| **Metaview**        | Automated meeting notes — open-source and locally stored                            |
+| **Otter.ai**        | Transcription and meeting summaries — without cloud storage                         |
+| **Fireflies.ai**    | Meeting recorder and AI notetaker — with zero telemetry                             |
+| **Teal**            | Job search and interview assistant — fully local and free                           |
 
 ---
 
@@ -754,7 +831,8 @@ Creator rewards help cover **AI/API bills** and ongoing development costs.
  </picture>
 </a>
 
-<!-- SEO keywords: free ai interview copilot · open source cluely · cluely alternative · cluely clone · interview coder alternative · final round ai alternative · lockedin ai alternative · free interview cheating tool · ai interview assistant · real-time interview ai · undetectable interview ai · best ai interview tool 2025 2026 · free cluely · open source interview ai · ai meeting assistant local · byok ai assistant · ollama interview assistant · stealth interview ai · interview cheating software · ai copilot interview -->
+<!-- SEO: free ai interview copilot · cluely clone · cluely alternative · open source cluely · cluely free version · cluely github · interview coder alternative · interview coder free · interview coder open source · free interview coder · leetcode ai assistant · hackerrank ai helper · coding interview ai · undetectable coding interview ai · ai for leetcode · ai coding interview assistant · final round ai alternative · lockedin ai alternative · parakeet ai alternative · free interview cheating tool · ai interview assistant · real-time interview ai · undetectable interview ai · best ai interview tool 2025 2026 · open source interview ai · stealth interview ai · interview cheating software · ai copilot interview · free interview ai · cluely open source clone · leetcode cheating tool · hackerrank cheat · coding interview cheat sheet ai -->
+
 <sub>
 free-ai-interview-copilot · open-source-cluely · cluely-alternative · cluely-clone · interview-coder-alternative · final-round-ai-alternative · lockedin-ai-alternative · ai-interview-assistant · real-time-interview-ai · undetectable-interview-ai · stealth-mode · local-ai · ollama · byok · rag · electron · rust · privacy-first · meeting-assistant · interview-helper · open-source-interview-ai
 </sub>

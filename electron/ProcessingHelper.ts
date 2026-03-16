@@ -106,6 +106,11 @@ export class ProcessingHelper {
       ragManager.cleanupStaleQueueItems();
     }
 
+    // Initialize self-improving model version manager (background, non-blocking)
+    this.llmHelper.initModelVersionManager().catch(err => {
+      console.warn('[ProcessingHelper] ModelVersionManager initialization failed (non-critical):', err.message);
+    });
+
     // NEW: Load Default Model Config
     const defaultModel = credManager.getDefaultModel();
     if (defaultModel) {
