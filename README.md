@@ -1,7 +1,11 @@
 <div align="center">
   <img src="assets/icon.png" width="150" alt="Natively AI Assistant Logo">
 
-# **Natively – Open Source AI Meeting Assistant & Cluely Alternative**
+# Natively — free, open-source AI interview copilot & meeting assistant (no subscriptions, no data breaches)
+
+**The #1 Cluely alternative · Free interview AI assistant · Open source interview copilot · AI meeting assistant local**
+
+<br/>
 
 [![License](https://img.shields.io/badge/License-AGPL--3.0-blue?style=flat-square)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Windows-blueviolet?style=flat-square)](https://github.com/evinjohnn/natively-cluely-ai-assistant/releases)
@@ -11,17 +15,162 @@
 ![Status](https://img.shields.io/badge/Status-active-success?style=flat-square)
 [![X Community](https://img.shields.io/badge/Community-black?style=flat-square&logo=x&logoColor=white)](https://x.com/i/communities/2031398735515693507)
 
+> **Competitors charge $20–$149/month, store your data on their servers, and one already breached 83,000 users.** Natively costs $0, runs locally, and has never had a data breach. Your keys, your models, your machine.
+
+<p align="center">
+  <a href="https://natively.software">
+    <img src="https://img.shields.io/badge/Visit%20Website-22C55E?style=for-the-badge&logo=vercel&logoColor=white" />
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/evinjohnn/natively-cluely-ai-assistant/releases/latest">
+    <img src="https://img.shields.io/badge/Download-macOS-007AFF?style=for-the-badge&logo=apple&logoColor=white" />
+  </a>
+  <a href="https://github.com/evinjohnn/natively-cluely-ai-assistant/releases/tag/v2.0.5">
+    <img src="https://img.shields.io/badge/Download-Windows-0078D4?style=for-the-badge&logo=windows&logoColor=white" />
+  </a>
+</p>
+
+<small>Requires macOS 12+ (Apple Silicon & Intel) or Windows 10/11</small>
+
+<br/>
+
+**49.4k views** · **$0 vs $149/mo rivals** · **<500ms latency** · **0 data breaches**
+
 </div>
+
+---
+
+## 3 things you should know before choosing an interview AI
+
+1. **Cluely** had a data breach in mid-2025 that exposed 83,000 users' personal info, transcripts, and screenshots — Natively stores everything locally with zero telemetry and has never had a breach.
+2. **Final Round AI** costs $149/month and its taskbar icon is visible to proctoring software — Natively is free, open-source, and has a battle-tested undetectable stealth mode.
+3. **LockedIn AI** charges $55–70/month and locks you into their cloud LLM with no local option — Natively lets you use any model (GPT, Claude, Gemini, Llama) or go fully offline with Ollama.
 
 ---
 
 <div align="center">
 
-> **Natively** is a **free, privacy-first AI Copilot** for **Google Meet, Zoom, and Teams**. It serves as an open-source alternative to Cluely, providing **real-time transcription**, **interview assistance**, and **automated meeting notes** completely locally.
+### ⭐ Star this repo — it matters
 
-Unlike cloud-only tools, Natively uses **Local RAG (Retrieval Augmented Generation)** to remember past conversations, giving you instant answers during **technical interviews**, **sales calls**, and **daily standups**.
+Every star pushes Natively higher in GitHub search, helping developers and job seekers find a free, private alternative instead of paying $149/month for tools that store their data on someone else's server.
+
+[![Star Natively](https://img.shields.io/github/stars/evinjohnn/natively-cluely-ai-assistant?style=for-the-badge&color=gold&label=Star%20on%20GitHub)](https://github.com/evinjohnn/natively-cluely-ai-assistant)
 
 </div>
+
+---
+
+## Demo
+
+![Natively AI Assistant Demo - Real-time Interview Helper and Transcription](assets/natively-ai-meeting-assistant-demo.gif)
+
+This demo shows **a complete live meeting scenario**:
+
+- Real-time transcription as the meeting happens
+- Rolling context awareness across multiple speakers
+- Screenshot analysis of shared slides
+- Instant generation of what to say next
+- Follow-up questions and concise responses
+- All happening live, without recording or post-processing
+
+---
+
+## How Natively stacks up
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+**Cluely — $20/mo**
+✗ Breached 83,000 users in 2025; all data on their servers
+✓ Natively: $0, local-only, zero breaches ever
+
+</td>
+<td width="50%" valign="top">
+
+**LockedIn AI — $55–70/mo**
+✗ Most expensive in category; cloud-only, no local AI
+✓ Natively: free BYOK + fully offline with Ollama
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+**Final Round AI — $149/mo**
+✗ Slowest live latency; taskbar icon visible to proctors
+✓ Natively: <500ms latency + undetectable stealth mode
+
+</td>
+<td width="50%" valign="top">
+
+**Pluely — Free/OSS**
+✗ No meeting history, no RAG, no dual audio, no dashboard
+✓ Natively: full RAG memory, dual audio, meeting dashboard
+
+</td>
+</tr>
+</table>
+
+---
+
+## Full comparison
+
+| Feature                       |        Natively        |        Cluely        |   Pluely   |   LockedIn AI    |     Final Round AI     |
+| :---------------------------- | :--------------------: | :------------------: | :--------: | :--------------: | :--------------------: |
+| **Price**                     |     ✅ Free (BYOK)     |      ⚠️ $20/mo       |  ✅ Free   |   ❌ $55–70/mo   |       ❌ $149/mo       |
+| **Open source**               |      ✅ AGPL-3.0       |          ❌          |     ✅     |        ❌        |           ❌           |
+| **Local data / no telemetry** |           ✅           |   ❌ Cloud servers   |     ✅     | ❌ Cloud servers |    ❌ Cloud servers    |
+| **Any LLM (BYOK)**            |           ✅           |   ❌ Vendor-locked   | ⚠️ Limited | ❌ Vendor-locked |    ❌ Vendor-locked    |
+| **Local AI (Ollama)**         |           ✅           |          ❌          |     ❌     |        ❌        |           ❌           |
+| **Real-time <500ms**          |           ✅           |  ⚠️ 5–90s reported   |     ✅     |    ✅ ~116ms     |       ⚠️ Slowest       |
+| **Dual audio channels**       |    ✅ System + Mic     |   ❌ Single stream   |     ❌     |        ❌        |           ❌           |
+| **Local RAG memory**          | ✅ SQLite + sqlite-vec |          ❌          |     ❌     |        ❌        |           ❌           |
+| **Meeting history dashboard** |           ✅           |      ⚠️ Limited      |     ❌     |        ❌        |       ⚠️ Limited       |
+| **Screenshot / OCR**          |           ✅           |      ⚠️ Limited      |     ❌     |        ✅        |       ⚠️ Limited       |
+| **Stealth mode**              |    ✅ Undetectable     |          ❌          |     ❌     |        ❌        | ❌ Visible to proctors |
+| **Resume / JD context**       |         ✅ Pro         |          ❌          |     ❌     |        ✅        |           ✅           |
+| **Data breach history**       |        ✅ None         | ❌ 83k users exposed |  ✅ None   |     ✅ None      |        ✅ None         |
+
+> **Legend:** ✅ Full support · ⚠️ Partial or limited · ❌ Not available
+
+---
+
+## Why Natively wins
+
+### vs Cluely — breached 83,000 users
+
+Cluely's mid-2025 data breach exposed personal information, full interview transcripts, and screenshots of 83,000 users. Every word spoken during an interview was stored on their servers — and then leaked. They charge $20/month for this privilege.
+
+Natively has no backend, no servers, and no telemetry. Your transcripts, API keys, and screenshots never leave your machine. The entire codebase is open-source (AGPL-3.0) and auditable. Zero breaches, zero data collection — that is the only acceptable standard for a tool that listens to your interviews.
+
+### vs LockedIn AI — $70/month for cloud lock-in
+
+LockedIn AI is the most expensive tool in the category at $55–70/month. It locks you into a single cloud LLM with no option for local inference. Every transcript and response passes through their servers.
+
+Natively supports every major model (Gemini, GPT, Claude, Groq) via bring-your-own-key, and offers 100% offline mode through Ollama. You pay only for the API tokens you actually use — or pay nothing at all by running Llama 3 locally. No subscription, no vendor lock-in.
+
+### vs Final Round AI — $149/month and visible to proctors
+
+Final Round AI is the most expensive option at $149/month, optimized for pre-interview prep and mock interviews but with the slowest live latency in the category. Critically, its taskbar icon is visible to proctoring software, making it detectable during monitored interviews.
+
+Natively delivers <500ms end-to-end latency using Rust-based native audio capture with Zero-Copy ABI Transfers. Its undetectable stealth mode hides from the dock, disguises process names, and syncs state across all windows — battle-tested and hardened across five major releases.
+
+### vs Pluely — lightweight but limited
+
+Pluely is a solid lightweight alternative (~10MB, Tauri-based) and it has Linux support, which Natively does not yet offer. Credit where it is due.
+
+But Pluely is a basic overlay. It has no local RAG, no meeting history, no dual audio channels, and no dashboard. Natively is a complete intelligence system: it remembers your past meetings via local vector search, separates system audio from your microphone, and gives you a full management dashboard with export to Markdown, JSON, and Text.
+
+---
+
+### Where we're not there yet
+
+- **No Linux support** — we are actively looking for maintainers to help bring Natively to Linux
+- **API key setup overhead** — you need to bring your own API keys (or install Ollama), which adds initial setup friction compared to all-in-one cloud tools
+- **No built-in mock interview mode** — Final Round AI has dedicated mock interview practice; Natively focuses on live, real-time assistance
 
 ---
 
@@ -39,7 +188,7 @@ Creator rewards help cover **AI/API bills** and ongoing development costs.
 
 ## Why Natively?
 
-While other tools focus on being "lightweight" wrappers, Natively is a complete intelligence system.
+While other tools focus on being "lightweight" wrappers, Natively is a complete intelligence system — a no subscription interview AI that gives you everything for free.
 
 - **Local Vector Database (RAG):** We embed your meetings locally so you can ask, "What did John say about the API last week?"
 - **Rich Dashboard:** A full UI to manage, search, and export your history—not just a floating window.
@@ -57,71 +206,35 @@ While other tools focus on being "lightweight" wrappers, Natively is a complete 
 
 </div>
 
-## Demo
-
-![Natively AI Assistant Demo - Real-time Interview Helper and Transcription](assets/natively-ai-meeting-assistant-demo.gif)
-
-This demo shows **a complete live meeting scenario**:
-
-- Real-time transcription as the meeting happens
-- Rolling context awareness across multiple speakers
-- Screenshot analysis of shared slides
-- Instant generation of what to say next
-- Follow-up questions and concise responses
-- All happening live, without recording or post-processing
-
 ---
 
-<div align="center">
+## 💎 Natively Pro
 
-### Download Natively
+While Natively is **free and open-source forever**, we also offer a **Pro Edition** designed specifically for power users and job seekers. Purchasing a Pro license gives you an edge in the job market, all while directly supporting the continued development of the open-source Natively core!
 
-_The privacy-first AI assistant for meetings._
+### Free vs Pro Feature Comparison
 
-<p align="center">
-  <a href="https://natively.software">
-    <img src="https://img.shields.io/badge/Visit%20Website-22C55E?style=for-the-badge&logo=vercel&logoColor=white" />
-  </a>
-</p>
-
-<p align="center">
-  <a href="https://github.com/evinjohnn/natively-cluely-ai-assistant/releases/latest">
-    <img src="https://img.shields.io/badge/Download-macOS-007AFF?style=for-the-badge&logo=apple&logoColor=white" />
-  </a>
-  <a href="https://github.com/evinjohnn/natively-cluely-ai-assistant/releases/tag/v2.0.5">
-    <img src="https://img.shields.io/badge/Download-Windows-0078D4?style=for-the-badge&logo=windows&logoColor=white" />
-  </a>
-</p>
+| Feature                                             | Natively Free | Natively Pro 💎 |
+| :-------------------------------------------------- | :-----------: | :-------------: |
+| **Bring Your Own Key (BYOK) Models**                |      ✅       |       ✅        |
+| **Local AI Support (Ollama)**                       |      ✅       |       ✅        |
+| **Real-Time Speech-to-Text (<500ms)**               |      ✅       |       ✅        |
+| **Live Contextual Assistant**                       |      ✅       |       ✅        |
+| **Screenshot & Slide OCR Analysis**                 |      ✅       |       ✅        |
+| **Undetectable & Stealth Modes**                    |      ✅       |       ✅        |
+| **Meeting Dashboard & Offline RAG History**         |      ✅       |       ✅        |
+| **Job Description (JD) & Resume Context Awareness** |      ❌       |       ✅        |
+| **Automated Company Research & Dossiers**           |      ❌       |       ✅        |
+| **Live Salary & Offer Negotiation Copilot**         |      ❌       |       ✅        |
+| **Priority Feature Access & Support**               |      ❌       |       ✅        |
 
 <p align="center">
   <a href="https://evynignatious.gumroad.com/l/natively">
-    <img src="https://img.shields.io/badge/Buy_Natively_Pro-Unlock_Premium-FF3366?style=for-the-badge&logo=gumroad&logoColor=white" />
+    <img src="https://img.shields.io/badge/Get_Natively_Pro-Unlock_Premium-FF3366?style=for-the-badge&logo=gumroad&logoColor=white" />
   </a>
 </p>
 
-<small>Requires macOS 12+ or Windows 10/11</small>
-
-</div>
-
-> [!NOTE]
-> **macOS Users:**
->
-> 1.  **"Unidentified Developer"**: If you see this, Right-click the app > Select **Open** > Click **Open**.
-> 2.  **"App is Damaged"**: If you see this, run the command in Terminal based on your download:
->
->     **For .zip downloads:**
->
->     ```bash
->     xattr -cr /Applications/Natively.app
->     ```
->
->     **For .dmg downloads:**
->     1. Open Terminal and run:
->        ```bash
->        xattr -cr ~/Downloads/Natively-2.0.2-arm64.dmg
->        ```
->     2. Install the natively.dmg
->     3. Open Terminal and run: `xattr -cr /Applications/Natively.app`
+---
 
 ### What's New in v2.0.5
 
@@ -137,22 +250,28 @@ Version 2.0.5 delivers major reliability fixes to Stealth Mode and Process Disgu
 
 ## Table of Contents
 
+- [3 things you should know](#3-things-you-should-know-before-choosing-an-interview-ai)
+- [How Natively stacks up](#how-natively-stacks-up)
+- [Full comparison](#full-comparison)
+- [Why Natively wins](#why-natively-wins)
+- [Where we're not there yet](#where-were-not-there-yet)
 - [Why Natively?](#why-natively)
+- [💎 Natively Pro](#-natively-pro)
 - [Privacy & Security](#privacy--security-core-design-principle)
-- [Quick Start (End Users)](#quick-start-end-users)
 - [Installation (Developers)](#installation-developers--contributors)
 - [AI Providers](#ai-providers)
 - [Key Features](#key-features)
 - [Meeting Intelligence Dashboard](#meeting-intelligence-dashboard)
 - [Use Cases](#use-cases)
-- [Comparison](#comparison)
-- [FAQ](#faq)
 - [Architecture Overview](#architecture-overview)
 - [Technical Details](#technical-details)
 - [Known Limitations](#known-limitations)
 - [Responsible Use](#responsible-use)
 - [Contributing](#contributing)
 - [License](#license)
+- [FAQ](#faq)
+- [Looking for an alternative?](#looking-for-an-alternative)
+- [Star History](#star-history)
 
 ---
 
@@ -198,6 +317,26 @@ You explicitly control:
 
 ## Installation (Developers & Contributors)
 
+> [!NOTE]
+> **macOS Users (Both Apple Silicon & Intel Macs supported):**
+>
+> 1.  **"Unidentified Developer"**: If you see this, Right-click the app > Select **Open** > Click **Open**.
+> 2.  **"App is Damaged"**: If you see this, run the command in Terminal based on your download:
+>
+>     **For .zip downloads:**
+>
+>     ```bash
+>     xattr -cr /Applications/Natively.app
+>     ```
+>
+>     **For .dmg downloads:**
+>     1. Open Terminal and run:
+>        ```bash
+>        xattr -cr ~/Downloads/Natively-2.0.2-arm64.dmg # Or your specific filename
+>        ```
+>     2. Install the natively.dmg
+>     3. Open Terminal and run: `xattr -cr /Applications/Natively.app`
+
 ### Prerequisites
 
 - Node.js (v20+ recommended)
@@ -211,7 +350,7 @@ Connect **any** speech provider and **any** LLM. No subscriptions, no markups, n
 
 ### Unlimited Free Transcription (Whisper, Google, Deepgram)
 
-- **Soniox** (API Key)
+- **Soniox** (API Key) - _Ultra-fast, highly accurate streaming STT_
 - **Google Cloud Speech-to-Text** (Service Account)
 - **Groq** (API Key)
 - **OpenAI Whisper** (API Key)
@@ -345,6 +484,8 @@ npm run dist
 
 - Real-time speech-to-text (**<500ms latency**)
 - **Fast Response Mode**: Ultra-fast text responses using Groq Llama 3.
+- **Multilingual Support**: Choose from various response languages, and set speech recognition matching specific accents and dialects.
+- **Anti-Chatbot / Human Persona System**: Refined system prompts and negative constraints ensure responses are concise, conversational, and indistinguishable from a real candidate (no robotic preambles or lectures).
 - Context-aware Memory (RAG) for Past Meetings
 - Instant answers as questions are asked
 - **Interim/Final Bridging**: Manual transcript finalization and interim bridging during recordings for higher accuracy.
@@ -376,7 +517,8 @@ npm run dist
 
 Natively understands that _listening_ to a meeting and _talking_ to an AI are different tasks. We treat them separately:
 
-- **System Audio (The Meeting):** Captures high-fidelity audio directly from your OS (Zoom, Teams, Meet). It "hears" what your colleagues are saying without interference from your room noise.
+- **System Audio (The Meeting):** Captures high-fidelity audio directly from your OS (fully supported on both macOS and Windows). It "hears" what your colleagues are saying without interference from your room noise.
+- **Sample Rate Auto-Detection**: Dynamically detects and syncs true hardware sample rates (e.g., automatically handling 48kHz audio interfaces or external microphones without distortion or downsampling artifacts).
 - **Two-Stage Silence Processing**: Combines adaptive RMS thresholds with **WebRTC Machine Learning VAD** to reject typing and fan noise.
 - **Microphone Input (Your Voice):** A dedicated channel for your voice commands and dictation. Toggle it instantly to ask Natively a private question without muting your meeting software.
 
@@ -443,26 +585,6 @@ Natively includes a powerful, local-first meeting management system to review, s
 
 ---
 
-## Comparison
-
-**Natively is built on a simple promise: Any speech provider, any API key, 100% free to use, and universally compatible.**
-
-| Feature                 | Natively                               | Commercial Tools (Cluely, etc.) | Other OSS     |
-| :---------------------- | :------------------------------------- | :------------------------------ | :------------ |
-| **Price**               | **Free (BYOK)**                        | $20 - $50 / month               | Free          |
-| **Speech Providers**    | **Any (Google, Groq, Deepgram, etc.)** | Locked to Vendor                | Limited       |
-| **LLM Choice**          | **Any (Local or Cloud)**               | Locked to Vendor                | Limited       |
-| **Privacy**             | **Local-First & Private**              | Data stored on servers          | Depends       |
-| **Latency**             | **Real-Time (<500ms)**                 | Variable                        | Often Slow    |
-| **Universal Mode**      | **Works over ANY app**                 | often limited to browser        | No            |
-| **Meeting History**     | **Full Dashboard & Search**            | Limited                         | None          |
-| **Data Export**         | **JSON / Markdown / Text**             | Proprietary Format              | None          |
-| **Audio Channels**      | **Dual (System + Mic)**                | Single Stream                   | Single Stream |
-| **Screenshot Analysis** | **Yes (Native)**                       | Limited                         | Rare          |
-| **Stealth Mode**        | **Yes (Undetectable)**                 | No                              | No            |
-
----
-
 ## Architecture Overview
 
 Natively processes audio, screen context, and user input locally, maintains a rolling context window, and sends only the required prompt data to the selected AI provider (local or cloud).
@@ -477,7 +599,7 @@ No raw audio, screenshots, or transcripts are stored or transmitted unless expli
 
 - **React, Vite, TypeScript, TailwindCSS**
 - **Electron**
-- **Rust** (native audio with **Zero-Copy ABI Transfers** via `napi::Buffer`)
+- **Rust** (native audio with **Zero-Copy ABI Transfers** via `napi::Buffer` — enabling continuous audio capture without V8 garbage collection pressure, achieving significantly lower latency and CPU usage than typical Electron-based competitors)
 - **SQLite** (local storage with `sqlite-vec`)
 
 ### Supported Models
@@ -517,7 +639,9 @@ This project does not encourage misuse or deception.
 
 ## Known Limitations
 
-- Linux support is limited and looking for maintainers
+- Linux support is limited and actively looking for maintainers
+- Initial setup requires bringing your own API keys or installing Ollama
+- No built-in mock interview mode (focus is on live, real-time assistance)
 
 ---
 
@@ -560,8 +684,6 @@ commercial Premium Edition and are not included in this repository.
 
 ---
 
----
-
 ## FAQ
 
 #### Is Natively really free?
@@ -584,11 +706,31 @@ Natively is a powerful assistant for any professional situation. However, users 
 
 Simply install **Ollama**, run a model (e.g., `ollama run llama3`), and Natively will automatically detect it. Enable "Ollama" in the AI Providers settings to switch to offline mode.
 
+#### How does Natively compare to Cluely?
+
+Cluely is a $20/month cloud-based tool that stores all data on their servers. In mid-2025, Cluely suffered a data breach that exposed personal information, transcripts, and screenshots of 83,000 users. Natively is free, open-source, and stores everything locally. It supports any LLM (not just one vendor), offers local AI via Ollama, and has battle-tested stealth mode. Natively has never had a data breach because there is no server to breach.
+
 ---
 
-### Tags
+# Looking for an Alternative?
 
-`ai-assistant` `meeting-notes` `interview-helper` `presentation-support` `ollama` `gemini-ai` `electron-app` `cross-platform` `privacy-focused` `open-source` `local-ai` `screenshot-analysis` `academic-helper` `sales-assistant` `coding-companion` `cluely` `cluely alternative` `interview coder` `final round ai` `claude skills` `moltbot`
+Natively is a free, open-source alternative to:
+
+- **Cluely** — real-time AI meeting assistant
+- **Lockheed AI / Lockhead AI** — interview copilot
+- **Parakeet AI** — live meeting assistant
+- **Interview Coder** — coding interview helper
+- **Final Round AI** — interview preparation and real-time assistance
+- **Metaview** — automated meeting notes
+- **Otter.ai** — transcription and meeting summaries
+- **Fireflies.ai** — meeting recorder and AI notetaker
+- **Teal** — job search and interview assistant
+
+If you've outgrown any of these tools or want full control over your data, Natively is the privacy-first, bring-your-own-key alternative.
+
+---
+
+`ai-assistant` · `meeting-notes` · `interview-helper` · `cluely-alternative` · `cluely` · `lockhead-ai` · `lockheed-ai` · `parakeet-ai` · `interview-coder` · `final-round-ai` · `metaview-alternative` · `otter-ai-alternative` · `fireflies-alternative` · `local-ai` · `ollama` · `electron` · `privacy-first` · `open-source` · `real-time-transcription` · `interview-copilot` · `ai-meeting-assistant` · `moltbot`
 
 ---
 
