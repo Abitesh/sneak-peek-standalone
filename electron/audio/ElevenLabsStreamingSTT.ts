@@ -12,6 +12,10 @@ export class ElevenLabsStreamingSTT extends EventEmitter {
     private reconnectTimer: NodeJS.Timeout | null = null;
     private inputSampleRate = 48000; // what the mic/system audio captures at
     private targetSampleRate = 16000; // what ElevenLabs Scribe v2 requires
+    
+    private buffer: Buffer[] = [];
+    private isConnecting = false;
+    private isSessionReady = false;
 
     constructor(apiKey: string) {
         super();
@@ -52,6 +56,9 @@ export class ElevenLabsStreamingSTT extends EventEmitter {
             this.ws = null;
         }
         this.isActive = false;
+        this.isConnecting = false;
+        this.isSessionReady = false;
+        this.buffer = [];
         console.log('[ElevenLabsStreaming] Stopped');
     }
 
@@ -61,7 +68,19 @@ export class ElevenLabsStreamingSTT extends EventEmitter {
      * Note: Input from Natively DSP is 32-bit Float PCM (F32).
      */
     public write(chunk: Buffer): void {
-        if (!this.isActive || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+        if (!this.isActive) return;
+
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.isSessionReady) {
+            this.buffer.push(chunk);
+            if (this.buffer.length > 500) this.buffer.shift(); // Cap buffer size
+
+            if (!this.isConnecting && this.shouldReconnect && !this.reconnectTimer) {
+                console.log('[ElevenLabsStreaming] WS not ready. Lazy connecting on new audio...');
+                this.connect();
+            }
+            return;
+        }
+
         try {
             // Downsample from inputSampleRate (e.g. 48000) to 16000Hz
             // Input is 32-bit float PCM (F32), output needs to be 16-bit PCM (S16)
@@ -89,6 +108,10 @@ export class ElevenLabsStreamingSTT extends EventEmitter {
     }
 
     private connect(): void {
+        if (this.isConnecting) return;
+        this.isConnecting = true;
+        this.isSessionReady = false;
+        
         console.log(`[ElevenLabsStreaming] Connecting... key=${this.apiKey?.slice(0, 8)}...`);
 
         // raw WebSocket URL with parameters - always request 16000 for Scribe v2
@@ -102,8 +125,12 @@ export class ElevenLabsStreamingSTT extends EventEmitter {
 
         this.ws.on('open', () => {
             this.isActive = true;
+            this.isConnecting = false;
             this.reconnectAttempts = 0;
             console.log('[ElevenLabsStreaming] Connected');
+            
+            // Note: ElevenLabs might require waiting for 'session_started' before sending.
+            // We'll flush the buffer in 'session_started'.
         });
 
         this.ws.on('message', (data: WebSocket.RawData) => {
@@ -113,6 +140,15 @@ export class ElevenLabsStreamingSTT extends EventEmitter {
                 switch (msg.message_type) {
                     case 'session_started':
                         console.log('[ElevenLabsStreaming] Session started:', msg.config);
+                        this.isSessionReady = true;
+                        
+                        // Flush buffered audio now that session is strictly ready
+                        while (this.buffer.length > 0) {
+                            const chunk = this.buffer.shift();
+                            if (chunk) {
+                                this.write(chunk);
+                            }
+                        }
                         break;
 
                     case 'partial_transcript':
@@ -160,9 +196,11 @@ export class ElevenLabsStreamingSTT extends EventEmitter {
         });
 
         this.ws.on('close', (code, reason) => {
-            this.isActive = false;
+            // Do not force isActive=false; let write() trigger reconnect if isActive is still true
+            this.isConnecting = false;
+            this.isSessionReady = false;
             console.log(`[ElevenLabsStreaming] Closed: code=${code} reason=${reason}`);
-            if (this.shouldReconnect) {
+            if (this.shouldReconnect && code !== 1000) {
                 this.scheduleReconnect();
             }
         });
@@ -181,6 +219,7 @@ export class ElevenLabsStreamingSTT extends EventEmitter {
         
         console.log(`[ElevenLabsStreaming] Reconnecting in ${delay}ms...`);
         this.reconnectTimer = setTimeout(() => {
+            this.reconnectTimer = null;
             if (this.shouldReconnect) {
                 this.connect();
             }
