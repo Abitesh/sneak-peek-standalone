@@ -3,7 +3,7 @@
 
 # Natively — free, open-source AI interview copilot & meeting assistant (no subscriptions, no data breaches)
 
-**The #1 Cluely alternative · Free interview AI assistant · Open source interview copilot · AI meeting assistant local**
+**The #1 Cluely alternative · Free interview AI assistant · Open source interview copilot · AI meeting assistant**
 
 <br/>
 
@@ -36,7 +36,10 @@
 
 <br/>
 
-**49.4k views** · **$0 vs $149/mo rivals** · **<500ms latency** · **0 data breaches**
+<img src="https://img.shields.io/badge/🔥_49.4k_views-FF7518?style=for-the-badge" alt="49.4k views" />
+<img src="https://img.shields.io/badge/💸_$0_vs_$149/mo_rivals-2EA043?style=for-the-badge" alt="$0 vs $149/mo rivals" />
+<img src="https://img.shields.io/badge/⚡_%3C500ms_latency-007AFF?style=for-the-badge" alt="<500ms latency" />
+<img src="https://img.shields.io/badge/🛡️_0_data_breaches-8B5CF6?style=for-the-badge" alt="0 data breaches" />
 
 </div>
 
@@ -79,36 +82,36 @@ This demo shows **a complete live meeting scenario**:
 
 ## How Natively stacks up
 
-<table>
+<table width="100%">
 <tr>
-<td width="50%" valign="top">
+<td width="50%" valign="top" style="padding: 15px;">
 
-**Cluely — $20/mo**
-✗ Breached 83,000 users in 2025; all data on their servers
-✓ Natively: $0, local-only, zero breaches ever
+**Cluely — $20/mo**<br/>
+❌ Breached 83,000 users in 2025; all data on their servers<br/>
+✅ **Natively:** $0, local-only, zero breaches ever
 
 </td>
-<td width="50%" valign="top">
+<td width="50%" valign="top" style="padding: 15px;">
 
-**LockedIn AI — $55–70/mo**
-✗ Most expensive in category; cloud-only, no local AI
-✓ Natively: free BYOK + fully offline with Ollama
+**LockedIn AI — $55–70/mo**<br/>
+❌ Most expensive in category; cloud-only, no local AI<br/>
+✅ **Natively:** free BYOK + fully offline with Ollama
 
 </td>
 </tr>
 <tr>
-<td width="50%" valign="top">
+<td width="50%" valign="top" style="padding: 15px;">
 
-**Final Round AI — $149/mo**
-✗ Slowest live latency; taskbar icon visible to proctors
-✓ Natively: <500ms latency + undetectable stealth mode
+**Final Round AI — $149/mo**<br/>
+❌ Slowest live latency; taskbar icon visible to proctors<br/>
+✅ **Natively:** <500ms latency + undetectable stealth mode
 
 </td>
-<td width="50%" valign="top">
+<td width="50%" valign="top" style="padding: 15px;">
 
-**Pluely — Free/OSS**
-✗ No meeting history, no RAG, no dual audio, no dashboard
-✓ Natively: full RAG memory, dual audio, meeting dashboard
+**Pluely — Free/OSS**<br/>
+❌ No meeting history, no RAG, no dual audio, no dashboard<br/>
+✅ **Natively:** full RAG memory, dual audio, meeting dashboard
 
 </td>
 </tr>
@@ -118,21 +121,21 @@ This demo shows **a complete live meeting scenario**:
 
 ## Full comparison
 
-| Feature                       |        Natively        |        Cluely        |   Pluely   |   LockedIn AI    |     Final Round AI     |
-| :---------------------------- | :--------------------: | :------------------: | :--------: | :--------------: | :--------------------: |
-| **Price**                     |     ✅ Free (BYOK)     |      ⚠️ $20/mo       |  ✅ Free   |   ❌ $55–70/mo   |       ❌ $149/mo       |
-| **Open source**               |      ✅ AGPL-3.0       |          ❌          |     ✅     |        ❌        |           ❌           |
-| **Local data / no telemetry** |           ✅           |   ❌ Cloud servers   |     ✅     | ❌ Cloud servers |    ❌ Cloud servers    |
-| **Any LLM (BYOK)**            |           ✅           |   ❌ Vendor-locked   | ⚠️ Limited | ❌ Vendor-locked |    ❌ Vendor-locked    |
-| **Local AI (Ollama)**         |           ✅           |          ❌          |     ❌     |        ❌        |           ❌           |
-| **Real-time <500ms**          |           ✅           |  ⚠️ 5–90s reported   |     ✅     |    ✅ ~116ms     |       ⚠️ Slowest       |
-| **Dual audio channels**       |    ✅ System + Mic     |   ❌ Single stream   |     ❌     |        ❌        |           ❌           |
-| **Local RAG memory**          | ✅ SQLite + sqlite-vec |          ❌          |     ❌     |        ❌        |           ❌           |
-| **Meeting history dashboard** |           ✅           |      ⚠️ Limited      |     ❌     |        ❌        |       ⚠️ Limited       |
-| **Screenshot / OCR**          |           ✅           |      ⚠️ Limited      |     ❌     |        ✅        |       ⚠️ Limited       |
-| **Stealth mode**              |    ✅ Undetectable     |          ❌          |     ❌     |        ❌        | ❌ Visible to proctors |
-| **Resume / JD context**       |         ✅ Pro         |          ❌          |     ❌     |        ✅        |           ✅           |
-| **Data breach history**       |        ✅ None         | ❌ 83k users exposed |  ✅ None   |     ✅ None      |        ✅ None         |
+| Feature                  | Natively               | Cluely               | Pluely     | LockedIn AI      | Final Round AI         |
+| :----------------------- | :--------------------- | :------------------- | :--------- | :--------------- | :--------------------- |
+| **Price**                | ✅ Free (BYOK)         | ⚠️ $20/mo            | ✅ Free    | ❌ $55–70/mo     | ❌ $149/mo             |
+| **Open source**          | ✅ AGPL-3.0            | ❌                   | ✅         | ❌               | ❌                     |
+| **Local data / private** | ✅ Yes                 | ❌ Cloud servers     | ✅ Yes     | ❌ Cloud servers | ❌ Cloud servers       |
+| **Any LLM (BYOK)**       | ✅ Yes                 | ❌ Vendor-locked     | ⚠️ Limited | ❌ Vendor-locked | ❌ Vendor-locked       |
+| **Local AI (Ollama)**    | ✅ Yes                 | ❌                   | ❌         | ❌               | ❌                     |
+| **Real-time <500ms**     | ✅ Yes                 | ⚠️ 5–90s lag         | ✅ Yes     | ✅ ~116ms        | ⚠️ Slowest             |
+| **Dual audio channels**  | ✅ System + Mic        | ❌ Single stream     | ❌         | ❌               | ❌                     |
+| **Local RAG memory**     | ✅ SQLite + sqlite-vec | ❌                   | ❌         | ❌               | ❌                     |
+| **Meeting history**      | ✅ Full dashboard      | ⚠️ Limited           | ❌         | ❌               | ⚠️ Limited             |
+| **Screenshot OCR**       | ✅ Yes                 | ⚠️ Limited           | ❌         | ✅ Yes           | ⚠️ Limited             |
+| **Stealth mode**         | ✅ Undetectable        | ❌                   | ❌         | ❌               | ❌ Visible to proctors |
+| **Resume & context**     | ✅ Pro                 | ❌                   | ❌         | ✅ Yes           | ✅ Yes                 |
+| **Data breach history**  | ✅ None                | ❌ 83k users exposed | ✅ None    | ✅ None          | ✅ None                |
 
 > **Legend:** ✅ Full support · ⚠️ Partial or limited · ❌ Not available
 
@@ -174,18 +177,6 @@ But Pluely is a basic overlay. It has no local RAG, no meeting history, no dual 
 
 ---
 
-## Support Natively
-
-The community around **Natively** created a Pump.fun token to support the project.
-
-Creator rewards help cover **AI/API bills** and ongoing development costs.
-
-<p align="center">
-  <a href="https://pump.fun/coin/B5opQ9euCVcJALeeCQbrFv5kePG8cCcoYqnXfx4Ppump">
-    <img src="assets/pumpfun-card.png" alt="Support Natively on Pump.fun" width="520" />
-  </a>
-</p>
-
 ## Why Natively?
 
 While other tools focus on being "lightweight" wrappers, Natively is a complete intelligence system — a no subscription interview AI that gives you everything for free.
@@ -208,25 +199,25 @@ While other tools focus on being "lightweight" wrappers, Natively is a complete 
 
 ---
 
-## 💎 Natively Pro
+## Natively Pro
 
 While Natively is **free and open-source forever**, we also offer a **Pro Edition** designed specifically for power users and job seekers. Purchasing a Pro license gives you an edge in the job market, all while directly supporting the continued development of the open-source Natively core!
 
 ### Free vs Pro Feature Comparison
 
-| Feature                                             | Natively Free | Natively Pro 💎 |
-| :-------------------------------------------------- | :-----------: | :-------------: |
-| **Bring Your Own Key (BYOK) Models**                |      ✅       |       ✅        |
-| **Local AI Support (Ollama)**                       |      ✅       |       ✅        |
-| **Real-Time Speech-to-Text (<500ms)**               |      ✅       |       ✅        |
-| **Live Contextual Assistant**                       |      ✅       |       ✅        |
-| **Screenshot & Slide OCR Analysis**                 |      ✅       |       ✅        |
-| **Undetectable & Stealth Modes**                    |      ✅       |       ✅        |
-| **Meeting Dashboard & Offline RAG History**         |      ✅       |       ✅        |
-| **Job Description (JD) & Resume Context Awareness** |      ❌       |       ✅        |
-| **Automated Company Research & Dossiers**           |      ❌       |       ✅        |
-| **Live Salary & Offer Negotiation Copilot**         |      ❌       |       ✅        |
-| **Priority Feature Access & Support**               |      ❌       |       ✅        |
+| Feature                                             | Natively Free | Natively Pro |
+| :-------------------------------------------------- | :-----------: | :----------: |
+| **Bring Your Own Key (BYOK) Models**                |      ✅       |      ✅      |
+| **Local AI Support (Ollama)**                       |      ✅       |      ✅      |
+| **Real-Time Speech-to-Text (<500ms)**               |      ✅       |      ✅      |
+| **Live Contextual Assistant**                       |      ✅       |      ✅      |
+| **Screenshot & Slide OCR Analysis**                 |      ✅       |      ✅      |
+| **Undetectable & Stealth Modes**                    |      ✅       |      ✅      |
+| **Meeting Dashboard & Offline RAG History**         |      ✅       |      ✅      |
+| **Job Description (JD) & Resume Context Awareness** |      ❌       |      ✅      |
+| **Automated Company Research & Dossiers**           |      ❌       |      ✅      |
+| **Live Salary & Offer Negotiation Copilot**         |      ❌       |      ✅      |
+| **Priority Feature Access & Support**               |      ❌       |      ✅      |
 
 <p align="center">
   <a href="https://evynignatious.gumroad.com/l/natively">
@@ -731,6 +722,20 @@ If you've outgrown any of these tools or want full control over your data, Nativ
 ---
 
 `ai-assistant` · `meeting-notes` · `interview-helper` · `cluely-alternative` · `cluely` · `lockhead-ai` · `lockheed-ai` · `parakeet-ai` · `interview-coder` · `final-round-ai` · `metaview-alternative` · `otter-ai-alternative` · `fireflies-alternative` · `local-ai` · `ollama` · `electron` · `privacy-first` · `open-source` · `real-time-transcription` · `interview-copilot` · `ai-meeting-assistant` · `moltbot`
+
+---
+
+## Support Natively
+
+The community around **Natively** created a Pump.fun token to support the project.
+
+Creator rewards help cover **AI/API bills** and ongoing development costs.
+
+<p align="center">
+  <a href="https://pump.fun/coin/B5opQ9euCVcJALeeCQbrFv5kePG8cCcoYqnXfx4Ppump">
+    <img src="assets/pumpfun-card.png" alt="Support Natively on Pump.fun" width="520" />
+  </a>
+</p>
 
 ---
 
