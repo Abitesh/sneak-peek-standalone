@@ -331,6 +331,50 @@ export class DatabaseManager {
             this.db.pragma('user_version = 7');
         }
 
+        // Version 7 → 8: Provision per-dimension vec0 tables (NOTE: this v8 ran in two broken
+        // iterations for some users — first with float[1536] single table, then with correct per-dim
+        // tables. The v9 migration below corrects any v8 that used the old broken schema.)
+        if (version < 8) {
+            console.log('[DatabaseManager] Applying migration v7 → v8: Provision per-dimension vec0 tables');
+            // Drop the legacy single-dim tables from v3/v4 if they exist and are unusable
+            try { this.db.exec('DROP TABLE IF EXISTS vec_chunks;'); } catch (_) {}
+            try { this.db.exec('DROP TABLE IF EXISTS vec_summaries;'); } catch (_) {}
+
+            for (const dim of DatabaseManager.KNOWN_DIMS) {
+                this.ensureVecTableForDim(dim);
+            }
+            console.log('[DatabaseManager] v8 migration: per-dimension vec0 tables provisioned');
+            this.db.pragma('user_version = 8');
+        }
+
+        // Version 8 → 9: Ensure per-dimension tables exist.
+        // Required for DBs already at v8 but with the old broken float[1536] single-table schema,
+        // or with the first incorrect v8 migration that didn't provision KNOWN_DIMS tables.
+        if (version < 9) {
+            console.log('[DatabaseManager] Applying migration v8 → v9: Ensure per-dimension vec0 tables exist');
+            // Drop old single-dim orphan tables if they exist (float[1536] schema)
+            try { this.db.exec('DROP TABLE IF EXISTS vec_chunks;'); } catch (_) {}
+            try { this.db.exec('DROP TABLE IF EXISTS vec_summaries;'); } catch (_) {}
+
+            let allOk = true;
+            for (const dim of DatabaseManager.KNOWN_DIMS) {
+                this.ensureVecTableForDim(dim);
+                // Verify the table actually exists after provisioning
+                try {
+                    this.db.prepare(`SELECT count(*) FROM vec_chunks_${dim} LIMIT 1`).get();
+                } catch (e) {
+                    console.error(`[DatabaseManager] v9: vec_chunks_${dim} still missing after provisioning:`, e);
+                    allOk = false;
+                }
+            }
+            if (allOk) {
+                console.log('[DatabaseManager] v9 migration: all per-dimension vec0 tables verified ✓');
+            } else {
+                console.warn('[DatabaseManager] v9 migration: some tables missing — sqlite-vec extension may not be loaded');
+            }
+            this.db.pragma('user_version = 9');
+        }
+
         console.log('[DatabaseManager] Migrations completed.');
     }
 
@@ -431,12 +475,56 @@ export class DatabaseManager {
     }
 
     /**
-     * Check if sqlite-vec is available (vec0 tables exist)
+     * Known embedding dimension tiers.
+     * Used by the v8 migration, delete operations, and table provisioning.
+     * When a new provider dimension is encountered at runtime, ensureVecTableForDim() handles it.
+     */
+    public static readonly KNOWN_DIMS: readonly number[] = [768, 1536, 3072];
+
+    /** Cache: dimensions for which vec0 tables have already been verified/created this session. */
+    private ensuredDims = new Set<number>();
+
+    /**
+     * Lazily create a per-dimension vec0 table pair if not already present.
+     * Called by v8 migration and at runtime when a new embedding dimension is first seen.
+     * Uses an in-memory cache to avoid redundant CREATE TABLE IF NOT EXISTS on every insert.
+     */
+    public ensureVecTableForDim(dim: number): void {
+        if (this.ensuredDims.has(dim)) return; // Already verified this session
+        if (!this.db) return;
+        // Guard against SQL injection: dim must be a positive integer
+        if (!Number.isInteger(dim) || dim <= 0 || dim > 100_000) {
+            console.error(`[DatabaseManager] Invalid dimension for vec0 table: ${dim}`);
+            return;
+        }
+        try {
+            this.db.exec(`
+                CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks_${dim} USING vec0(
+                    chunk_id INTEGER PRIMARY KEY,
+                    embedding float[${dim}]
+                );
+            `);
+            this.db.exec(`
+                CREATE VIRTUAL TABLE IF NOT EXISTS vec_summaries_${dim} USING vec0(
+                    summary_id INTEGER PRIMARY KEY,
+                    embedding float[${dim}]
+                );
+            `);
+            this.ensuredDims.add(dim);
+            console.log(`[DatabaseManager] Ensured vec0 tables for dim=${dim}`);
+        } catch (e) {
+            console.error(`[DatabaseManager] Failed to create vec0 tables for dim=${dim}:`, e);
+        }
+    }
+
+    /**
+     * Check if sqlite-vec is available (any per-dimension vec0 table must exist)
      */
     public hasVecExtension(): boolean {
         if (!this.db) return false;
         try {
-            this.db.prepare("SELECT count(*) FROM vec_chunks LIMIT 1").get();
+            // Check the most common dimension (Ollama 768); any may suffice
+            this.db.prepare("SELECT count(*) FROM vec_chunks_768 LIMIT 1").get();
             return true;
         } catch (e) {
             return false;

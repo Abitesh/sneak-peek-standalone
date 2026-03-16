@@ -6,6 +6,7 @@ import Database from 'better-sqlite3';
 import { Worker } from 'worker_threads';
 import path from 'path';
 import { Chunk } from './SemanticChunker';
+import { DatabaseManager } from '../db/DatabaseManager';
 
 export interface StoredChunk extends Chunk {
     id: number;
@@ -125,11 +126,11 @@ export class VectorStore {
     }
 
     /**
-     * Detect if sqlite-vec vec0 tables are available
+     * Detect if sqlite-vec is available (per-dimension vec0 tables must exist)
      */
     private detectVecSupport(): boolean {
         try {
-            this.db.prepare("SELECT count(*) as cnt FROM vec_chunks LIMIT 1").get();
+            this.db.prepare("SELECT count(*) as cnt FROM vec_chunks_768 LIMIT 1").get();
             console.log('[VectorStore] Using native sqlite-vec for vector search');
             return true;
         } catch (e: any) {
@@ -169,21 +170,23 @@ export class VectorStore {
     }
 
     /**
-     * Store embedding for a chunk (dual-write: BLOB column + vec0 table)
+     * Store embedding for a chunk (dual-write: BLOB column + per-dimension vec0 table)
      */
     storeEmbedding(chunkId: number, embedding: number[]): void {
         const blob = this.embeddingToBlob(embedding);
         this.db.prepare('UPDATE chunks SET embedding = ? WHERE id = ?').run(blob, chunkId);
 
-        // Also insert into vec0 virtual table for native search
+        // Also insert into the dimension-specific vec0 virtual table for native search
         if (this.useNativeVec) {
+            const dim = embedding.length;
+            // Lazily provision the table if it's a novel dimension (e.g., a new provider)
+            DatabaseManager.getInstance().ensureVecTableForDim(dim);
             try {
-                // sqlite-vec requires primary key to be a strict integer
                 this.db.prepare(
-                    'INSERT OR REPLACE INTO vec_chunks(chunk_id, embedding) VALUES (?, ?)'
+                    `INSERT OR REPLACE INTO vec_chunks_${dim}(chunk_id, embedding) VALUES (?, ?)`
                 ).run(BigInt(chunkId), blob);
             } catch (e) {
-                console.warn('[VectorStore] Failed to insert into vec_chunks:', e);
+                console.warn(`[VectorStore] Failed to insert into vec_chunks_${dim}:`, e);
             }
         }
     }
@@ -246,12 +249,14 @@ export class VectorStore {
         providerName?: string
     ): Promise<ScoredChunk[]> {
         const queryBlob = this.embeddingToBlob(queryEmbedding);
+        const dim = queryEmbedding.length;
         try {
             return await this.postToWorker<ScoredChunk[]>({
                 type: 'nativeVecSearch',
                 dbPath: this.dbPath,
                 extPath: this.extPath,
                 queryBlob,
+                dim,
                 meetingId,
                 providerName,
                 limit,
@@ -342,10 +347,9 @@ export class VectorStore {
     }
 
     /**
-     * Delete all chunks for a meeting
+     * Delete all chunks for a meeting (removes from all tracked dimension tables)
      */
     deleteChunksForMeeting(meetingId: string): void {
-        // Delete from vec0 first (need to get IDs)
         if (this.useNativeVec) {
             try {
                 const ids = this.db.prepare(
@@ -354,12 +358,18 @@ export class VectorStore {
 
                 if (ids.length > 0) {
                     const placeholders = ids.map(() => '?').join(',');
-                    this.db.prepare(
-                        `DELETE FROM vec_chunks WHERE chunk_id IN (${placeholders})`
-                    ).run(...ids.map(r => r.id));
+                    const idList = ids.map(r => r.id);
+                    // Delete from all known dimension-specific vec0 tables
+                    for (const dim of DatabaseManager.KNOWN_DIMS) {
+                        try {
+                            this.db.prepare(
+                                `DELETE FROM vec_chunks_${dim} WHERE chunk_id IN (${placeholders})`
+                            ).run(...idList);
+                        } catch (_) { /* dim table may not exist */ }
+                    }
                 }
             } catch (e) {
-                console.warn('[VectorStore] Failed to delete from vec_chunks:', e);
+                console.warn('[VectorStore] Failed to delete from vec_chunks dimension tables:', e);
             }
         }
 
@@ -393,28 +403,27 @@ export class VectorStore {
     }
 
     /**
-     * Store embedding for meeting summary (dual-write: BLOB + vec0)
+     * Store embedding for meeting summary (dual-write: BLOB + per-dimension vec0 table)
      */
     storeSummaryEmbedding(meetingId: string, embedding: number[]): void {
         const blob = this.embeddingToBlob(embedding);
         this.db.prepare('UPDATE chunk_summaries SET embedding = ? WHERE meeting_id = ?').run(blob, meetingId);
 
-        // Also insert into vec0 virtual table
         if (this.useNativeVec) {
             try {
-                // Get the summary's integer ID for vec0
                 const row = this.db.prepare(
                     'SELECT id FROM chunk_summaries WHERE meeting_id = ?'
                 ).get(meetingId) as any;
 
                 if (row) {
-                    // sqlite-vec requires primary key to be a strict integer
+                    const dim = embedding.length;
+                    DatabaseManager.getInstance().ensureVecTableForDim(dim);
                     this.db.prepare(
-                        'INSERT OR REPLACE INTO vec_summaries(summary_id, embedding) VALUES (?, ?)'
+                        `INSERT OR REPLACE INTO vec_summaries_${dim}(summary_id, embedding) VALUES (?, ?)`
                     ).run(BigInt(row.id), blob);
                 }
             } catch (e) {
-                console.warn('[VectorStore] Failed to insert into vec_summaries:', e);
+                console.warn('[VectorStore] Failed to insert into vec_summaries dim table:', e);
             }
         }
     }
@@ -442,12 +451,14 @@ export class VectorStore {
         providerName?: string
     ): Promise<{ meetingId: string; summaryText: string; similarity: number }[]> {
         const queryBlob = this.embeddingToBlob(queryEmbedding);
+        const dim = queryEmbedding.length;
         try {
             return await this.postToWorker<{ meetingId: string; summaryText: string; similarity: number }[]>({
                 type: 'nativeVecSearchSummaries',
                 dbPath: this.dbPath,
                 extPath: this.extPath,
                 queryBlob,
+                dim,
                 providerName,
                 limit
             });
@@ -559,18 +570,27 @@ export class VectorStore {
             this.db.prepare('UPDATE chunk_summaries SET embedding = NULL WHERE meeting_id = ?').run(id);
             this.db.prepare('UPDATE meetings SET embedding_provider = NULL, embedding_dimensions = NULL WHERE id = ?').run(id);
 
-            // Delete from vec0 tables
+            // Delete from per-dimension vec0 tables
             if (this.useNativeVec) {
                 try {
                     const cIds = this.db.prepare('SELECT id FROM chunks WHERE meeting_id = ?').all(id) as any[];
                     if (cIds.length > 0) {
                         const placeholders = cIds.map(() => '?').join(',');
-                        this.db.prepare(`DELETE FROM vec_chunks WHERE chunk_id IN (${placeholders})`).run(...cIds.map(r => r.id));
+                        const idList = cIds.map(r => r.id);
+                        for (const dim of DatabaseManager.KNOWN_DIMS) {
+                            try {
+                                this.db.prepare(`DELETE FROM vec_chunks_${dim} WHERE chunk_id IN (${placeholders})`).run(...idList);
+                            } catch (_) { /* dim table may not exist */ }
+                        }
                     }
 
                     const sIds = this.db.prepare('SELECT id FROM chunk_summaries WHERE meeting_id = ?').get(id) as any;
                     if (sIds) {
-                         this.db.prepare(`DELETE FROM vec_summaries WHERE summary_id = ?`).run(sIds.id);
+                        for (const dim of DatabaseManager.KNOWN_DIMS) {
+                            try {
+                                this.db.prepare(`DELETE FROM vec_summaries_${dim} WHERE summary_id = ?`).run(sIds.id);
+                            } catch (_) { /* dim table may not exist */ }
+                        }
                     }
                 } catch (e) {}
             }

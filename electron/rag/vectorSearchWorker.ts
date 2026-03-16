@@ -19,6 +19,7 @@ interface NativeVecSearchChunksMessage {
     dbPath: string;
     extPath: string; // path to sqlite-vec extension (without platform suffix)
     queryBlob: Buffer;
+    dim: number;        // embedding dimension — selects vec_chunks_{dim} table
     meetingId?: string;
     providerName?: string;
     limit: number;
@@ -32,6 +33,7 @@ interface NativeVecSearchSummariesMessage {
     dbPath: string;
     extPath: string;
     queryBlob: Buffer;
+    dim: number;        // embedding dimension — selects vec_summaries_{dim} table
     providerName?: string;
     limit: number;
 }
@@ -196,12 +198,13 @@ parentPort.on('message', (message: WorkerMessage) => {
             }
 
             case 'nativeVecSearch': {
-                const { requestId, dbPath, extPath, queryBlob, meetingId, providerName, limit, minSimilarity, fetchMultiplier } = message;
+                const { requestId, dbPath, extPath, queryBlob, dim, meetingId, providerName, limit, minSimilarity, fetchMultiplier } = message;
                 const db = getDb(dbPath, extPath);
                 const fetchLimit = (meetingId || providerName) ? limit * fetchMultiplier : limit;
+                const vecTable = `vec_chunks_${dim}`;
 
                 const vecRows = db.prepare(`
-                    SELECT chunk_id, distance FROM vec_chunks
+                    SELECT chunk_id, distance FROM ${vecTable}
                     WHERE embedding MATCH ? ORDER BY distance LIMIT ?
                 `).all(queryBlob, fetchLimit) as any[];
 
@@ -234,12 +237,13 @@ parentPort.on('message', (message: WorkerMessage) => {
             }
 
             case 'nativeVecSearchSummaries': {
-                const { requestId, dbPath, extPath, queryBlob, providerName, limit } = message;
+                const { requestId, dbPath, extPath, queryBlob, dim, providerName, limit } = message;
                 const db = getDb(dbPath, extPath);
                 const fetchLimit = providerName ? limit * 4 : limit;
+                const vecTable = `vec_summaries_${dim}`;
 
                 const vecRows = db.prepare(`
-                    SELECT summary_id, distance FROM vec_summaries
+                    SELECT summary_id, distance FROM ${vecTable}
                     WHERE embedding MATCH ? ORDER BY distance LIMIT ?
                 `).all(queryBlob, fetchLimit) as any[];
 
