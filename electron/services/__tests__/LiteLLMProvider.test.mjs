@@ -107,3 +107,87 @@ describe('LiteLLM outbound data-scope gating (privacy)', () => {
     assert.deepEqual(getDeniedDataScopes(['screenshots'], policy), []);
   });
 });
+
+// Mirrors LLMHelper's max-tokens resolution: manual override > /model/info
+// budget > default, clamped to [MIN, MAX]. Kept in lockstep with the source.
+const LITELLM_DEFAULT = 8192;
+const LITELLM_MIN = 256;
+const LITELLM_MAX = 1048576;
+
+function resolveMaxTokens(manualOverride, modelBudgets, model) {
+  if (manualOverride !== null) return manualOverride;
+  const budget = modelBudgets.get(model) ?? LITELLM_DEFAULT;
+  return Math.min(LITELLM_MAX, Math.max(LITELLM_MIN, budget));
+}
+
+// Mirrors the /model/info response parsing (model_name + model_info.max_output_tokens).
+function parseModelInfoBudgets(data) {
+  const budgets = new Map();
+  for (const entry of (data?.data || [])) {
+    const name = entry?.model_name;
+    const budget = Number(entry?.model_info?.max_output_tokens ?? entry?.model_info?.max_tokens);
+    if (name && Number.isFinite(budget) && budget > 0) budgets.set(name, Math.floor(budget));
+  }
+  return budgets;
+}
+
+describe('LiteLLM max-tokens resolution (auto via /model/info + manual override)', () => {
+  test('manual override always wins over per-model budgets', () => {
+    const budgets = new Map([['gpt-4o', 16384]]);
+    assert.equal(resolveMaxTokens(32768, budgets, 'gpt-4o'), 32768);
+  });
+
+  test('auto mode uses the /model/info budget for known models', () => {
+    const budgets = new Map([['anthropic/claude-sonnet-4-6', 64000], ['gpt-4o', 16384]]);
+    assert.equal(resolveMaxTokens(null, budgets, 'anthropic/claude-sonnet-4-6'), 64000);
+    assert.equal(resolveMaxTokens(null, budgets, 'gpt-4o'), 16384);
+  });
+
+  test('auto mode falls back to the default for unknown models or empty cache', () => {
+    assert.equal(resolveMaxTokens(null, new Map(), 'mystery-model'), LITELLM_DEFAULT);
+    const budgets = new Map([['gpt-4o', 16384]]);
+    assert.equal(resolveMaxTokens(null, budgets, 'not-in-registry'), LITELLM_DEFAULT);
+  });
+
+  test('auto budgets are clamped to the sane range', () => {
+    const budgets = new Map([['tiny', 16], ['huge', 99999999]]);
+    assert.equal(resolveMaxTokens(null, budgets, 'tiny'), LITELLM_MIN);
+    assert.equal(resolveMaxTokens(null, budgets, 'huge'), LITELLM_MAX);
+  });
+
+  test('parses the documented /model/info response shape', () => {
+    const budgets = parseModelInfoBudgets({
+      data: [
+        { model_name: 'gpt-4', litellm_params: { model: 'gpt-4' }, model_info: { max_tokens: 4096, max_output_tokens: 4096, max_input_tokens: 8192, litellm_provider: 'openai', mode: 'chat' } },
+        { model_name: 'claude-sonnet', model_info: { max_output_tokens: 64000 } },
+      ],
+    });
+    assert.equal(budgets.get('gpt-4'), 4096);
+    assert.equal(budgets.get('claude-sonnet'), 64000);
+  });
+
+  test('falls back to legacy max_tokens when max_output_tokens is absent', () => {
+    const budgets = parseModelInfoBudgets({ data: [{ model_name: 'old-model', model_info: { max_tokens: 2048 } }] });
+    assert.equal(budgets.get('old-model'), 2048);
+  });
+
+  test('ignores malformed /model/info entries instead of crashing', () => {
+    const budgets = parseModelInfoBudgets({
+      data: [
+        { model_name: '', model_info: { max_output_tokens: 1000 } },          // no name
+        { model_name: 'no-info' },                                            // no model_info
+        { model_name: 'bad-budget', model_info: { max_output_tokens: 'lots' } }, // NaN
+        { model_name: 'zero', model_info: { max_output_tokens: 0 } },         // non-positive
+        { model_name: 'good', model_info: { max_output_tokens: 8192 } },
+      ],
+    });
+    assert.equal(budgets.size, 1);
+    assert.equal(budgets.get('good'), 8192);
+  });
+
+  test('handles empty/missing response bodies', () => {
+    assert.equal(parseModelInfoBudgets({}).size, 0);
+    assert.equal(parseModelInfoBudgets(null).size, 0);
+    assert.equal(parseModelInfoBudgets({ data: [] }).size, 0);
+  });
+});
