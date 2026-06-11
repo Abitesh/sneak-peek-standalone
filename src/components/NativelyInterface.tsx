@@ -458,7 +458,7 @@ const MessageRow = React.memo(
     return (
       <div className="w-full" {...(isCodeMsg ? { 'data-code-msg': 'true' } : {})}>
         <div
-          className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in-up`}
+          className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
         >
           <div
             className={`
