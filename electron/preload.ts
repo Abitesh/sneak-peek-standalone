@@ -176,6 +176,18 @@ interface ElectronAPI {
   ) => Promise<{ success: boolean; error?: string }>;
   localWhisperGetModels: () => Promise<{ models: any[]; activeModelId: string }>;
   localWhisperSetModel: (modelId: string) => Promise<{ success: boolean }>;
+  localWhisperGetChannelConfig: () => Promise<{
+    enabled: boolean;
+    micModelId: string;
+    systemModelId: string;
+    globalModelId: string;
+  }>;
+  localWhisperSetChannelConfig: (cfg: {
+    enabled?: boolean;
+    micModelId?: string;
+    systemModelId?: string;
+    globalModelId?: string;
+  }) => Promise<{ success: boolean; error?: string }>;
   localWhisperDeleteModel: (modelId: string) => Promise<{ success: boolean; error?: string }>;
   localWhisperStartDownload: (modelId: string) => Promise<{ success: boolean; error?: string }>;
   onLocalWhisperDownloadProgress: (
@@ -286,7 +298,7 @@ interface ElectronAPI {
   generateWhatToSay: (
     question?: string,
     imagePaths?: string[],
-    options?: { promptInstruction?: string },
+    options?: { promptInstruction?: string; domContext?: string },
   ) => Promise<{
     answer: string | null;
     question?: string;
@@ -834,6 +846,7 @@ interface ElectronAPI {
   // because a subsequent question's first token has to wait for the prior
   // response to drain through the supersession check.
   cancelChatStream: () => void;
+  onDomContextReceived: (callback: (dom: string) => void) => () => void;
 }
 
 export const PROCESSING_EVENTS = {
@@ -1164,6 +1177,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   ) => ipcRenderer.invoke('test-stt-connection', provider, apiKey, region),
   localWhisperGetModels: () => ipcRenderer.invoke('local-whisper-get-models'),
   localWhisperSetModel: (modelId: string) => ipcRenderer.invoke('local-whisper-set-model', modelId),
+  localWhisperGetChannelConfig: () => ipcRenderer.invoke('local-whisper-get-channel-config'),
+  localWhisperSetChannelConfig: (cfg: {
+    enabled?: boolean;
+    micModelId?: string;
+    systemModelId?: string;
+    globalModelId?: string;
+  }) => ipcRenderer.invoke('local-whisper-set-channel-config', cfg),
   localWhisperDeleteModel: (modelId: string) =>
     ipcRenderer.invoke('local-whisper-delete-model', modelId),
   localWhisperStartDownload: (modelId: string) =>
@@ -1348,7 +1368,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   generateWhatToSay: (
     question?: string,
     imagePaths?: string[],
-    options?: { promptInstruction?: string },
+    options?: { promptInstruction?: string; domContext?: string },
   ) => ipcRenderer.invoke('generate-what-to-say', question, imagePaths, options),
   generateClarify: () => ipcRenderer.invoke('generate-clarify'),
   generateCodeHint: (imagePaths?: string[], problemStatement?: string) =>
@@ -2146,6 +2166,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Cancel the in-flight chat stream. See ElectronAPI interface for rationale.
   cancelChatStream: () => {
     ipcRenderer.send('gemini-chat-stream-stop');
+  },
+  onDomContextReceived: (callback: (dom: string) => void) => {
+    const subscription = (_: any, dom: string) => callback(dom);
+    ipcRenderer.on('dom-context-received', subscription);
+    return () => {
+      ipcRenderer.removeListener('dom-context-received', subscription);
+    };
   },
 } as ElectronAPI);
 

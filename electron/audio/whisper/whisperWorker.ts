@@ -15,6 +15,7 @@
  * natively as a true dynamic ESM import at runtime.
  */
 import { parentPort } from 'worker_threads';
+import { WhisperProgressAggregator } from './whisperProgressAggregator';
 
 const LANG_MAP: Record<string, string | null> = {
   'auto': null,
@@ -164,52 +165,25 @@ parentPort.on('message', async (msg: any) => {
       // HF Transformers fires progress_callback per *file* (encoder, decoder,
       // tokenizer, config…). The raw `data.progress` is per-file 0..100, which
       // makes a model-level bar bounce around (3 → 2 → 100 → 5 → …) as files
-      // start, complete, and new ones enter the stream.
+      // start, complete, and new ones enter the stream. The byte-weighted
+      // aggregation that turns those per-file events into a smooth model-level
+      // percentage lives in whisperProgressAggregator.ts (pure + unit-tested);
+      // see that file for the full rationale on why count-averaging produced
+      // the old "jumps to ~80% then stalls" bug.
       //
-      // Strategy: register every file we ever see in a Map, keep its value
-      // monotonic per file (0 on initiate, latest pct on progress, 100 on done),
-      // and report the AVERAGE across the map. Capped at 99 so the bar never
-      // hits 100 before the IPC 'complete' signal — that boundary is owned by
-      // the 'ready' message below.
-      const fileProgress = new Map<string, number>();
-      let lastPostedPct = 0;
+      // expectedBytes = catalog download size, the denominator from byte zero.
+      // 0 when unknown / lookup failed → the aggregator falls back to observed
+      // file totals. The constructor sanitizes any non-finite/negative value.
+      const aggregator = new WhisperProgressAggregator(Number(msg.expectedBytes));
       pipe = await pipeline('automatic-speech-recognition', msg.modelId, {
         dtype,
         progress_callback: (data: any) => {
-          const key: string | undefined = data.file ?? data.name;
-          if (!key) return;
-          let val: number | null = null;
-          if (data.status === 'initiate' || data.status === 'download' || data.status === 'downloading') {
-            if (!fileProgress.has(key)) val = 0;
-          } else if (data.status === 'progress') {
-            const p = Number(data.progress);
-            if (!Number.isNaN(p)) val = Math.min(100, Math.max(0, p));
-          } else if (data.status === 'done') {
-            val = 100;
-          } else {
-            return;
-          }
-          if (val !== null) {
-            const prev = fileProgress.get(key) ?? 0;
-            // Per-file monotonic: each file's progress only goes up.
-            fileProgress.set(key, Math.max(prev, val));
-          }
-          if (fileProgress.size === 0) return;
-          let sum = 0;
-          for (const v of fileProgress.values()) sum += v;
-          const avg = sum / fileProgress.size;
-          // Cap at 99 — only the 'ready' completion event sets 100. Floor so
-          // we don't post 0.7 → 1 → 1 → 1.4 → 2 churn.
-          const rounded = Math.min(99, Math.floor(avg));
-          // Cross-file safety net: don't decrease (e.g. when a brand-new file
-          // joins the map at 0% it shouldn't drag the bar backwards).
-          const next = Math.max(lastPostedPct, rounded);
-          if (next === lastPostedPct) return;
-          lastPostedPct = next;
+          const { pct } = aggregator.update(data);
+          if (pct === null) return;
           parentPort!.postMessage({
             type: 'progress',
             modelId: msg.modelId,
-            progress: next,
+            progress: pct,
           });
         },
       });

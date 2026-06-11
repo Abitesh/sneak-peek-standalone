@@ -5,7 +5,8 @@ import { estimateTokens } from "./modelCapabilities";
 import { TemporalContext } from "./TemporalContextBuilder";
 import { IntentResult } from "./IntentClassifier";
 import { ScreenContext } from "../services/screen/ScreenContextService";
-import { PromptAssembler } from "../services/context/PromptAssembler";
+import { PromptAssembler, escapeUserContent, INJECTION_REDACTION_MESSAGE, TRUNCATION_SUFFIX } from "../services/context/PromptAssembler";
+import { DOM_CONTEXT_MAX_CHARS } from "../config/constants";
 import { checkAnswerForCodeBugs } from "./CodeSanityCheck";
 import { formatAnswerPlanForPrompt, isCodingAnswerType } from "./AnswerPlanner";
 import type { AnswerPlan, AnswerType } from "./AnswerPlanner";
@@ -99,6 +100,7 @@ export class WhatToAnswerLLM {
         // mode-context retrieval step is skipped — the skill defines the entire
         // intent and mixing custom-mode reference docs in just dilutes it.
         activeSkill?: { id: string; name: string; promptBlock: string },
+        domContext?: string,
         // Candidate's own resume facts (already XML-formatted by the
         // KnowledgeOrchestrator) for grounding interviewer questions like "tell
         // me about your projects". Supplies FACTS only; the first-person
@@ -241,11 +243,36 @@ ANSWER SHAPE: ${intentResult.answerShape}
                 ? undefined
                 : candidateProfile;
 
+            let processedDomContext: string | undefined = undefined;
+            let domTokenEstimate = 0;
+            if (domContext) {
+                const escaped = escapeUserContent(domContext);
+                if (escaped.length > DOM_CONTEXT_MAX_CHARS) {
+                    const ratio = escaped.length / domContext.length;
+                    // Deduct length of suffix (\n[...truncated]) to ensure final length fits comfortably
+                    const maxRawLength = Math.floor((DOM_CONTEXT_MAX_CHARS - 30) / ratio);
+                    processedDomContext = domContext.substring(0, maxRawLength) + TRUNCATION_SUFFIX;
+                } else {
+                    processedDomContext = domContext;
+                }
+
+                // Check if the DOM block will be fully redacted during prompt assembly.
+                // If redacted, its budget will be tiny (redaction message), preventing transcript over-truncation.
+                const escapedDom = escapeUserContent(processedDomContext);
+                const hasInjection = PromptAssembler.hasPromptInjection(escapedDom);
+                if (hasInjection) {
+                    domTokenEstimate = estimateTokens(INJECTION_REDACTION_MESSAGE) + 100;
+                } else {
+                    domTokenEstimate = estimateTokens(escapedDom) + 100;
+                }
+            }
+
             const assemblerBudget = 2000
                 + estimateTokens(intentContext || '')
                 + estimateTokens(modeContextBlock)
                 + estimateTokens(effectiveCandidateProfile || '')
                 + estimateTokens(screenContext?.ocrText || '')
+                + domTokenEstimate
                 + estimateTokens((temporalContext?.previousResponses || []).join('\n'));
             const reservedForFit =
                 (this.llmHelper.getCapabilities().outputBudgetTokens || 2000)
@@ -282,6 +309,7 @@ ANSWER SHAPE: ${intentResult.answerShape}
                 transcript: workingTranscript,
                 modeTemplateType: 'active',
                 screenContext,
+                domContext: processedDomContext,
                 priorResponses: temporalContext?.hasRecentResponses ? temporalContext.previousResponses : undefined,
                 intentContext,
                 retrievedModeContext: modeContextBlock || undefined,
