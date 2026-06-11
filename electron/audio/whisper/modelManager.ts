@@ -162,6 +162,17 @@ export function getAvailableModels(): WhisperModelInfo[] {
 }
 
 /**
+ * Catalog download size (in bytes) for a model, used as the progress-bar
+ * denominator from byte zero so the bar tracks real wall-clock download
+ * instead of inferring the total from whichever files have reported so far.
+ * Returns 0 for unknown ids (caller then falls back to observed file totals).
+ */
+export function getModelSizeBytes(modelId: string): number {
+  const m = MODEL_CATALOG.find(x => x.id === modelId);
+  return m ? Math.round(m.sizeMb * 1024 * 1024) : 0;
+}
+
+/**
  * Deletes a downloaded model from the cache directory.
  */
 export function deleteModel(modelId: WhisperModelId): void {

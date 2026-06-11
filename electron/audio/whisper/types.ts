@@ -51,6 +51,10 @@ export interface WorkerInitMessage {
   // Per-module dtype map (see inferenceConfig.ts). String applies to all
   // ONNX files; Record keys are ONNX basenames without `.onnx`.
   dtype?: string | Record<string, string>;
+  // Catalog download size in bytes — the progress-bar denominator from byte
+  // zero (see whisperProgressAggregator.ts). Optional / 0 when unknown, in
+  // which case the worker falls back to observed per-file byte totals.
+  expectedBytes?: number;
 }
 export interface WorkerTranscribeMessage {
   type: 'transcribe';

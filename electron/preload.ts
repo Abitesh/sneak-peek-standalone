@@ -176,6 +176,18 @@ interface ElectronAPI {
   ) => Promise<{ success: boolean; error?: string }>;
   localWhisperGetModels: () => Promise<{ models: any[]; activeModelId: string }>;
   localWhisperSetModel: (modelId: string) => Promise<{ success: boolean }>;
+  localWhisperGetChannelConfig: () => Promise<{
+    enabled: boolean;
+    micModelId: string;
+    systemModelId: string;
+    globalModelId: string;
+  }>;
+  localWhisperSetChannelConfig: (cfg: {
+    enabled?: boolean;
+    micModelId?: string;
+    systemModelId?: string;
+    globalModelId?: string;
+  }) => Promise<{ success: boolean; error?: string }>;
   localWhisperDeleteModel: (modelId: string) => Promise<{ success: boolean; error?: string }>;
   localWhisperStartDownload: (modelId: string) => Promise<{ success: boolean; error?: string }>;
   onLocalWhisperDownloadProgress: (
@@ -1138,6 +1150,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   ) => ipcRenderer.invoke('test-stt-connection', provider, apiKey, region),
   localWhisperGetModels: () => ipcRenderer.invoke('local-whisper-get-models'),
   localWhisperSetModel: (modelId: string) => ipcRenderer.invoke('local-whisper-set-model', modelId),
+  localWhisperGetChannelConfig: () => ipcRenderer.invoke('local-whisper-get-channel-config'),
+  localWhisperSetChannelConfig: (cfg: {
+    enabled?: boolean;
+    micModelId?: string;
+    systemModelId?: string;
+    globalModelId?: string;
+  }) => ipcRenderer.invoke('local-whisper-set-channel-config', cfg),
   localWhisperDeleteModel: (modelId: string) =>
     ipcRenderer.invoke('local-whisper-delete-model', modelId),
   localWhisperStartDownload: (modelId: string) =>
