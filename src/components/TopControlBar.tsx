@@ -82,8 +82,37 @@ export function TopControlBar({
     localStorage.setItem(positionKey, JSON.stringify(next));
   };
 
+  useEffect(() => {
+    const handlePointerMove = (event: PointerEvent) => {
+      const drag = dragRef.current;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      const rect = barRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const halfWidth = rect.width / 2;
+      updatePosition({
+        x: Math.min(Math.max(event.clientX - drag.offsetX, halfWidth + 8), window.innerWidth - halfWidth - 8),
+        y: Math.min(Math.max(event.clientY - drag.offsetY, 8), Math.max(8, window.innerHeight - rect.height - 8)),
+      });
+    };
+
+    const handlePointerUp = (event: PointerEvent) => {
+      if (dragRef.current?.pointerId === event.pointerId) dragRef.current = null;
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
+    };
+  }, []);
+
   const startDrag = (event: React.PointerEvent<HTMLButtonElement>) => {
     event.preventDefault();
+    event.stopPropagation();
     const rect = barRef.current?.getBoundingClientRect();
     if (!rect) return;
     dragRef.current = {
@@ -94,20 +123,11 @@ export function TopControlBar({
     event.currentTarget.setPointerCapture(event.pointerId);
   };
 
-  const moveDrag = (event: React.PointerEvent<HTMLButtonElement>) => {
-    const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    const rect = barRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const halfWidth = rect.width / 2;
-    updatePosition({
-      x: Math.min(Math.max(event.clientX - drag.offsetX, halfWidth + 8), window.innerWidth - halfWidth - 8),
-      y: Math.min(Math.max(event.clientY - drag.offsetY, 8), Math.max(8, window.innerHeight - rect.height - 8)),
-    });
-  };
-
   const stopDrag = (event: React.PointerEvent<HTMLButtonElement>) => {
     if (dragRef.current?.pointerId === event.pointerId) dragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
   };
 
   const toggleAuto = async () => {
@@ -129,18 +149,18 @@ export function TopControlBar({
   return (
     <div
       ref={barRef}
-      className="fixed z-[400] flex items-center gap-1 rounded-[15px] border border-white/15 bg-[#111216]/85 px-1.5 py-1 shadow-[0_12px_40px_rgba(0,0,0,0.38)] backdrop-blur-2xl select-none"
+      className="no-drag fixed z-[400] flex items-center gap-1 rounded-[15px] border border-white/15 bg-[#111216]/85 px-1.5 py-1 shadow-[0_12px_40px_rgba(0,0,0,0.38)] backdrop-blur-2xl select-none pointer-events-auto"
       style={{ left: position.x, top: position.y, transform: 'translateX(-50%)' }}
       role="toolbar"
       aria-label="Natively controls"
     >
       <button
         type="button"
-        className="h-8 w-7 inline-flex items-center justify-center rounded-lg text-white/55 hover:bg-white/10 hover:text-white cursor-grab active:cursor-grabbing touch-none"
+        data-top-control-drag-handle="true"
+        className="no-drag h-8 w-7 inline-flex items-center justify-center rounded-lg text-white/55 hover:bg-white/10 hover:text-white cursor-grab active:cursor-grabbing touch-none pointer-events-auto"
         title="Drag toolbar"
         aria-label="Drag toolbar"
         onPointerDown={startDrag}
-        onPointerMove={moveDrag}
         onPointerUp={stopDrag}
         onPointerCancel={stopDrag}
       >
