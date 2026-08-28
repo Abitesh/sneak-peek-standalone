@@ -17,7 +17,6 @@ import { getOrchestrator, type OrchestratorEvent, type UserState } from '../../l
 import type { ToasterId } from '../../lib/onboarding/orchestrator.ts';
 import { PermissionsToaster } from './PermissionsToaster';
 import { BrowserExtensionToaster } from './BrowserExtensionToaster';
-import { TrialPromoToaster } from '../trial/TrialPromoToaster';
 import { SupportToaster } from '../SupportToaster';
 import ReviewPromptHost from '../ReviewPromptHost';
 
@@ -71,6 +70,13 @@ export const OrchestratedToasterHost: React.FC = () => {
   const orchSnapshot = React.useCallback(() => orch.getSnapshot(), [orch]);
   const state = useSyncExternalStore(orchSubscribe, orchSnapshot);
   const activeId = state.activeToasterId;
+
+  // Paid-plan/free-trial promotion is disabled in this build. If an old
+  // persisted queue still reaches this stage, skip it after render so the
+  // orchestrator can continue normally without showing a trial prompt.
+  useEffect(() => {
+    if (activeId === 'trial_promo') orch.markSkipped('trial_promo');
+  }, [activeId, orch]);
 
   const onDismiss = (id: ToasterId) => () => orch.markDismissed(id);
   const onSkip = (id: ToasterId) => () => orch.markSkipped(id);
@@ -127,27 +133,8 @@ export const OrchestratedToasterHost: React.FC = () => {
       return null;
 
     case 'trial_promo':
-      // TrialPromoToaster needs additional props for start/manual setup,
-      // which it reads from window.electronAPI at runtime. The orchestrator
-      // hands it `isOpen` and onDismiss only.
-      return (
-        <TrialPromoToaster
-          isOpen={true}
-          hasNativelyKey={orch.getUserState().hasNativelyKey}
-          hasTrialToken={orch.getUserState().hasTrialToken}
-          onDismiss={onDismiss('trial_promo')}
-          onStartTrial={async () => {
-            const res = await window.electronAPI?.startTrial?.();
-            if (!res?.ok) throw new Error(res?.error || 'Could not start trial');
-            orch.setUserState({ hasTrialToken: true });
-            onDismiss('trial_promo')();
-          }}
-          onManualSetup={() => {
-            window.electronAPI?.openSettingsTab?.('api');
-            onDismiss('trial_promo')();
-          }}
-        />
-      );
+      // The effect above marks this legacy queued stage skipped.
+      return null;
 
     case 'quiet_window':
       // Internal gate — never renders a visible component.
