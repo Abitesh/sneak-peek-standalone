@@ -800,7 +800,10 @@ export class SessionTracker {
         this.transcriptEpochSummaries = [];
         this.sessionStartTime = Date.now();
         this.lastAssistantMessage = null;
+        this.lastAssistantMessageBySurface = {};
+        this.lastCommittedAttemptBySurface = {};
         this.assistantResponseHistory = [];
+        this.currentMeetingMetadata = null;
         this.lastInterimInterviewer = null;
         this.detectedCodingQuestion = null;
         this.codingQuestionSource = null;

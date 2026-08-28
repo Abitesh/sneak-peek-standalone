@@ -116,6 +116,10 @@ export class IntelligenceManager extends EventEmitter {
         this.session.setMeetingMetadata(metadata);
     }
 
+    getMeetingMetadata(): any {
+        return this.session.getMeetingMetadata();
+    }
+
     addTranscript(segment: import('./SessionTracker').TranscriptSegment, skipRefinementCheck: boolean = false): void {
         if (skipRefinementCheck) {
             // Direct add without refinement detection
@@ -133,6 +137,14 @@ export class IntelligenceManager extends EventEmitter {
         identity?: TurnIdentity,
     ): boolean {
         return this.session.addAssistantMessage(text, writeDecision, surface, identity);
+    }
+
+    /** Add a bounded screen observation to the same meeting conversation used
+     * by transcript turns and assistant answers. Images stay outside history. */
+    addScreenAnalysis(summary: string): boolean {
+        const text = String(summary ?? '').trim().slice(0, 2400);
+        if (!text) return false;
+        return this.session.addAssistantMessage(`[SCREEN ANALYSIS]\n${text}`, undefined, 'screenshot');
     }
 
     getContext(lastSeconds: number = 120) {

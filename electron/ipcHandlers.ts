@@ -872,6 +872,11 @@ export function initializeIpcHandlers(appState: AppState): void {
     }
     try {
       const result = await appState.processingHelper.getLLMHelper().analyzeImageFiles([resolved]);
+      try {
+        appState.getIntelligenceManager?.()?.addScreenAnalysis?.(result?.text);
+      } catch (screenMemoryError) {
+        console.warn('[IPC] screen analysis shared-context write failed:', screenMemoryError);
+      }
       return result;
     } catch (error: any) {
       throw error;
@@ -1117,6 +1122,9 @@ export function initializeIpcHandlers(appState: AppState): void {
 
             const mm = ModesManager.getInstance();
             const modeInfo = mm.getActiveModeInfo?.() ?? null;
+            const sharedConversationSessionId = String(
+              appState.getIntelligenceManager?.()?.getMeetingMetadata?.()?.id ?? senderId,
+            );
             const rawMode = (modeInfo as any)?.templateType ?? 'general';
             // Unknown ids fail closed in the registry; fall back to the seeded
             // mode rather than throwing inside a live answer path — but SAY SO.
@@ -1284,6 +1292,11 @@ export function initializeIpcHandlers(appState: AppState): void {
               resolvedProfileSources: v3ProfileResolved,
               extraAllowedSourceTypes: extraSourceTypes,
               debugSources: v3DebugSources as never,
+              conversationSummary: (() => {
+                try {
+                  return appState.getIntelligenceManager?.()?.getFormattedContext?.(180) || undefined;
+                } catch { return undefined; }
+              })(),
               deferDebugCompletion: true,
               requestId: `v3-${myStreamId}`,
               requestSequence: myStreamId,
@@ -1293,7 +1306,7 @@ export function initializeIpcHandlers(appState: AppState): void {
               // a u:local|s:<sender> turn.
               scope: {
                 userId: V3_USER_ID,
-                sessionId: String(senderId),
+                sessionId: sharedConversationSessionId,
                 ...(v3MeetingId ? { meetingId: v3MeetingId } : {}),
               },
               retrieval: port,
@@ -1582,7 +1595,7 @@ export function initializeIpcHandlers(appState: AppState): void {
               if (!v3Truncated) {
                 try {
                   const { recordAnswerSummary } = require('./context-intelligence/question/conversation-state-store');
-                  recordAnswerSummary(String(senderId), finalText);
+                  recordAnswerSummary(sharedConversationSessionId, finalText);
                 } catch { /* continuity only */ }
                 try {
                   // The user/answer PAIR is the antecedent unit for follow-up
@@ -1675,7 +1688,14 @@ export function initializeIpcHandlers(appState: AppState): void {
             event.sender?.once?.('destroyed', () => {
               _convoCleanupRegistered.delete(senderId);
               try { _manualConversationMemory.clearSession(String(senderId)); } catch { /* noop */ }
-              try { require('./context-intelligence/question/conversation-state-store').clearConversationState(String(senderId)); } catch { /* noop */ }
+              try {
+                const meetingSessionId = String(
+                  appState.getIntelligenceManager?.()?.getMeetingMetadata?.()?.id ?? senderId,
+                );
+                const { clearConversationState } = require('./context-intelligence/question/conversation-state-store');
+                clearConversationState(String(senderId));
+                clearConversationState(meetingSessionId);
+              } catch { /* noop */ }
             });
           }
         } catch { /* noop */ }
@@ -9949,6 +9969,7 @@ export function initializeIpcHandlers(appState: AppState): void {
       try { appState.onManualWhatToAnswer?.(); } catch { /* never block the answer */ }
       try {
         let screenContext: any;
+        const intelligenceManager = appState.getIntelligenceManager();
         let screenContextStatus: 'not_available' | 'available' | 'failed' = 'not_available';
         let visionProviderUsed: string | undefined;
         let visionModelUsed: string | undefined;
@@ -10033,6 +10054,18 @@ export function initializeIpcHandlers(appState: AppState): void {
             });
 
             screenContext = sur.status === 'available' ? sur : undefined;
+            if (sur.status === 'available') {
+              const screenSummary = [
+                sur.visibleSummary,
+                sur.taskDetected ? `Task detected: ${sur.taskDetected}` : '',
+                sur.extractedText ? `Visible text: ${sur.extractedText}` : '',
+              ].filter(Boolean).join('\n');
+              try {
+                intelligenceManager?.addScreenAnalysis?.(screenSummary);
+              } catch (screenMemoryError) {
+                console.warn('[WTA] screen analysis shared-context write failed:', screenMemoryError);
+              }
+            }
             screenContextStatus =
               sur.status === 'available'
                 ? 'available'
@@ -10050,8 +10083,6 @@ export function initializeIpcHandlers(appState: AppState): void {
             });
           }
         }
-
-        const intelligenceManager = appState.getIntelligenceManager();
 
         // Smart Browser Context v2 — when a structured envelope (coding problem/
         // editor) accompanied the capture, format it into a BROWSER_CONTEXT_KIND
@@ -10866,6 +10897,38 @@ export function initializeIpcHandlers(appState: AppState): void {
 
   // Query live meeting with JIT RAG
   safeHandle('rag:query-live', async (event, { query }: { query: string }) => {
+    // Personal/profile questions belong to the V3 manual-chat surface. A
+    // successful live-meeting lookup must not terminate those turns before
+    // Profile Intelligence can hydrate and retrieve the active resume.
+    try {
+      const { classifyTurn } = require('./context-intelligence/question/turn-classifier');
+      const { resolveModePolicy, resolveModeIdOrWarn } = require('./context-intelligence/policies/mode-policy-registry');
+      const { ModesManager } = require('./services/ModesManager');
+      const modeInfo = ModesManager.getInstance().getActiveModeInfo?.() ?? null;
+      const modeId = resolveModeIdOrWarn(
+        modeInfo?.templateType ?? null,
+        'ipc/rag-query-live',
+        { quietWhenAbsent: true },
+      );
+      const classification = classifyTurn({
+        resolvedQuestion: String(query || ''),
+        policy: resolveModePolicy(modeId),
+        isFollowUp: false,
+      });
+      const personalClaim = classification.claimTypes.some((claim: string) =>
+        claim === 'USER_PROJECT'
+        || claim === 'USER_SKILL'
+        || claim === 'USER_EMPLOYMENT'
+        || claim === 'USER_EDUCATION'
+        || claim === 'USER_MOTIVATION',
+      );
+      if (personalClaim) {
+        return { fallback: true };
+      }
+    } catch (error) {
+      console.warn('[RAG] personal-question routing check failed; continuing with live RAG:', error);
+    }
+
     const ragManager = appState.getRAGManager();
 
     if (!ragManager || !ragManager.isReady()) {
@@ -11176,14 +11239,6 @@ export function initializeIpcHandlers(appState: AppState): void {
 
   safeHandle('profile:set-mode', async (_, enabled: boolean) => {
     try {
-      // Premium gate: only allow enabling profile mode with active license or free trial
-      if (enabled && !isProOrTrialActive()) {
-        return {
-          success: false,
-          error:
-            'Pro license required. Please activate a license key to use Profile Intelligence features.',
-        };
-      }
       const orchestrator = appState.getKnowledgeOrchestrator();
       if (!orchestrator) {
         return { success: false, error: 'Knowledge engine not initialized' };
@@ -12111,7 +12166,6 @@ export function initializeIpcHandlers(appState: AppState): void {
 
   safeHandle('modes:create', async (_, params: { name: string; templateType: string }) => {
     try {
-      if (!isProOrTrialActive()) return { success: false, error: 'pro_required' };
       const { ModesManager } = require('./services/ModesManager');
       const mode = ModesManager.getInstance().createMode({
         name: params.name,
@@ -12202,17 +12256,6 @@ export function initializeIpcHandlers(appState: AppState): void {
       try {
         const { ModesManager } = require('./services/ModesManager');
         const mgr = ModesManager.getInstance();
-        // Gate: changing templateType to a non-general template requires pro.
-        // Also gate if the existing mode is already non-general (editing a pro mode requires pro).
-        if (!isProOrTrialActive()) {
-          if (updates.templateType && updates.templateType !== 'general') {
-            return { success: false, error: 'pro_required' };
-          }
-          const existing = mgr.getModes().find((m: any) => m.id === id);
-          if (existing && existing.templateType !== 'general') {
-            return { success: false, error: 'pro_required' };
-          }
-        }
         mgr.updateMode(id, updates);
         return { success: true };
       } catch (e: any) {
@@ -12255,14 +12298,6 @@ export function initializeIpcHandlers(appState: AppState): void {
     hasLiveTranscriptCapable?: boolean;
   }) => {
     try {
-      // Source Contract Builder is a Phase-7 pro feature: the panel renders
-      // for any non-general mode and gates on pro via the surrounding UI,
-      // but the IPC must enforce the same gate so a hand-crafted payload
-      // can't bypass. Mirror modes:set-active: general modes are free, all
-      // others require pro/trial.
-      if (input.templateType !== 'general' && !isProOrTrialActive()) {
-        return null;
-      }
       const { ModesManager } = require('./services/ModesManager');
       const mgr = ModesManager.getInstance();
       return mgr.buildUserSourceContract({
@@ -12389,7 +12424,6 @@ export function initializeIpcHandlers(appState: AppState): void {
 
   safeHandle('modes:delete', async (_, id: string) => {
     try {
-      if (!isProOrTrialActive()) return { success: false, error: 'pro_required' };
       const { ModesManager } = require('./services/ModesManager');
       ModesManager.getInstance().deleteMode(id);
       return { success: true };
@@ -12401,16 +12435,6 @@ export function initializeIpcHandlers(appState: AppState): void {
 
   safeHandle('modes:set-active', async (_, id: string | null) => {
     try {
-      // Allow clearing (null) or setting general mode without pro; all other modes require pro
-      if (id !== null) {
-        const { ModesManager } = require('./services/ModesManager');
-        const targetMode = ModesManager.getInstance()
-          .getModes()
-          .find((m: any) => m.id === id);
-        if (targetMode && targetMode.templateType !== 'general' && !isProOrTrialActive()) {
-          return { success: false, error: 'pro_required' };
-        }
-      }
       const { ModesManager } = require('./services/ModesManager');
       // Abort AND INVALIDATE every in-flight chat stream BEFORE the mode
       // flips. A turn planned under mode A must not keep streaming into a UI
@@ -12571,7 +12595,6 @@ export function initializeIpcHandlers(appState: AppState): void {
     // profile:upload-resume already uses correctly.
     let selectedPath: string | undefined;
     try {
-      if (!isProOrTrialActive()) return { success: false, error: 'pro_required' };
       const result: any = await dialog.showOpenDialog({
         properties: ['openFile'],
         filters: [
@@ -12604,7 +12627,6 @@ export function initializeIpcHandlers(appState: AppState): void {
 
   safeHandle('modes:delete-reference-file', async (_, id: string) => {
     try {
-      if (!isProOrTrialActive()) return { success: false, error: 'pro_required' };
       const { ModesManager } = require('./services/ModesManager');
       ModesManager.getInstance().deleteReferenceFile(id);
       return { success: true };

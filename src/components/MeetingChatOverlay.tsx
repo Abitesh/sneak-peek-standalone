@@ -210,6 +210,7 @@ const MeetingChatOverlay: React.FC<MeetingChatOverlayProps> = ({
     const [messages, setMessages] = useState<Message[]>([]);
     const [chatState, setChatState] = useState<ChatState>('idle');
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    const submitInFlightRef = useRef(false);
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const chatWindowRef = useRef<HTMLDivElement>(null);
@@ -243,8 +244,11 @@ const MeetingChatOverlay: React.FC<MeetingChatOverlayProps> = ({
             setChatState('idle');
             setMessages([]);
             setErrorMessage(null);
+            submitInFlightRef.current = false;
+            void window.electronAPI?.ragCancelQuery?.({ meetingId: meetingContext.id });
+            window.electronAPI?.cancelChatStream?.();
         }
-    }, [isOpen]);
+    }, [isOpen, meetingContext.id]);
 
     // ESC key handler
     useEffect(() => {
@@ -265,8 +269,11 @@ const MeetingChatOverlay: React.FC<MeetingChatOverlayProps> = ({
     }, []);
 
     const handleClose = useCallback(() => {
+        submitInFlightRef.current = false;
+        void window.electronAPI?.ragCancelQuery?.({ meetingId: meetingContext.id });
+        window.electronAPI?.cancelChatStream?.();
         onClose();
-    }, [onClose]);
+    }, [meetingContext.id, onClose]);
 
     // Build context string for LLM
     const buildContextString = useCallback((): string => {
@@ -299,7 +306,8 @@ const MeetingChatOverlay: React.FC<MeetingChatOverlayProps> = ({
 
     // Submit question using RAG streaming
     const submitQuestion = useCallback(async (question: string) => {
-        if (!question.trim() || chatState === 'waiting_for_llm' || chatState === 'streaming_response') return;
+        if (!question.trim() || submitInFlightRef.current || chatState === 'waiting_for_llm' || chatState === 'streaming_response') return;
+        submitInFlightRef.current = true;
 
         const userMessage: Message = {
             id: genMessageId(),
@@ -556,6 +564,7 @@ ${contextString}`;
             // fall back to 'idle' so the next submit can proceed.
             setChatState(prev => (prev === 'error' ? prev : 'idle'));
             streamBuffer.reset();
+            submitInFlightRef.current = false;
         }
     }, [chatState, buildContextString, meetingContext]);
 

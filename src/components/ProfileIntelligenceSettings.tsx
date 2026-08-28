@@ -21,7 +21,7 @@ const PI_CSS = `
         --pi-hero: #ffffff;
         --pi-primary: rgba(255,255,255,0.85);
         --pi-secondary: rgba(255,255,255,0.55);
-        --pi-tertiary: rgba(255,255,255,0.35);
+        --pi-tertiary: rgba(255,255,255,0.62);
         --pi-btn-bg: rgba(255,255,255,0.06);
         --pi-btn-bg-hover: rgba(255,255,255,0.10);
         --pi-btn-border: rgba(255,255,255,0.10);
@@ -75,7 +75,7 @@ const PI_CSS = `
         --pi-hero: #111827;
         --pi-primary: #374151;
         --pi-secondary: #6b7280;
-        --pi-tertiary: #9ca3af;
+        --pi-tertiary: #6b7280;
         --pi-btn-bg: rgba(0,0,0,0.04);
         --pi-btn-bg-hover: rgba(0,0,0,0.08);
         --pi-btn-border: rgba(0,0,0,0.05);

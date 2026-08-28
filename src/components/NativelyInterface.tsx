@@ -3426,11 +3426,9 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
     if (!window.electronAPI?.onSessionReset) return;
     const unsubscribe = window.electronAPI.onSessionReset(() => {
       console.log('[NativelyInterface] Resetting session state...');
-      window.electronAPI?.cancelChatStream?.();
-      chatStreamIdRef.current = null;
-      chatStreamSourceRef.current = null;
-      requestStartTimeRef.current = null;
-      setMessages([]);
+      resetChatState();
+      isRecordingRef.current = false;
+      setIsManualRecording(false);
       eagerCodeExpansionHoldRef.current = false;
       answerPanelPinnedRef.current = false;
       setAnswerPanelPinned(false);
@@ -3477,7 +3475,6 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
       setAttachedContext([]);
       setManualTranscript('');
       setVoiceInput('');
-      setIsProcessing(false);
       if (rollingPartialDebounceRef.current !== null) {
         clearTimeout(rollingPartialDebounceRef.current);
         rollingPartialDebounceRef.current = null;

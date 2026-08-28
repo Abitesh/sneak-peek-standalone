@@ -4953,6 +4953,10 @@ export class IntelligenceEngine extends EventEmitter {
                 }
             } catch { /* normalizer never blocks the answer */ }
 
+            // The stream may have been superseded while output normalization
+            // awaited. Never let that stale answer enter shared history or
+            // usage after a newer Ask/Listen/Screen generation owns the turn.
+            if (isWtaSuperseded()) return null;
             this.session.addAssistantMessage(finalWtaAnswer, wtaWriteDecision, 'what_to_answer');
 
             // Full-JIT write-gating law (§6): a provider-error/no-answer WTA

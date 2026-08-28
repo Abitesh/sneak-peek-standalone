@@ -1,13 +1,14 @@
 // electron/services/__tests__/ProfileIntelligenceGate.test.mjs
 //
-// Verifies the Profile Intelligence IPC handlers enforce the Pro/trial gate.
+// Verifies the Profile Intelligence IPC handlers preserve the entitlement
+// boundary: local document setup is available without Pro, while paid analysis
+// operations remain gated.
 // We test this at the source level (matching the existing ModeBleeding.test
 // pattern) because the IPC handlers themselves require an Electron app
 // runtime to instantiate.
 //
-// The contract is: every premium handler that ingests user data must call
-// isProOrTrialActive() before doing any work, and short-circuit to the
-// "Pro license required" error message otherwise.
+// Local profile/file storage and indexing must not be gated. Paid analysis
+// operations retain their existing Pro/trial check.
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
@@ -20,7 +21,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SOURCE = path.resolve(__dirname, '../../ipcHandlers.ts');
 
 const GUARDED_HANDLERS = [
-  'profile:set-mode',
   'profile:research-company',
   'profile:generate-negotiation',
 ];
@@ -76,13 +76,35 @@ describe('Profile Intelligence IPC: Pro/trial gate', () => {
 describe('Profile Intelligence: local document setup', () => {
   const source = fs.readFileSync(SOURCE, 'utf8');
 
-  for (const handler of ['profile:upload-resume', 'profile:upload-jd']) {
+  for (const handler of ['profile:set-mode', 'profile:upload-resume', 'profile:upload-jd']) {
     test(`${handler} does not require a Pro license before local ingestion`, () => {
       const slice = sliceSafeHandleBlock(source, handler).slice(0, 3000);
-      assert.ok(slice.includes('ingestDocument'), `${handler} must retain document ingestion`);
+      assert.ok(
+        handler === 'profile:set-mode' || slice.includes('ingestDocument'),
+        `${handler} must retain local profile setup`,
+      );
       assert.equal(slice.includes('isProOrTrialActive()'), false, `${handler} must not be premium-gated`);
     });
   }
+
+  for (const handler of ['modes:upload-reference-file', 'modes:delete-reference-file']) {
+    test(`${handler} remains available for local multi-file intelligence`, () => {
+      const slice = sliceSafeHandleBlock(source, handler).slice(0, 3000);
+      assert.equal(slice.includes('isProOrTrialActive()'), false, `${handler} must not be premium-gated`);
+    });
+  }
+});
+
+describe('Profile questions do not terminate in live-meeting RAG', () => {
+  const source = fs.readFileSync(SOURCE, 'utf8');
+
+  test('rag:query-live classifies existing personal claims before querying live RAG', () => {
+    const slice = sliceSafeHandleBlock(source, 'rag:query-live');
+    assert.ok(slice.includes("require('./context-intelligence/question/turn-classifier')"));
+    assert.ok(slice.includes("claim === 'USER_PROJECT'"));
+    assert.ok(slice.includes("return { fallback: true }"));
+    assert.ok(slice.indexOf('classifyTurn') < slice.indexOf('const ragManager'));
+  });
 });
 
 describe('Profile Intelligence: resume + JD storage tables exist in the schema', () => {
