@@ -11069,14 +11069,8 @@ export function initializeIpcHandlers(appState: AppState): void {
 
   safeHandle('profile:upload-resume', async (_, filePath: string) => {
     try {
-      // Premium gate: require active license or free trial for profile features
-      if (!isProOrTrialActive()) {
-        return {
-          success: false,
-          error:
-            'Pro license required. Please activate a license key to use Profile Intelligence features.',
-        };
-      }
+      // Resume ingestion is local document setup. Premium gates remain on
+      // profile mode and premium analysis features below.
       const resolvedPath = consumeSelectedProfilePath(filePath);
       if (!resolvedPath) {
         console.warn('[IPC] profile:upload-resume rejected: path was not produced by profile:select-file or has expired.');
@@ -11293,14 +11287,8 @@ export function initializeIpcHandlers(appState: AppState): void {
 
   safeHandle('profile:upload-jd', async (_, filePath: string) => {
     try {
-      // Premium gate
-      if (!isProOrTrialActive()) {
-        return {
-          success: false,
-          error:
-            'Pro license required. Please activate a license key to use Profile Intelligence features.',
-        };
-      }
+      // Job-description ingestion is local document setup. Premium gates remain
+      // on profile mode and premium analysis features below.
       const resolvedPath = consumeSelectedProfilePath(filePath);
       if (!resolvedPath) {
         console.warn('[IPC] profile:upload-jd rejected: path was not produced by profile:select-file or has expired.');

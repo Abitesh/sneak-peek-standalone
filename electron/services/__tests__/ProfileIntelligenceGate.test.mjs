@@ -20,9 +20,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SOURCE = path.resolve(__dirname, '../../ipcHandlers.ts');
 
 const GUARDED_HANDLERS = [
-  'profile:upload-resume',
   'profile:set-mode',
-  'profile:upload-jd',
   'profile:research-company',
   'profile:generate-negotiation',
 ];
@@ -73,6 +71,18 @@ describe('Profile Intelligence IPC: Pro/trial gate', () => {
     // should return a falsy hasProfile when the orchestrator is missing.
     assert.ok(slice.includes('hasProfile: false'), 'profile:get-status must default to hasProfile=false when orchestrator missing');
   });
+});
+
+describe('Profile Intelligence: local document setup', () => {
+  const source = fs.readFileSync(SOURCE, 'utf8');
+
+  for (const handler of ['profile:upload-resume', 'profile:upload-jd']) {
+    test(`${handler} does not require a Pro license before local ingestion`, () => {
+      const slice = sliceSafeHandleBlock(source, handler).slice(0, 3000);
+      assert.ok(slice.includes('ingestDocument'), `${handler} must retain document ingestion`);
+      assert.equal(slice.includes('isProOrTrialActive()'), false, `${handler} must not be premium-gated`);
+    });
+  }
 });
 
 describe('Profile Intelligence: resume + JD storage tables exist in the schema', () => {

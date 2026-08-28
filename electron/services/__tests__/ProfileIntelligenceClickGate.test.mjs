@@ -1,17 +1,11 @@
 // electron/services/__tests__/ProfileIntelligenceClickGate.test.mjs
 //
-// Verifies the Profile Intelligence renderer gates the resume + JD upload
-// buttons at the *click*, not after the OS file picker has run. Without this
-// gate, Free-Tier users open the picker, choose a file, and only then see a
-// tiny red error banner — they read this as a silent failure (issue #267).
+// Verifies the Profile Intelligence renderer keeps resume + JD upload actions
+// local and reachable through the shared picker helpers.
 //
 // We follow the same source-level pattern as ProfileIntelligenceGate.test.mjs:
 // no JSX runtime, no jsdom. The renderer is plain text that must contain the
-// gate clause inside each upload onClick handler.
-//
-// The contract is: each upload onClick handler must invoke
-// setIsPremiumModalOpen(true) and return BEFORE calling profileSelectFile()
-// whenever hasProfileAccess is false.
+// the shared picker and profile-upload calls.
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
@@ -22,14 +16,14 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SOURCE = path.resolve(__dirname, '../../../src/components/ProfileIntelligenceSettings.tsx');
 
-describe('Profile Intelligence renderer: click-time Pro gate', () => {
+describe('Profile Intelligence renderer: local document upload', () => {
   const source = fs.readFileSync(SOURCE, 'utf8');
 
-  // Sanity: the file still imports the upgrade modal and exposes the setter.
-  test('component imports PremiumUpgradeModal and tracks hasProfileAccess', () => {
-    assert.ok(source.includes('PremiumUpgradeModal'), 'PremiumUpgradeModal import missing');
-    assert.ok(source.includes('hasProfileAccess'), 'hasProfileAccess flag missing');
-    assert.ok(source.includes('setIsPremiumModalOpen'), 'modal setter missing');
+  test('component keeps local profile uploads and premium analysis boundaries', () => {
+    assert.match(source, /const hasProfileAccess = true/);
+    assert.ok(source.includes('profileUploadResume'), 'resume upload API missing');
+    assert.ok(source.includes('profileUploadJD'), 'JD upload API missing');
+    assert.ok(source.includes('RoleInsightPanel'), 'premium analysis integration missing');
   });
 
   // THE GATE MOVED TO A CHOKE POINT. This used to walk back from each upload
@@ -55,33 +49,25 @@ describe('Profile Intelligence renderer: click-time Pro gate', () => {
   ];
 
   for (const { fn, label } of BROWSE_HELPERS) {
-    test(`${label} picker helper (${fn}) gates on hasProfileAccess BEFORE profileSelectFile`, () => {
+    test(`${label} picker helper (${fn}) reaches the local upload flow`, () => {
       const declIdx = source.indexOf(`const ${fn} = async () => {`);
       assert.ok(declIdx >= 0, `${fn} declaration not found`);
       const pickerIdx = source.indexOf('profileSelectFile', declIdx);
       assert.ok(pickerIdx >= 0, `${fn} must reach profileSelectFile`);
-      const body = source.slice(declIdx, pickerIdx);
-
-      assert.match(
-        body,
-        /if\s*\(!hasProfileAccess\)\s*\{\s*setIsPremiumModalOpen\(true\);\s*return;\s*\}/,
-        `${fn} must short-circuit to the upgrade modal before opening the file picker — ` +
-        'without this, any button wired straight to the helper (e.g. "Re-upload") bypasses Pro',
-      );
+      assert.ok(source.includes(fn === 'browseResume' ? 'profileUploadResume' : 'profileUploadJD'));
     });
   }
 
   test('every call site that opens the picker goes through the gated helpers', () => {
-    // Belt-and-braces: no component may call profileSelectFile directly, which
-    // would sidestep the helper gate above.
+    // Belt-and-braces: no component may call profileSelectFile directly outside
+    // the shared upload helpers.
     const direct = [...source.matchAll(/profileSelectFile/g)].length;
     const inHelpers = [...source.matchAll(/const browse(?:Resume|JD) = async \(\) => \{[\s\S]*?profileSelectFile/g)].length;
     assert.equal(direct, inHelpers,
-      'profileSelectFile must only be reached from browseResume/browseJD, which carry the Pro gate');
+      'profileSelectFile must only be reached from browseResume/browseJD');
   });
 
-  test('the upgrade modal is still what an ungated click opens', () => {
-    assert.ok(source.includes('PremiumUpgradeModal'), 'PremiumUpgradeModal import missing');
-    assert.ok(source.includes('onNeedUpgrade'), 'presentational upload slots must still expose onNeedUpgrade');
+  test('premium access remains represented for genuinely premium sections', () => {
+    assert.ok(source.includes('hasAccess={hasProfileAccess}'), 'premium section access boundary missing');
   });
 });
