@@ -334,6 +334,7 @@ import { DynamicActionBar } from './dynamic-actions/DynamicActionBar';
 import GlassEffectLayer from './ui/GlassEffectLayer';
 import { OverlayBanner, OverlayBannerButton } from './ui/OverlayBanner';
 import RollingTranscript from './ui/RollingTranscript';
+import { TopControlBar } from './TopControlBar';
 
 // PERF: hoisted plugin arrays. ReactMarkdown receives `remarkPlugins` and
 // `rehypePlugins` as new array literals if defined inline at the call site —
@@ -7994,6 +7995,32 @@ Provide only the answer, nothing else.`;
 
   return (
     <>
+    <TopControlBar
+      isListening={isManualRecording}
+      isProcessing={isProcessing}
+      currentModel={currentModel}
+      currentModelDisplayName={currentModelDisplayName}
+      activeModeLabel={activeModeLabel}
+      inputValue={inputValue}
+      onListen={() => void handleAnswerNow()}
+      onAnswer={() => void handleWhatToSay()}
+      onAsk={() => {
+        if (inputValue.trim()) {
+          void handleManualSubmit();
+        } else {
+          textInputRef.current?.focus();
+        }
+      }}
+      onScreen={() => void generalHandlersRef.current.takeScreenshot()}
+      onModel={(anchor) => {
+        const rect = anchor.getBoundingClientRect();
+        void window.electronAPI.toggleModelSelector({
+          x: window.screenX + rect.left,
+          y: window.screenY + rect.bottom + 8,
+          activate: false,
+        });
+      }}
+    />
     {/* The resize toggle and the TopPill render in their OWN aux
         BrowserWindows (OverlayAuxWindows.tsx), positioned by the main
         process around this window. This window is exactly the shell card. */}
