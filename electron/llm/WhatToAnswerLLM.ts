@@ -24,6 +24,7 @@ import type { ActiveModeDocumentGroundingInfo } from "../services/ModesManager";
 import type { ModeRetrievalOptions } from "../services/ModeContextRetriever";
 import { isCodeVerificationEnabled } from "./codeVerification/verificationEnabled";
 import type { WhatToAnswerRequestSnapshot } from "./whatToAnswerRequestSnapshot";
+import { getPerson1FileContext } from '../personalKnowledge/person1PromptContext';
 
 // Wall-clock budget for the pre-stream mode-context HYBRID retrieval await.
 // The hybrid retriever embeds the live query, and the embedder's own hard
@@ -665,6 +666,29 @@ The user triggered this action with a coding problem on screen and NO new questi
                 ? undefined
                 : candidateProfile;
 
+            // Personal files share the existing reference_files route and provider
+            // scope. Strict document-grounded modes own that layer for their mode
+            // files, so unrelated My Files content must not join those prompts.
+            let personalFileContext = '';
+            if (
+                answerPlan
+                && retrievalQueryDecision.allowed
+                && !documentGroundedCustomModeActiveForPrompt
+                && isLayerAllowed(answerPlan, 'reference_files')
+            ) {
+                let referenceFilesAllowed = true;
+                try {
+                    const { SettingsManager } = require('../services/SettingsManager');
+                    const policy = SettingsManager.getInstance().get('providerDataScopes');
+                    referenceFilesAllowed = policy?.reference_files !== false;
+                } catch {
+                    referenceFilesAllowed = true;
+                }
+                if (referenceFilesAllowed) {
+                    personalFileContext = getPerson1FileContext(answerPlan, retrievalQueryDecision.query);
+                }
+            }
+
             let processedDomContext: string | undefined = undefined;
             let domTokenEstimate = 0;
             if (domContext) {
@@ -840,7 +864,9 @@ The user triggered this action with a coding problem on screen and NO new questi
                     && !promotedScreenCodingTurn
                     && temporalContext?.hasRecentResponses) ? temporalContext.previousResponses : undefined,
                 intentContext,
-                retrievedModeContext: typedModeContext || undefined,
+                retrievedModeContext: [typedModeContext || modeContextBlock, personalFileContext]
+                    .filter(Boolean)
+                    .join('\n\n') || undefined,
                 pinnedModeInstructions: pinnedModeInstructions || undefined,
                 candidateProfile: typedCandidateProfile || undefined,
                 tokenBudget: Math.max(1000, assemblerBudget),
@@ -953,7 +979,7 @@ The user triggered this action with a coding problem on screen and NO new questi
             // still yield every token as it arrives; the buffer is just appended.
             const streamedBuffer: string[] = [];
             const packetScopes: ProviderDataScope[] = [];
-            if (modeContextBlock) packetScopes.push('reference_files');
+            if (modeContextBlock || personalFileContext) packetScopes.push('reference_files');
             // Candidate resume facts AND prior assistant responses both fall under
             // the 'profile_history' data scope; push once if either is present.
             const hasProfileHistory = Boolean(effectiveCandidateProfile)

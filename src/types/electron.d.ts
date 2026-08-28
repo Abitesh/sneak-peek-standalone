@@ -37,6 +37,23 @@ export interface ElectronAPI {
     width: number
     height: number
   }) => Promise<void>
+  personalFilesPickAndIngest?: () => Promise<{
+    success?: boolean
+    cancelled?: boolean
+    file?: { id: string; fileName: string; mimeType: string; sizeBytes: number; createdAt: string; updatedAt: string; chunkCount: number }
+    error?: string
+  }>
+  personalFilesList?: () => Promise<{
+    success: boolean
+    files?: Array<{ id: string; fileName: string; mimeType: string; sizeBytes: number; createdAt: string; updatedAt: string; chunkCount: number }>
+    error?: string
+  }>
+  personalFilesDelete?: (fileId: string) => Promise<{ success: boolean; error?: string }>
+  personalFilesSearch?: (query: string) => Promise<{
+    success: boolean
+    results?: Array<{ fileId: string; fileName: string; chunkId: string; text: string; score: number; startChar: number; endChar: number }>
+    error?: string
+  }>
   // Overlay aux windows (pill / resize toggle) coordination
   sendOverlayUiState?: (state: Record<string, unknown>) => Promise<void>
   onOverlayUiState?: (

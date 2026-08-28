@@ -18,6 +18,10 @@ interface DomCaptureMeta {
 interface ElectronAPI {
   updateContentDimensions: (dimensions: { width: number; height: number }) => Promise<void>;
   updateContentDimensionsCentered: (dimensions: { width: number; height: number }) => Promise<void>;
+  personalFilesPickAndIngest: () => Promise<{ success?: boolean; cancelled?: boolean; file?: any; error?: string }>;
+  personalFilesList: () => Promise<{ success: boolean; files?: any[]; error?: string }>;
+  personalFilesDelete: (fileId: string) => Promise<{ success: boolean; error?: string }>;
+  personalFilesSearch: (query: string) => Promise<{ success: boolean; results?: any[]; error?: string }>;
   sendOverlayUiState: (state: Record<string, unknown>) => Promise<void>;
   onOverlayUiState: (callback: (state: Record<string, unknown>) => void) => () => void;
   sendOverlayToggleAnchor: (payload: { panelRight: number }) => Promise<void>;
@@ -1169,6 +1173,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('update-content-dimensions', dimensions),
   updateContentDimensionsCentered: (dimensions: { width: number; height: number }) =>
     ipcRenderer.invoke('update-content-dimensions-centered', dimensions),
+  personalFilesPickAndIngest: () => ipcRenderer.invoke('personal-files:pick-and-ingest'),
+  personalFilesList: () => ipcRenderer.invoke('personal-files:list'),
+  personalFilesDelete: (fileId: string) => ipcRenderer.invoke('personal-files:delete', fileId),
+  personalFilesSearch: (query: string) => ipcRenderer.invoke('personal-files:search', query),
   // ── Overlay aux windows (pill / resize toggle) coordination ──────────────
   // Overlay renderer → main → aux windows: UI-state broadcast.
   sendOverlayUiState: (state: Record<string, unknown>) =>

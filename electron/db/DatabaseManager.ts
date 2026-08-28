@@ -1755,6 +1755,50 @@ export class DatabaseManager {
             }
         }
 
+        if (version < 31) {
+            console.log('[DatabaseManager] Applying migration v30 → v31: personal knowledge tables');
+            this.db.exec(`
+                CREATE TABLE IF NOT EXISTS personal_files (
+                    id TEXT PRIMARY KEY,
+                    file_name TEXT NOT NULL,
+                    file_path TEXT NOT NULL,
+                    mime_type TEXT NOT NULL DEFAULT '',
+                    size_bytes INTEGER NOT NULL DEFAULT 0,
+                    content_hash TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_personal_files_hash
+                    ON personal_files(content_hash);
+                CREATE TABLE IF NOT EXISTS personal_file_chunks (
+                    id TEXT PRIMARY KEY,
+                    file_id TEXT NOT NULL,
+                    chunk_index INTEGER NOT NULL,
+                    text TEXT NOT NULL,
+                    start_char INTEGER NOT NULL,
+                    end_char INTEGER NOT NULL,
+                    FOREIGN KEY(file_id) REFERENCES personal_files(id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_personal_file_chunks_file
+                    ON personal_file_chunks(file_id, chunk_index);
+                CREATE VIRTUAL TABLE IF NOT EXISTS personal_file_chunks_fts
+                    USING fts5(chunk_id UNINDEXED, file_id UNINDEXED, file_name, text);
+                CREATE TRIGGER IF NOT EXISTS personal_file_chunks_ai
+                AFTER INSERT ON personal_file_chunks
+                BEGIN
+                    INSERT INTO personal_file_chunks_fts(chunk_id, file_id, file_name, text)
+                    SELECT NEW.id, NEW.file_id, pf.file_name, NEW.text
+                    FROM personal_files pf WHERE pf.id = NEW.file_id;
+                END;
+                CREATE TRIGGER IF NOT EXISTS personal_file_chunks_ad
+                AFTER DELETE ON personal_file_chunks
+                BEGIN
+                    DELETE FROM personal_file_chunks_fts WHERE chunk_id = OLD.id;
+                END;
+            `);
+            this.db.pragma('user_version = 31');
+        }
+
         console.log('[DatabaseManager] Migrations completed.');
     }
 

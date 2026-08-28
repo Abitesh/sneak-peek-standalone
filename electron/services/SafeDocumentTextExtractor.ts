@@ -18,6 +18,8 @@ import { fileURLToPath, pathToFileURL } from 'url';
 export const SAFE_DOCUMENT_EXTENSIONS = new Set([
   '.txt', '.md', '.markdown', '.json', '.csv', '.tsv',
   '.xml', '.html', '.htm', '.log', '.pdf', '.docx',
+  '.js', '.jsx', '.ts', '.tsx', '.py', '.java', '.c', '.cpp', '.h', '.hpp',
+  '.cs', '.go', '.rs', '.sql', '.sh', '.yaml', '.yml', '.toml',
 ]);
 
 /** 50 MB hard cap — should be enforced by the upload UI's progress bar first. */

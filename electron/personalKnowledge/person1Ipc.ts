@@ -12,48 +12,64 @@ import { getPersonalKnowledgeManager } from './index';
 type SafeHandle = (channel: string, handler: (...args: any[]) => any) => void;
 
 const FILE_FILTERS = [
-    { name: 'Documents', extensions: ['pdf', 'docx', 'txt', 'md', 'markdown', 'csv', 'json', 'xml', 'html', 'htm'] },
+    { name: 'Documents', extensions: ['pdf', 'docx', 'txt', 'md', 'markdown', 'csv', 'json', 'xml', 'html', 'htm', 'tsv', 'log', 'toml'] },
     { name: 'Source code', extensions: ['js', 'jsx', 'ts', 'tsx', 'py', 'java', 'c', 'cpp', 'h', 'hpp', 'cs', 'go', 'rs', 'sql', 'sh', 'yaml', 'yml'] },
     { name: 'All supported files', extensions: [
-        'pdf', 'docx', 'txt', 'md', 'markdown', 'csv', 'json', 'xml', 'html', 'htm',
+        'pdf', 'docx', 'txt', 'md', 'markdown', 'csv', 'json', 'xml', 'html', 'htm', 'tsv', 'log', 'toml',
         'js', 'jsx', 'ts', 'tsx', 'py', 'java', 'c', 'cpp', 'h', 'hpp', 'cs', 'go', 'rs', 'sql', 'sh', 'yaml', 'yml',
     ] },
 ];
 
 export function registerPerson1Ipc(safeHandle: SafeHandle): void {
+    const errorMessage = (error: unknown, fallback: string): string =>
+        error instanceof Error && error.message ? error.message : fallback;
+
     safeHandle('personal-files:pick-and-ingest', async () => {
-        const picked = await dialog.showOpenDialog({
-            properties: ['openFile'],
-            filters: FILE_FILTERS,
-            title: 'Add a file to My Files',
-        });
+        try {
+            const picked = await dialog.showOpenDialog({
+                properties: ['openFile'],
+                filters: FILE_FILTERS,
+                title: 'Add a file to My Files',
+            });
 
-        if (picked.canceled || !picked.filePaths[0]) {
-            return { cancelled: true };
+            if (picked.canceled || !picked.filePaths[0]) {
+                return { cancelled: true };
+            }
+
+            const filePath = path.resolve(picked.filePaths[0]);
+            const file = await getPersonalKnowledgeManager().ingestFile(filePath);
+            return { success: true, file };
+        } catch (error) {
+            return { success: false, error: errorMessage(error, 'File indexing failed.') };
         }
-
-        const filePath = path.resolve(picked.filePaths[0]);
-        const file = await getPersonalKnowledgeManager().ingestFile(filePath);
-
-        return { success: true, file };
     });
 
     safeHandle('personal-files:list', async () => {
-        return { success: true, files: getPersonalKnowledgeManager().listFiles() };
+        try {
+            return { success: true, files: getPersonalKnowledgeManager().listFiles() };
+        } catch (error) {
+            return { success: false, error: errorMessage(error, 'Could not load My Files.'), files: [] };
+        }
     });
 
     safeHandle('personal-files:delete', async (_event: unknown, fileId: string) => {
         if (typeof fileId !== 'string' || !fileId.trim()) {
             return { success: false, error: 'Invalid file id.' };
         }
-        return { success: getPersonalKnowledgeManager().deleteFile(fileId) };
+        try {
+            const deleted = getPersonalKnowledgeManager().deleteFile(fileId);
+            return deleted ? { success: true } : { success: false, error: 'File not found.' };
+        } catch (error) {
+            return { success: false, error: errorMessage(error, 'Could not delete file.') };
+        }
     });
 
     safeHandle('personal-files:search', async (_event: unknown, query: string) => {
         if (typeof query !== 'string') return { success: true, results: [] };
-        return {
-            success: true,
-            results: getPersonalKnowledgeManager().search(query),
-        };
+        try {
+            return { success: true, results: getPersonalKnowledgeManager().search(query) };
+        } catch (error) {
+            return { success: false, error: errorMessage(error, 'Could not search My Files.'), results: [] };
+        }
     });
 }

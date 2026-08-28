@@ -13,8 +13,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import Database from 'better-sqlite3';
-import mammoth from 'mammoth';
-import { PDFParse } from 'pdf-parse';
+import { extractSafeDocumentText } from '../services/SafeDocumentTextExtractor';
 
 export interface PersonalFileRecord {
     id: string;
@@ -44,7 +43,7 @@ const CHUNK_OVERLAP_CHARS = 250;
 const MAX_RESULTS = 8;
 
 const SUPPORTED_EXTENSIONS = new Set([
-    '.txt', '.md', '.markdown', '.csv', '.json', '.xml', '.html', '.htm',
+    '.txt', '.md', '.markdown', '.csv', '.json', '.xml', '.html', '.htm', '.tsv', '.log', '.toml',
     '.js', '.jsx', '.ts', '.tsx', '.py', '.java', '.c', '.cpp', '.h', '.hpp',
     '.cs', '.go', '.rs', '.sql', '.sh', '.yaml', '.yml',
     '.docx', '.pdf',
@@ -89,29 +88,6 @@ function makeFtsQuery(query: string): string {
         .slice(0, 12)
         .map(t => `"${t.replace(/"/g, '""')}"`)
         .join(' OR ');
-}
-
-async function extractText(filePath: string): Promise<string> {
-    const ext = path.extname(filePath).toLowerCase();
-    const buffer = await fs.promises.readFile(filePath);
-
-    if (ext === '.pdf') {
-        const parser = new PDFParse({ data: buffer });
-        try {
-            const result = await parser.getText();
-            return result.text || '';
-        } finally {
-            await parser.destroy();
-        }
-    }
-
-    if (ext === '.docx') {
-        const result = await mammoth.extractRawText({ buffer });
-        return result.value || '';
-    }
-
-    // Plain/source formats are intentionally read as UTF-8.
-    return buffer.toString('utf8');
 }
 
 function chunkText(text: string): Array<{ text: string; startChar: number; endChar: number }> {
@@ -220,7 +196,7 @@ export class PersonalKnowledgeManager {
 
     async ingestFile(filePath: string): Promise<PersonalFileRecord> {
         const resolved = path.resolve(filePath);
-        const stat = await fs.promises.stat(resolved);
+        const stat = await fs.promises.lstat(resolved);
 
         if (!stat.isFile()) throw new Error('Selected path is not a file.');
         if (stat.size > MAX_FILE_BYTES) {
@@ -243,7 +219,7 @@ export class PersonalKnowledgeManager {
             return this.getFile(existing.id)!;
         }
 
-        let text = normalizeWhitespace(await extractText(resolved));
+        let text = normalizeWhitespace((await extractSafeDocumentText(resolved)).content);
         if (!text) throw new Error('No readable text was found in this file.');
         if (text.length > MAX_EXTRACTED_CHARS) {
             text = text.slice(0, MAX_EXTRACTED_CHARS);
@@ -335,11 +311,10 @@ export class PersonalKnowledgeManager {
         const result = this.db.transaction(() => {
             // FTS trigger needs the chunk rows to exist while it fires.
             this.db.prepare(`DELETE FROM personal_file_chunks WHERE file_id = ?`).run(id);
-            this.db.prepare(`DELETE FROM personal_files WHERE id = ?`).run(id);
+            return this.db.prepare(`DELETE FROM personal_files WHERE id = ?`).run(id);
         })();
 
-        void result;
-        return !this.getFile(id);
+        return result.changes > 0;
     }
 
     search(query: string, limit = MAX_RESULTS): PersonalFileSearchResult[] {

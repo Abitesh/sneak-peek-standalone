@@ -7,7 +7,7 @@ import {
     Camera, RotateCcw, Eye, Layout, MessageSquare, Crop,
     ChevronDown, ChevronUp, Check, BadgeCheck, Power, Palette, Calendar, Ghost, Sun, Moon, RefreshCw, Info, Globe, FlaskConical, Terminal, Settings, Activity, ExternalLink, Trash2,
     Sparkles, Pencil, Briefcase, Building2, Search, MapPin, CheckCircle, HelpCircle, Zap, SlidersHorizontal, PointerOff, Folder,
-    Star, AlertCircle, Gift, Smartphone, Cpu, Shield, Code2, Headphones
+    Star, AlertCircle, Gift, Smartphone, Cpu, Shield, Code2, Headphones, FileText
 } from 'lucide-react';
 import { AutoAnswerIcon } from './AutoAnswerIcon';
 import { HiCreditCard } from 'react-icons/hi2';
@@ -19,6 +19,7 @@ import { PlansSettings } from './settings/PlansSettings';
 import { PhoneMirrorSettings } from './settings/PhoneMirrorSettings';
 import { IntelligenceSettings } from './settings/IntelligenceSettings';
 import { SkillsSettings } from './settings/SkillsSettings';
+import { MyFilesPanel } from './settings/MyFilesPanel';
 import { LocalWhisperModelPanel, type ChannelConfig as LocalWhisperChannelConfig } from './LocalWhisperModelPanel';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { useShortcuts } from '../hooks/useShortcuts';
@@ -407,6 +408,7 @@ const ProviderSelect: React.FC<ProviderSelectProps> = ({ value, options, onChang
    direction rather than guessing. Keep in sync with the <nav> below. */
 const SETTINGS_NAV_ORDER = [
     'general',
+    'my-files',
     'plans',
     'ai-providers',
     'skills',
@@ -1875,6 +1877,13 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({
                                         <span>{t('Plans & Billing')}</span>
                                     </button>
                                     <button
+                                        onClick={() => setActiveTab('my-files')}
+                                        className={navItemClass(activeTab === 'my-files')}
+                                    >
+                                        {activeTab === 'my-files' && navActivePill}
+                                        <FileText size={16} /> {t('My Files')}
+                                    </button>
+                                    <button
                                         onClick={() => setActiveTab('ai-providers')}
                                         className={navItemClass(activeTab === 'ai-providers')}
                                     >
@@ -2661,6 +2670,10 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({
                                     </div>
 
                                 </div>
+                            )}
+
+                            {activeTab === 'my-files' && (
+                                <MyFilesPanel />
                             )}
 
                             {activeTab === 'ai-providers' && (
