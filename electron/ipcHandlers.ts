@@ -6439,11 +6439,14 @@ export function initializeIpcHandlers(appState: AppState): void {
   safeHandle('get-current-llm-config', async () => {
     try {
       const llmHelper = appState.processingHelper.getLLMHelper();
+      const hasConfiguredProvider = llmHelper.hasConfiguredProvider();
+      const modelId = hasConfiguredProvider ? llmHelper.getCurrentModelId() : '';
+      const displayName = hasConfiguredProvider ? llmHelper.getCurrentModelDisplayName() : '';
       return {
         provider: llmHelper.getCurrentProvider(),
-        model: llmHelper.getCurrentModelId(),
-        modelId: llmHelper.getCurrentModelId(),
-        displayName: llmHelper.getCurrentModelDisplayName(),
+        model: modelId,
+        modelId,
+        displayName,
         isOllama: llmHelper.isUsingOllama(),
       };
     } catch (error: any) {
@@ -7919,7 +7922,8 @@ export function initializeIpcHandlers(appState: AppState): void {
   safeHandle('get-stored-credentials', async () => {
     try {
       const { CredentialsManager } = require('./services/CredentialsManager');
-      const creds = CredentialsManager.getInstance().getAllCredentials();
+      const cm = CredentialsManager.getInstance();
+      const creds = cm.getAllCredentials();
 
       // Return masked versions for security (just indicate if set)
       const hasKey = (key?: string) => !!(key && key.trim().length > 0);
@@ -7938,7 +7942,7 @@ export function initializeIpcHandlers(appState: AppState): void {
         litellmMaxTokens: creds.litellmMaxTokens || null,
         hasNativelyKey: hasKey(creds.nativelyApiKey),
         googleServiceAccountPath: creds.googleServiceAccountPath || null,
-        sttProvider: creds.sttProvider || 'none',
+        sttProvider: cm.getSttProvider(),
         nvidiaNimSttModel: creds.nvidiaNimSttModel || 'nemotron-asr-streaming',
         groqSttModel: creds.groqSttModel || 'whisper-large-v3-turbo',
         hasSttGroqKey: hasKey(creds.groqSttApiKey),

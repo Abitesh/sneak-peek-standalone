@@ -9012,7 +9012,18 @@ let isMultimodal = !!(imagePaths?.length);
     }
   }
 
-  public getCurrentProvider(): "ollama" | "gemini" | "custom" | "codex-cli" {
+  public hasConfiguredProvider(): boolean {
+    if (this.useOllama) return Boolean(this.ollamaModel);
+    return Boolean(
+      this.customProvider || this.activeCurlProvider || this.nativelyKey
+      || this.client || this.groqClient || this.openaiClient || this.claudeClient
+      || this.deepseekClient || this.nvidiaNimClient || this.litellmClient
+      || this.isCodexAvailable()
+    );
+  }
+
+  public getCurrentProvider(): "none" | "ollama" | "gemini" | "custom" | "codex-cli" {
+    if (!this.hasConfiguredProvider()) return "none";
     if (this.customProvider) return "custom";
     if (this.isCodexCliModel(this.currentModelId)) return "codex-cli";
     return this.useOllama ? "ollama" : "gemini";

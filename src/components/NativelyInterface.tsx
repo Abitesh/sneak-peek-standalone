@@ -5428,6 +5428,9 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
         const feedback =
           result.error ??
           'Could not generate an answer yet. Wait a few seconds after speech and try again.';
+        const actionableFeedback = /No AI provider configured/i.test(feedback)
+          ? 'No AI provider is configured. Open Settings → AI Providers to add an API key.'
+          : feedback;
         // CRITICAL ORDERING: clear streaming refs and wipe imperative DOM
         // BEFORE the `setMessages` that commits the null-feedback. The old
         // order called `flushToken()` first — which exits early when
@@ -5456,7 +5459,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
           cancelAnimationFrame(streamingCodeRafRef.current);
           streamingCodeRafRef.current = null;
         }
-        setMessages((prev) => applyWhatToAnswerNullFeedbackMessages(prev, feedback));
+        setMessages((prev) => applyWhatToAnswerNullFeedbackMessages(prev, actionableFeedback));
         pinAnswerPanel();
       }
     } catch (err) {
@@ -8416,17 +8419,17 @@ Provide only the answer, nothing else.`;
                       <span>{t('Transcription Not Configured')}</span>
                     </div>
                     <p className="text-[11px] text-orange-600/70 dark:text-orange-400/60 leading-snug pl-[26px]">
-                      {t('No STT provider selected. Open Settings → Audio to pick one.')}
+                      {t('Microphone is ready, but no speech-to-text provider is configured.')}
                     </p>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <button
                       onClick={() => {
-                        window.electronAPI?.toggleSettingsWindow?.();
+                        void window.electronAPI?.openSettingsTab?.('audio');
                       }}
                       className="px-3 py-1.5 rounded-lg bg-orange-500/15 hover:bg-orange-500/25 text-orange-700 dark:text-orange-500 text-[11px] font-semibold transition-all active:scale-95 border border-orange-500/20 shadow-sm"
                     >
-                      {t('Open Settings')}
+                      {t('Open Audio Settings')}
                     </button>
                     <button
                       onClick={() => setSttNotConfigured(false)}
