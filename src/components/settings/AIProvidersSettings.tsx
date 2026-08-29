@@ -1477,7 +1477,7 @@ export const AipModelList: React.FC<AipModelListProps> = ({
                         </div>
 
                         {models.length <= AIP_MODEL_FILTER_THRESHOLD && (
-                            <p className="aip-meta mt-2">{t('Showing built-in models only.')}</p>
+                            <p className="aip-meta mt-2">{t('Showing models available from your configured providers.')}</p>
                         )}
                     </div>
                 </div>

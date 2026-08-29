@@ -324,41 +324,10 @@ export function initializeIpcHandlers(appState: AppState): void {
     return escapeXmlText(clipped);
   };
 
-  /**
-   * Returns true if the user has an active application license OR an unexpired free trial.
-   * Used to gate profile intelligence features (resume upload, JD upload, company research, etc.).
-   */
-  const isProOrTrialActive = (): boolean => {
-    // 1. Application-owned license (AVIABI-2005-2007-1977 or signed license)
-    try {
-      const { AppLicenseService } = require('./services/licensing/AppLicenseService');
-      const license = AppLicenseService.getInstance();
-      if (license.isPremium()) {
-        console.log('[License] Application license is active');
-        return true;
-      }
-    } catch (error) {
-      console.warn('[License] Failed to check application license:', error);
-    }
-
-    // 2. Active free trial (token present and not expired)
-    try {
-      const { CredentialsManager } = require('./services/CredentialsManager');
-      const cm = CredentialsManager.getInstance();
-      const token = cm.getTrialToken();
-      if (!token) return false;
-      const expiresAt = cm.getTrialExpiresAt();
-      if (!expiresAt) return false;
-      const isTrialActive = new Date(expiresAt).getTime() > Date.now();
-      if (isTrialActive) {
-        console.log('[License] Free trial is active');
-      }
-      return isTrialActive;
-    } catch (error) {
-      console.warn('[License] Failed to check trial status:', error);
-      return false;
-    }
-  };
+  // Access to application features is determined by configured provider keys.
+  // Provider quota/authentication failures remain provider-owned errors; there
+  // is no Natively subscription or trial gate in the request path.
+  const isProOrTrialActive = (): boolean => true;
 
   // Clears premium-only context when the pro license is lost.
   const clearActiveModeOnLicenseLoss = (): void => {
@@ -1124,6 +1093,7 @@ export function initializeIpcHandlers(appState: AppState): void {
             const { buildV3Prompt } = require('./context-intelligence/orchestration/engine-bridge');
             const { resolveModePolicy, isModeId, resolveModeIdOrWarn } = require('./context-intelligence/policies/mode-policy-registry');
             const { ModesManager } = require('./services/ModesManager');
+            const { getPersonalKnowledgeManager } = require('./personalKnowledge');
 
             // The registry and the turn MUST agree on this, or scope containment
             // rejects every source. One constant rather than two literals.
@@ -1145,6 +1115,24 @@ export function initializeIpcHandlers(appState: AppState): void {
             const policy = resolveModePolicy(modeId);
 
             const files = modeInfo?.id ? (mm.getReferenceFiles?.(modeInfo.id) ?? []) : [];
+            const personalKnowledge = getPersonalKnowledgeManager();
+            const personalFiles = personalKnowledge.listFiles();
+            const personalQuery = String((skillStrippedMessage ?? message) || '');
+            // Legacy fallback only: V3 retrieves My Files through its typed
+            // port below. Keeping this block in the legacy input preserves
+            // grounding when V3 is disabled or falls back after an error.
+            if (context == null) {
+              const fallbackPersonalContext = personalKnowledge.buildPromptContext(personalQuery);
+              if (fallbackPersonalContext) context = fallbackPersonalContext;
+            }
+            if (process.env.NATIVELY_CONTEXT_TRACE === '1') {
+              console.log('[CHAT CONTEXT]', {
+                queryChars: personalQuery.length,
+                modeFiles: files.length,
+                personalFiles: personalFiles.length,
+                profileSources: 0,
+              });
+            }
             // Fail-closed retrieval port over this mode's files. The registry
             // construction lives in ONE factory (mode-retrieval-port.ts) shared
             // with the engine surfaces — a second inline copy of a
@@ -1152,6 +1140,7 @@ export function initializeIpcHandlers(appState: AppState): void {
             // drifted, and this one decides what evidence a turn may see.
             const { createModeRetrievalPort, attachmentSourceTypeExtensions } = require('./context-intelligence/retrieval/mode-retrieval-port');
             const { createMeetingRetrievalPort, combineRetrievalPorts } = require('./context-intelligence/retrieval/meeting-retrieval-port');
+            const { createPersonalFileRetrievalPort } = require('./context-intelligence/retrieval/personal-file-retrieval-port');
             // Custom/general modes gain the source types their OWN attachments
             // evidence (deep-test D10): a candidate résumé + JD attached to an
             // "Untitled" custom mode planned [] for every job question because
@@ -1244,6 +1233,14 @@ export function initializeIpcHandlers(appState: AppState): void {
 
             const v3Ports = [
               modePort,
+              // My Files is a user-scoped source, not a mode attachment. Add it
+              // to the same V3 retrieval pipeline so ordinary manual chat can
+              // ground against arbitrary uploaded files as well as modes.
+              createPersonalFileRetrievalPort(
+                personalKnowledge,
+                { userId: V3_USER_ID, sessionId: sharedConversationSessionId },
+                { topK: policy.retrievalPolicy.maximumCandidates },
+              ),
               ...(v3ProfilePort ? [v3ProfilePort] : []),
               ...(wantsMeeting ? [createMeetingRetrievalPort({
                 retriever: ragForV3!.getRetriever(),
@@ -6652,7 +6649,7 @@ export function initializeIpcHandlers(appState: AppState): void {
       await llmHelper.switchToGemini(apiKey, modelId);
 
       // Persist API key if provided
-      if (apiKey) {
+      if (false && apiKey) {
         const { CredentialsManager } = require('./services/CredentialsManager');
         CredentialsManager.getInstance().setGeminiApiKey(apiKey);
       }
@@ -7291,7 +7288,7 @@ export function initializeIpcHandlers(appState: AppState): void {
             e?.message,
           );
         }
-      } else {
+      } else if (false) {
         // API key was cleared — deactivate any natively_api Pro license so premium is revoked.
         try {
           const { LicenseManager } = require('../premium/electron/services/LicenseManager');

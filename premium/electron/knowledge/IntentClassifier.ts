@@ -34,6 +34,20 @@ export const INTRO_PATTERNS = [
   'could you start by giving me a brief self-intro',
 ];
 
+const EXPERIENCE_TOPIC_SCOPED_RE = /(what(?:'s| is|s)?\s+(?:my|your)\s+(?:experience|background)\s+(?:in|with|on|for|at|as|about|through|across|during|since|around)|what(?:'s| is|s)?\s+(?:my|your)\s+experience\s+.*\b(?:mentoring|leading|building|working|engineering|designing|managing|shipping|debugging|developing|researching|design|implementation|coding)\b|what(?:'s| is|s)?\s+(?:my|your)\s+background\s+.*\b(?:in|with|on|for|at|as)\b)/i;
+
+function hasBareExperienceIdentityLookup(lowerText: string): boolean {
+  if (!lowerText) return false;
+  const barePatterns = [
+    /(?:what(?:'s| is|s)?\s+(?:my|your)\s+experience)/i,
+    /(?:what(?:'s| is|s)?\s+(?:my|your)\s+background)/i,
+    /(?:how much experience)/i,
+    /(?:what(?:'s| is|s)?\s+(?:my|your)\s+career)/i,
+  ];
+  return barePatterns.some((pattern) => pattern.test(lowerText))
+    && !EXPERIENCE_TOPIC_SCOPED_RE.test(lowerText);
+}
+
 export class IntentClassifier {
   static classify(text: string): { intent: string; confidence: number } {
     if (!text) {
@@ -46,7 +60,11 @@ export class IntentClassifier {
       return { intent: 'intro', confidence: 0.95 };
     }
 
-    if (/(my name|call me|who am i|what is my name|what's my name|what is your name|who are you)/.test(lowerText)) {
+    if (/(my name|call me|who am i|what is my name|what's my name|what is your name|who are you|what company do you work for|where do you work)/.test(lowerText)) {
+      return { intent: 'intro', confidence: 0.92 };
+    }
+
+    if (hasBareExperienceIdentityLookup(lowerText)) {
       return { intent: 'intro', confidence: 0.92 };
     }
 
@@ -94,7 +112,11 @@ export function classifyIntentWithContext(
   const lowerText = text.toLowerCase();
   const hint = context || {};
 
-  if (/(my name|i am|i'm|call me|my name is|who am i|what is my name|what's my name)/.test(lowerText)) {
+  if (/(my name|i am|i'm|call me|my name is|who am i|what is my name|what's my name|what company do you work for|where do you work)/.test(lowerText)) {
+    return 'intro';
+  }
+
+  if (hasBareExperienceIdentityLookup(lowerText)) {
     return 'intro';
   }
 

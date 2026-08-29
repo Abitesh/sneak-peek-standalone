@@ -13,7 +13,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { DatabaseManager } from '../../DatabaseManager';
+import { DatabaseManager } from '../../db/DatabaseManager';
 import { extractSafeDocumentText } from '../SafeDocumentTextExtractor';
 
 export enum DocType {
@@ -96,14 +96,13 @@ export class KnowledgeOrchestrator {
 
       // Extract text from document
       const extraction = await extractSafeDocumentText(filePath);
-      if (!extraction.success) {
+      const rawText = extraction.content || '';
+      if (!rawText) {
         return {
           success: false,
-          error: extraction.error || 'Failed to extract document text',
+          error: 'Failed to extract document text',
         };
       }
-
-      const rawText = extraction.text || '';
 
       // Store in appropriate active field and database
       switch (docType) {

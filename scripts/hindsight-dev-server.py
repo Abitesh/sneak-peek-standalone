@@ -10,7 +10,7 @@ separate decision.
 Usage:
     GEMINI_API_KEY=... python3 scripts/hindsight-dev-server.py
     # optional overrides:
-    HINDSIGHT_PORT=8888 HINDSIGHT_LLM_MODEL=gemini-2.5-flash python3 scripts/hindsight-dev-server.py
+    HINDSIGHT_PORT=8888 HINDSIGHT_LLM_MODEL=gemini-3.1-flash-lite python3 scripts/hindsight-dev-server.py
 
 Then point Natively at it:
     HINDSIGHT_BASE_URL=http://localhost:8888
@@ -35,7 +35,7 @@ API_KEY = (
 )
 # A sensible default Gemini model; override via HINDSIGHT_LLM_MODEL if the server
 # rejects it (the smoke test will surface that).
-MODEL = os.environ.get("HINDSIGHT_LLM_MODEL", "gemini-2.5-flash")
+MODEL = os.environ.get("HINDSIGHT_LLM_MODEL", "gemini-3.1-flash-lite")
 
 if not API_KEY:
     print("[hindsight-dev-server] ERROR: no LLM API key found "

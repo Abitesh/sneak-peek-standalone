@@ -57,7 +57,6 @@ async function raceWithBudget<T>(promise: Promise<T>, ms: number, fallback: T): 
             settled = true;
             resolve({ value: fallback, timedOut: true });
         }, ms);
-        timer.unref?.();
         promise.then(
             (value) => { if (!settled) { settled = true; clearTimeout(timer); resolve({ value, timedOut: false }); } },
             () => { if (!settled) { settled = true; clearTimeout(timer); resolve({ value: fallback, timedOut: false }); } },

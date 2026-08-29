@@ -5037,6 +5037,17 @@ let isMultimodal = !!(imagePaths?.length);
     // CACHE: separate system for Gemini's systemInstruction channel.
     const geminiSystemForCache = skipSystemPrompt ? undefined : this.injectLanguageInstruction(v2StreamBase ?? HARD_SYSTEM_PROMPT);
 
+    if (process.env.NATIVELY_CONTEXT_TRACE === '1') {
+      console.log('[FINAL REQUEST]', {
+        contextChars: context?.length ?? 0,
+        modeEvidenceChars: modeContextBlock.length,
+        referenceContextAttached: modeContextBlock.length > 0 || /<personal_file_knowledge>|<evidence_pack>/i.test(userContent),
+        profileContextAttached: /<candidate_|<profile_|profile_(?:resume|fact)/i.test(userContent),
+        requestChars: userContent.length,
+        model: this.currentModelId,
+      });
+    }
+
     if (this.useOllama) {
       const response = await this.callOllama(combinedMessages.gemini, imagePaths?.[0]);
       yield response;

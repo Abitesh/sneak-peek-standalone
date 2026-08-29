@@ -52,6 +52,8 @@ export const categoryConfig = {
 /**
  * Hybrid search scoring: combines semantic similarity and keyword matching
  */
+import { isSemanticAdmissionGateEnabled, resolveSemanticFloor } from '../../../electron/llm/semanticAdmissionGate';
+
 export interface SearchNode {
   id: string;
   category: string;
@@ -61,6 +63,7 @@ export interface SearchNode {
   semanticScore?: number;
   keywordScore?: number;
   blendedScore?: number;
+  boostSum?: number;
 }
 
 /**
@@ -135,34 +138,56 @@ export function detectCategoryHints(question: string): string[] {
  * @param queryEmbedding - Optional semantic embedding for question
  * @returns Sorted array of relevant nodes
  */
-export function getRelevantNodes(
+export async function getRelevantNodes(
   question: string,
   nodes: any[],
-  embeddings?: Map<string, number[]>,
-  queryEmbedding?: number[]
-): SearchNode[] {
+  embeddingsOrResolver?: Map<string, number[]> | ((embeddingSpaceKey?: string) => Promise<number[] | number[] | null | undefined>),
+  queryEmbeddingOrOptions?: number[] | { embeddingSpaceKey?: string; spaceKey?: string },
+  maybeOptions?: { embeddingSpaceKey?: string; spaceKey?: string }
+): Promise<SearchNode[]> {
   if (!nodes || nodes.length === 0) {
     return [];
   }
 
   const hints = detectCategoryHints(question);
   const lowerQuestion = question.toLowerCase();
+  const resolvedOptions = {
+    ...(queryEmbeddingOrOptions && typeof queryEmbeddingOrOptions === 'object' && !Array.isArray(queryEmbeddingOrOptions) ? queryEmbeddingOrOptions : {}),
+    ...(maybeOptions || {}),
+  };
+  const spaceKey = resolvedOptions.embeddingSpaceKey ?? resolvedOptions.spaceKey ?? null;
+  const gateEnabled = isSemanticAdmissionGateEnabled();
+  const floor = resolveSemanticFloor(spaceKey);
 
-  // Score each node
+  let queryEmbedding: number[] | undefined;
+  if (typeof embeddingsOrResolver === 'function') {
+    try {
+      const result = await embeddingsOrResolver(spaceKey || undefined);
+      if (Array.isArray(result)) queryEmbedding = result;
+    } catch {
+      queryEmbedding = undefined;
+    }
+  } else if (Array.isArray(queryEmbeddingOrOptions)) {
+    queryEmbedding = queryEmbeddingOrOptions;
+  }
+
+  const embeddings = embeddingsOrResolver instanceof Map ? embeddingsOrResolver : undefined;
+
   const scored: SearchNode[] = nodes.map((node: any) => {
     let semanticScore = 0;
     let keywordScore = 0;
+    const nodeContent = node.content || node.text_content || '';
 
-    // Semantic scoring
     if (queryEmbedding && embeddings?.has(node.id)) {
       const nodeEmbedding = embeddings.get(node.id);
       if (nodeEmbedding) {
         semanticScore = cosineSimilarity(queryEmbedding, nodeEmbedding);
       }
+    } else if (queryEmbedding && Array.isArray(node.embedding)) {
+      semanticScore = cosineSimilarity(queryEmbedding, node.embedding as number[]);
     }
 
-    // Keyword scoring
-    const content = (node.content || '').toLowerCase();
+    const content = (nodeContent || '').toLowerCase();
     const words = content.split(/\s+/);
     const questionWords = lowerQuestion.split(/\s+/);
     let matches = 0;
@@ -173,32 +198,56 @@ export function getRelevantNodes(
     }
     keywordScore = matches / Math.max(questionWords.length, 1);
 
-    // Hint bonus for category matches
     let hintBonus = 0;
     if (hints.includes(node.category)) {
       hintBonus = 0.2;
     }
 
-    // Blended score (60% semantic, 40% keyword + hints)
-    const blendedScore = semanticScore * 0.6 + (keywordScore + hintBonus) * 0.4;
+    const durationBoost = typeof node.duration_months === 'number' && node.duration_months > 0 ? Math.min(0.1, node.duration_months / 240) : 0.1;
+    const recencyBoost = node.end_date == null ? 0.1 : 0;
+    const boostSum = Math.min(0.4, durationBoost + recencyBoost + keywordScore * 0.2 + hintBonus);
+    const blendedScore = semanticScore * 0.6 + boostSum;
 
     return {
       id: node.id,
       category: node.category || 'unknown',
-      content: node.content || '',
+      content: nodeContent || '',
       tags: node.tags || [],
       confidence: node.confidence || 0.5,
       semanticScore,
       keywordScore,
       blendedScore,
+      boostSum,
     };
   });
 
-  // Sort by blended score (threshold: 0.55)
-  const threshold = 0.55;
-  return scored
-    .filter((n) => n.blendedScore > threshold)
+  const legacyThreshold = 0.55;
+  const candidates = scored.map((n) => {
+    const cosine = Number.isFinite(n.semanticScore) ? n.semanticScore : 0;
+    const boostSum = Number.isFinite(n.boostSum) ? n.boostSum : 0;
+    const admitted = gateEnabled && floor !== null
+      ? cosine >= floor
+      : n.blendedScore > legacyThreshold;
+    return { cosine, boostSum, admitted };
+  });
+
+  const telemetryPayload = {
+    spaceKey,
+    enforced: Boolean(gateEnabled && floor !== null),
+    floor: floor ?? null,
+    candidateCount: scored.length,
+    candidates: scored.map((n, index) => ({
+      id: n.id,
+      cosine: Number.isFinite(n.semanticScore) ? n.semanticScore : 0,
+      boostSum: Number.isFinite(n.boostSum) ? n.boostSum : 0,
+      admitted: candidates[index]?.admitted ?? false,
+    })),
+  };
+  console.log('[SemanticAdmission] ' + JSON.stringify(telemetryPayload));
+
+  const returned = scored.filter((n) => gateEnabled && floor !== null ? n.semanticScore >= floor : n.blendedScore > legacyThreshold)
     .sort((a, b) => b.blendedScore - a.blendedScore);
+  return returned;
 }
 
 /**
