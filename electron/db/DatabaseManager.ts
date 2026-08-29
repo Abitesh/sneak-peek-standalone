@@ -1799,6 +1799,24 @@ export class DatabaseManager {
             this.db.pragma('user_version = 31');
         }
 
+        if (version < 32) {
+            console.log('[DatabaseManager] Applying migration v31 → v32: Profile Intelligence documents');
+            this.db.exec(`
+                CREATE TABLE IF NOT EXISTS profile_documents (
+                    id TEXT PRIMARY KEY,
+                    doc_type TEXT NOT NULL,
+                    raw_text TEXT,
+                    structured_data TEXT,
+                    extraction_mode TEXT DEFAULT 'unknown',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_profile_documents_type
+                    ON profile_documents(doc_type);
+            `);
+            this.db.pragma('user_version = 32');
+        }
+
         console.log('[DatabaseManager] Migrations completed.');
     }
 

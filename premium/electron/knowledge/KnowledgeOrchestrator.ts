@@ -110,8 +110,74 @@ export class KnowledgeOrchestrator {
    */
   private loadProfileData(): void {
     try {
-      // Load resume, JD, and company data from database
-      // This is a placeholder for integration with existing profile retrieval
+      // Check if we have a real DatabaseManager with isAvailable method
+      const hasDb = typeof this.db === 'object' && this.db !== null;
+      const isRealDbManager = hasDb && typeof (this.db as any).isAvailable === 'function';
+      const isKnowledgeDbManager = hasDb && typeof (this.db as any).getDb === 'function';
+      
+      if (!isRealDbManager && !isKnowledgeDbManager) {
+        console.warn('[KnowledgeOrchestrator] Database manager type not recognized, skipping profile load');
+        return;
+      }
+      
+      let sqliteDb: any = null;
+      
+      // Get the SQLite database connection
+      if (isRealDbManager) {
+        // This is a real DatabaseManager
+        if (!(this.db as any).isAvailable()) {
+          console.warn('[KnowledgeOrchestrator] Database not available, skipping profile load');
+          return;
+        }
+        sqliteDb = (this.db as any).getDb();
+      } else if (isKnowledgeDbManager) {
+        // This is a KnowledgeDatabaseManager (stub or test) — it has getDb directly
+        sqliteDb = (this.db as any).getDb?.();
+      }
+      
+      if (!sqliteDb) {
+        console.warn('[KnowledgeOrchestrator] Cannot access SQLite database');
+        return;
+      }
+
+      // Load resume
+      try {
+        const resumeRow = sqliteDb.prepare(
+          'SELECT raw_text, structured_data, extraction_mode FROM profile_documents WHERE doc_type = ? ORDER BY updated_at DESC LIMIT 1'
+        ).get(DocType.RESUME);
+        
+        if (resumeRow) {
+          this.activeResume = {
+            raw_text: resumeRow.raw_text,
+            structured_data: typeof resumeRow.structured_data === 'string' 
+              ? JSON.parse(resumeRow.structured_data) 
+              : resumeRow.structured_data,
+          };
+          console.log('[KnowledgeOrchestrator] Resume loaded from database');
+        }
+      } catch (err) {
+        console.warn('[KnowledgeOrchestrator] Failed to load resume:', err);
+      }
+
+      // Load JD
+      try {
+        const jdRow = sqliteDb.prepare(
+          'SELECT raw_text, structured_data, extraction_mode FROM profile_documents WHERE doc_type = ? ORDER BY updated_at DESC LIMIT 1'
+        ).get(DocType.JD);
+        
+        if (jdRow) {
+          this.activeJD = {
+            raw_text: jdRow.raw_text,
+            structured_data: typeof jdRow.structured_data === 'string' 
+              ? JSON.parse(jdRow.structured_data) 
+              : jdRow.structured_data,
+          };
+          console.log('[KnowledgeOrchestrator] JD loaded from database');
+        }
+      } catch (err) {
+        console.warn('[KnowledgeOrchestrator] Failed to load JD:', err);
+      }
+
       console.log('[KnowledgeOrchestrator] Profile data loaded from storage');
     } catch (error) {
       console.error('[KnowledgeOrchestrator] Failed to load profile data:', error);
@@ -148,6 +214,8 @@ export class KnowledgeOrchestrator {
       // Parse based on document type using LLM if available
       let parsedData: any = {};
       let usedLLM = false;
+      let documentId = '';
+      
       switch (docType) {
         case DocType.RESUME:
           if (this.generateContentFn) {
@@ -160,6 +228,7 @@ export class KnowledgeOrchestrator {
             };
           }
           this.activeResume = { raw_text: rawText, structured_data: { ...parsedData, _extraction_mode: usedLLM ? 'llm' : 'heuristic' } };
+          documentId = `resume-${Date.now()}`;
           break;
         case DocType.JD:
           if (this.generateContentFn) {
@@ -172,28 +241,67 @@ export class KnowledgeOrchestrator {
             };
           }
           this.activeJD = { raw_text: rawText, structured_data: { ...parsedData, _extraction_mode: usedLLM ? 'llm' : 'heuristic' } };
+          documentId = `jd-${Date.now()}`;
           break;
         case DocType.COMPANY:
           parsedData = { raw_text: rawText };
           this.activeCompany = { raw_text: rawText, structured_data: parsedData };
+          documentId = `company-${Date.now()}`;
           break;
       }
 
       // Store in database
       try {
-        const sqliteDb = this.db.getDb();
+        const isRealDbManager = typeof (this.db as any).isAvailable === 'function';
+        const isKnowledgeDbManager = typeof (this.db as any).getDb === 'function';
+        
+        let sqliteDb: any = null;
+        
+        if (isRealDbManager) {
+          // This is a real DatabaseManager
+          if (!(this.db as any).isAvailable()) {
+            console.warn('[KnowledgeOrchestrator] Database not available for storage');
+            return {
+              success: true,
+              documentId,
+            };
+          }
+          sqliteDb = (this.db as any).getDb();
+        } else if (isKnowledgeDbManager) {
+          // This is a KnowledgeDatabaseManager (stub or test)
+          sqliteDb = (this.db as any).getDb?.();
+        }
+        
         if (sqliteDb) {
-          // Placeholder for database storage
-          // Real implementation would use proper schema
-          console.log(`[KnowledgeOrchestrator] Stored ${docType} document (${rawText.length} chars)`);
+          const now = new Date().toISOString();
+          // First delete any existing document of this type
+          sqliteDb.prepare('DELETE FROM profile_documents WHERE doc_type = ?').run(docType);
+          
+          // Then insert the new document
+          sqliteDb.prepare(`
+            INSERT INTO profile_documents (id, doc_type, raw_text, structured_data, extraction_mode, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+          `).run(
+            documentId,
+            docType,
+            rawText,
+            JSON.stringify(parsedData),
+            usedLLM ? 'llm' : 'heuristic',
+            now,
+            now
+          );
+          console.log(`[KnowledgeOrchestrator] Stored ${docType} document in database (${rawText.length} chars)`);
+        } else {
+          console.warn('[KnowledgeOrchestrator] Database not available for storage');
         }
       } catch (dbError) {
-        console.warn('[KnowledgeOrchestrator] Database storage failed:', dbError);
+        console.error('[KnowledgeOrchestrator] Database storage failed:', dbError);
+        // Don't fail the ingest on DB error — the in-memory object is still valid for this session
       }
 
       return {
         success: true,
-        documentId: `${docType}-${Date.now()}`,
+        documentId,
       };
     } catch (error: any) {
       return {
@@ -861,6 +969,35 @@ Return ONLY valid JSON, no markdown or extra text.`;
         this.activeCompany = null;
         break;
     }
+
+    // Delete from database
+    try {
+      const isRealDbManager = typeof (this.db as any).isAvailable === 'function';
+      const isKnowledgeDbManager = typeof (this.db as any).getDb === 'function';
+      
+      let sqliteDb: any = null;
+      
+      if (isRealDbManager) {
+        // This is a real DatabaseManager
+        if (!(this.db as any).isAvailable()) {
+          console.warn('[KnowledgeOrchestrator] Database not available for deletion');
+          console.log(`[KnowledgeOrchestrator] Deleted ${docType} documents`);
+          return;
+        }
+        sqliteDb = (this.db as any).getDb();
+      } else if (isKnowledgeDbManager) {
+        // This is a KnowledgeDatabaseManager (stub or test)
+        sqliteDb = (this.db as any).getDb?.();
+      }
+      
+      if (sqliteDb) {
+        sqliteDb.prepare('DELETE FROM profile_documents WHERE doc_type = ?').run(docType);
+        console.log(`[KnowledgeOrchestrator] Deleted ${docType} documents from database`);
+      }
+    } catch (dbError) {
+      console.error('[KnowledgeOrchestrator] Failed to delete from database:', dbError);
+    }
+
     console.log(`[KnowledgeOrchestrator] Deleted ${docType} documents`);
   }
 
