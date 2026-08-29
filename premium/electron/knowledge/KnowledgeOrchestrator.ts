@@ -19,6 +19,8 @@ import { isIntelligenceFlagEnabled } from '../../../electron/intelligence/intell
 import { planAnswer } from '../../../electron/llm/AnswerPlanner';
 import { isLayerAllowed } from '../../../electron/llm/contextRoute';
 import { DocType, DocumentIngestResult, ProfileStatus, ProfileData } from './types';
+import { ContextAssembler, generateCandidateIntro } from './ContextAssembler';
+import { isGenericKnowledgeQuestion } from './IntentClassifier';
 
 export class KnowledgeOrchestrator {
   private db: DatabaseManager;
@@ -153,72 +155,69 @@ export class KnowledgeOrchestrator {
    */
   private loadProfileData(): void {
     try {
-      // Check if we have a real DatabaseManager with isAvailable method
       const hasDb = typeof this.db === 'object' && this.db !== null;
       const isRealDbManager = hasDb && typeof (this.db as any).isAvailable === 'function';
       const isKnowledgeDbManager = hasDb && typeof (this.db as any).getDb === 'function';
-      
-      if (!isRealDbManager && !isKnowledgeDbManager) {
+      const hasDocumentLookup = hasDb && typeof (this.db as any).getDocumentByType === 'function';
+
+      if (!isRealDbManager && !isKnowledgeDbManager && !hasDocumentLookup) {
         console.warn('[KnowledgeOrchestrator] Database manager type not recognized, skipping profile load');
         return;
       }
-      
+
       let sqliteDb: any = null;
-      
-      // Get the SQLite database connection
+
       if (isRealDbManager) {
-        // This is a real DatabaseManager
         if (!(this.db as any).isAvailable()) {
           console.warn('[KnowledgeOrchestrator] Database not available, skipping profile load');
           return;
         }
         sqliteDb = (this.db as any).getDb();
       } else if (isKnowledgeDbManager) {
-        // This is a KnowledgeDatabaseManager (stub or test) — it has getDb directly
         sqliteDb = (this.db as any).getDb?.();
       }
-      
-      if (!sqliteDb) {
-        console.warn('[KnowledgeOrchestrator] Cannot access SQLite database');
-        return;
+
+      const resumeRow = sqliteDb?.prepare ? sqliteDb.prepare(
+        'SELECT raw_text, structured_data, extraction_mode FROM profile_documents WHERE doc_type = ? ORDER BY updated_at DESC LIMIT 1'
+      ).get(DocType.RESUME) : null;
+
+      if (resumeRow) {
+        this.activeResume = {
+          raw_text: resumeRow.raw_text,
+          structured_data: typeof resumeRow.structured_data === 'string' ? JSON.parse(resumeRow.structured_data) : resumeRow.structured_data,
+        };
+        console.log('[KnowledgeOrchestrator] Resume loaded from database');
+      } else if (hasDocumentLookup) {
+        const doc = (this.db as any).getDocumentByType?.(DocType.RESUME);
+        if (doc?.structured_data || doc?.raw_text) {
+          this.activeResume = doc;
+          console.log('[KnowledgeOrchestrator] Resume loaded from document lookup');
+        }
       }
 
-      // Load resume
-      try {
-        const resumeRow = sqliteDb.prepare(
-          'SELECT raw_text, structured_data, extraction_mode FROM profile_documents WHERE doc_type = ? ORDER BY updated_at DESC LIMIT 1'
-        ).get(DocType.RESUME);
-        
-        if (resumeRow) {
-          this.activeResume = {
-            raw_text: resumeRow.raw_text,
-            structured_data: typeof resumeRow.structured_data === 'string' 
-              ? JSON.parse(resumeRow.structured_data) 
-              : resumeRow.structured_data,
-          };
-          console.log('[KnowledgeOrchestrator] Resume loaded from database');
+      const jdRow = sqliteDb?.prepare ? sqliteDb.prepare(
+        'SELECT raw_text, structured_data, extraction_mode FROM profile_documents WHERE doc_type = ? ORDER BY updated_at DESC LIMIT 1'
+      ).get(DocType.JD) : null;
+
+      if (jdRow) {
+        this.activeJD = {
+          raw_text: jdRow.raw_text,
+          structured_data: typeof jdRow.structured_data === 'string' ? JSON.parse(jdRow.structured_data) : jdRow.structured_data,
+        };
+        console.log('[KnowledgeOrchestrator] JD loaded from database');
+      } else if (hasDocumentLookup) {
+        const doc = (this.db as any).getDocumentByType?.(DocType.JD);
+        if (doc?.structured_data || doc?.raw_text) {
+          this.activeJD = doc;
+          console.log('[KnowledgeOrchestrator] JD loaded from document lookup');
         }
-      } catch (err) {
-        console.warn('[KnowledgeOrchestrator] Failed to load resume:', err);
       }
 
-      // Load JD
-      try {
-        const jdRow = sqliteDb.prepare(
-          'SELECT raw_text, structured_data, extraction_mode FROM profile_documents WHERE doc_type = ? ORDER BY updated_at DESC LIMIT 1'
-        ).get(DocType.JD);
-        
-        if (jdRow) {
-          this.activeJD = {
-            raw_text: jdRow.raw_text,
-            structured_data: typeof jdRow.structured_data === 'string' 
-              ? JSON.parse(jdRow.structured_data) 
-              : jdRow.structured_data,
-          };
-          console.log('[KnowledgeOrchestrator] JD loaded from database');
+      if (hasDocumentLookup && !this.activeResume && !this.activeJD) {
+        const doc = (this.db as any).getDocumentByType?.(DocType.RESUME);
+        if (doc && (doc.structured_data || doc.raw_text)) {
+          this.activeResume = doc;
         }
-      } catch (err) {
-        console.warn('[KnowledgeOrchestrator] Failed to load JD:', err);
       }
 
       console.log('[KnowledgeOrchestrator] Profile data loaded from storage');
@@ -1157,43 +1156,87 @@ Return ONLY valid JSON, no markdown or extra text.`;
    */
   async processQuestion(question: string): Promise<any> {
     const normalized = typeof question === 'string' ? question.trim() : '';
-    const plan = normalized ? planAnswer({ question: normalized, source: 'manual_input', speakerPerspective: 'user' }) : null;
+    if (!normalized || !this.knowledgeMode) return null;
+
+    const profile = this.activeResume?.structured_data ?? this.activeResume ?? null;
+    if (!profile) return null;
+
+    const qLower = normalized.toLowerCase();
+    const plan = planAnswer({ question: normalized, source: 'manual_input', speakerPerspective: 'user' });
     const canonicalResumeAllowed = plan ? isLayerAllowed(plan, 'resume') : false;
-    const legacyResumeAllowed = (() => {
-      const q = normalized.toLowerCase();
-      if (!q) return false;
-      const CANDIDATE_REF_REGEX = /\b(you|your|yours|yourself|you've|you're|you'd|you'll|ya|we|our|ours|ourselves|us|me|my|mine|myself)\b/i;
-      const CANDIDATE_FRAMING_REGEX = /\b(you|your|yours|yourself|you've|you're|you'd|you'll|we|our|ours|us|me|my|mine|myself)\b/i;
-      if (CANDIDATE_REF_REGEX.test(q) || CANDIDATE_FRAMING_REGEX.test(q)) return true;
-      return !/^(?:what|who|when|where|why|how|is|are|can|could|do|does|did|should|would|will)\b/.test(q);
+
+    const isIntroQuestion = (() => {
+      const introPatterns = [
+        'tell me about yourself', 'give me a quick introduction', 'brief introduction', 'self-introduction',
+        'introducing yourself', 'brief intro', 'self intro', 'introduce yourself', 'describe yourself',
+        'how would you describe yourself', 'summarize who you are', 'tell us a little about yourself',
+        'give me your background', 'who are you as a candidate', 'walk me through your background',
+        'what is my name', 'who am i', 'what is your name', 'what are my skills', 'what do i do',
+      ];
+      return introPatterns.some((pattern) => qLower.includes(pattern)) || /\b(i am|i'm|my name|who am i|what is my name|what's my name|what do i do|what have i built|what've i shipped)\b/.test(qLower);
     })();
 
-    if (isIntelligenceFlagEnabled('pronounRegexShadowObservation')) {
-      const payload = {
-        legacyResumeAllowed,
-        canonicalResumeAllowed,
-        answerType: plan?.answerType ?? 'unknown_answer',
+    const isNegotiation = /\b(salary|compensation|equity|bonus|offer|package|counter|negotiat)\b/.test(qLower);
+    if (isNegotiation) {
+      return {
+        answer: normalized ? `Profile-grounded answer for: ${normalized}` : null,
         question: normalized,
+        sources: [],
+        answerType: plan?.answerType ?? 'negotiation',
+        resumeAllowed: false,
+        factualRecall: false,
+        liveNegotiationResponse: null,
       };
-      console.log('[PronounRegexShadow]', payload);
     }
 
-    const resolvedEmbedder = this.resolveQueryEmbedder();
-    if (resolvedEmbedder && normalized) {
-      try {
-        await resolvedEmbedder(normalized);
-      } catch {
-        // Fail-open on the hot path; the shadow log is the only telemetry here.
-      }
+    if (isGenericKnowledgeQuestion(normalized)) {
+      return null;
     }
 
-    console.log('[KnowledgeOrchestrator] Processing question with profile grounding');
+    const contextAssembly = ContextAssembler.assembleContext(this.activeResume, this.activeJD, this.activeCompany, normalized);
+    const answer = normalized ? `Profile-grounded answer for: ${normalized}` : null;
+
+    const leadershipEntries = Array.isArray(profile.leadership) ? profile.leadership : [];
+    const leadershipMatches = leadershipEntries.filter((entry: any) => {
+      const org = String(entry?.organization || entry?.company || '').toLowerCase();
+      return org && (qLower.includes(org) || /\b(role at|for)\b/.test(qLower) || /\b(leadership|led|managed|head|president|coordinator|director)\b/.test(qLower));
+    });
+
+    let contextBlock = contextAssembly.contextBlock || '';
+    if (leadershipMatches.length > 0 && !contextBlock.includes('<candidate_leadership>')) {
+      contextBlock += `\n<candidate_leadership>\n${leadershipMatches.map((entry: any) => `${entry.role || 'Leadership'} at ${entry.organization || entry.company || 'Organization'}${entry.description ? ` — ${entry.description}` : ''}`).join('\n')}\n</candidate_leadership>`;
+    }
+
+    if (!contextBlock && profile.identity?.name) {
+      contextBlock = `<candidate_identity>\nName: ${profile.identity.name}\n</candidate_identity>`;
+    }
+
+    if (isIntroQuestion) {
+      const introResponse = generateCandidateIntro(profile, normalized);
+      return {
+        answer,
+        question: normalized,
+        sources: ['resume'],
+        answerType: plan?.answerType ?? 'intro',
+        resumeAllowed: canonicalResumeAllowed,
+        factualRecall: true,
+        isIntroQuestion: true,
+        introResponse,
+        contextBlock: contextBlock || `<candidate_identity>\nName: ${profile.identity?.name || profile.name}\n</candidate_identity>`,
+      };
+    }
+
+    const containsProfileContent = /candidate_(identity|experience|projects|education|achievements|certifications|skills|leadership)/.test(contextBlock);
     return {
-      answer: normalized ? `Profile-grounded answer for: ${normalized}` : null,
+      answer,
       question: normalized,
-      sources: [],
-      answerType: plan?.answerType ?? 'unknown_answer',
+      sources: contextAssembly.sources || ['resume'],
+      answerType: plan?.answerType ?? 'profile_detail',
       resumeAllowed: canonicalResumeAllowed,
+      factualRecall: containsProfileContent || Boolean(contextBlock),
+      isIntroQuestion: false,
+      introResponse: generateCandidateIntro(profile, normalized),
+      contextBlock,
     };
   }
 

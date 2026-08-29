@@ -99,7 +99,7 @@ export function detectCategoryHints(question: string): string[] {
   const hints: string[] = [];
 
   // Experience keywords
-  if (lowerQuestion.match(/\b(experience|worked|job|role|position|company|employer)\b/)) {
+  if (lowerQuestion.match(/\b(experience|expertise|worked|job|role|position|company|employer)\b/)) {
     hints.push('experience');
   }
 
