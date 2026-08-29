@@ -36,9 +36,6 @@ change.md
 # nativelyapi is a separate git repo — exclude from parent repo tracking
 /nativelyapi
 
-# Local premium dev copy — never commit to public repo
-/premium
-
 # Generated migration patches — private, not for public repo
 *.patch
 # Exception: the patches/ directory holds patch-package commits that MUST
