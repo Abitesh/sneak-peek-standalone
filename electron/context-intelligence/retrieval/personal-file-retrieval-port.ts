@@ -9,6 +9,15 @@ import { createLegacyRetrievalPort } from './legacy-retrieval-port';
 
 export interface PersonalFileSearchLike {
   listFiles(): Array<{ id: string; fileName?: string }>;
+  searchRelevant?(query: string, limit?: number): Array<{
+    fileId: string;
+    fileName?: string;
+    chunkId: string;
+    text: string;
+    score?: number;
+    startChar?: number;
+    endChar?: number;
+  }>;
   search(query: string, limit?: number): Array<{
     fileId: string;
     fileName?: string;
@@ -36,7 +45,7 @@ export function createPersonalFileRetrievalPort(
   }
 
   return createLegacyRetrievalPort({
-    retrieve: async (query): Promise<LegacyChunk[]> => manager.search(query, options.topK ?? 20).map((item) => ({
+    retrieve: async (query): Promise<LegacyChunk[]> => (manager.searchRelevant?.(query, options.topK ?? 20) ?? manager.search(query, options.topK ?? 20)).map((item) => ({
       sourceId: item.fileId,
       fileName: item.fileName,
       text: item.text,

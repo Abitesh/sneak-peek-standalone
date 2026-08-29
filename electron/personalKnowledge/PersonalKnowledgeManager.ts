@@ -9,6 +9,7 @@
 // on-device. Only the retrieved text is later passed to the selected LLM
 // provider when the normal answer pipeline uses this context.
 
+import { DatabaseManager } from '../db/DatabaseManager';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
@@ -83,6 +84,22 @@ function lexicalScore(query: string, text: string): number {
     return score / q.length;
 }
 
+const DOCUMENT_WORDS = /\b(?:file|document|notes?|pdf|according to|uploaded|that|this|my)\b/gi;
+const STRUCTURAL_QUERY = /\b(?:first|1st|last|next|previous|preceding|following|beginning|start|question\s+\d+|questions?\s+\d+\s*(?:through|-|to)\s*\d+|first\s+\d+|last\s+\d+)\b/i;
+
+function expandedQueries(query: string): string[] {
+    const clean = query.replace(DOCUMENT_WORDS, ' ').replace(/\s+/g, ' ').trim();
+    const variants = new Set([clean]);
+    const lower = clean.toLowerCase();
+    if (/\b(?:oop|o\.o\.p\.|object[- ]oriented)\b/.test(lower)) {
+        variants.add(`${clean} object oriented programming`);
+        variants.add(`${clean} OOP`);
+    }
+    if (/\bacid\b/.test(lower)) variants.add(`${clean} atomicity consistency isolation durability`);
+    if (/\bnormalization\b/.test(lower)) variants.add(`${clean} normal forms functional dependency`);
+    return [...variants].filter(Boolean);
+}
+
 function makeFtsQuery(query: string): string {
     return tokenize(query)
         .slice(0, 12)
@@ -128,10 +145,14 @@ function chunkText(text: string): Array<{ text: string; startChar: number; endCh
 export class PersonalKnowledgeManager {
     private static instance: PersonalKnowledgeManager | null = null;
     private db: Database.Database;
+    private readonly storageRoot: string;
 
     private constructor(db: Database.Database) {
         this.db = db;
+        const databaseName = typeof (db as any).name === 'string' ? (db as any).name : process.cwd();
+        this.storageRoot = path.join(path.dirname(databaseName), 'personal-files');
         this.ensureSchema();
+        this.repairStoredPaths();
     }
 
     static getInstance(db?: Database.Database): PersonalKnowledgeManager {
@@ -229,6 +250,9 @@ export class PersonalKnowledgeManager {
         const id = makeId('pfile', `${contentHash}:${resolved}`);
         const chunks = chunkText(text);
         const mimeType = this.guessMimeType(ext);
+        await fs.promises.mkdir(this.storageRoot, { recursive: true });
+        const storedPath = path.join(this.storageRoot, `${id}${ext}`);
+        await fs.promises.copyFile(resolved, storedPath);
 
         const insertFile = this.db.prepare(`
             INSERT INTO personal_files
@@ -245,7 +269,7 @@ export class PersonalKnowledgeManager {
             insertFile.run(
                 id,
                 path.basename(resolved),
-                resolved,
+                storedPath,
                 mimeType,
                 stat.size,
                 contentHash,
@@ -267,6 +291,13 @@ export class PersonalKnowledgeManager {
         try {
             tx();
         } catch (error) {
+            console.error('[PersonalKnowledgeManager] persistent insert failed', {
+                database: typeof (this.db as any).name === 'string' ? (this.db as any).name : '(unknown)',
+                fileId: id,
+                operation: 'insert file and chunks',
+                error: error instanceof Error ? error.message : String(error),
+            });
+            try { await fs.promises.unlink(storedPath); } catch { /* preserve original error */ }
             // If two concurrent uploads raced on the same content hash, return
             // the winner rather than surfacing a UNIQUE error to the UI.
             const winner = this.db.prepare(
@@ -277,6 +308,35 @@ export class PersonalKnowledgeManager {
         }
 
         return this.getFile(id)!;
+    }
+
+    private repairStoredPaths(): void {
+        try {
+            fs.mkdirSync(this.storageRoot, { recursive: true });
+            const rows = this.db.prepare('SELECT id, file_name, file_path FROM personal_files').all() as Array<{ id: string; file_name: string; file_path: string }>;
+            const update = this.db.prepare('UPDATE personal_files SET file_path = ?, updated_at = ? WHERE id = ?');
+            for (const row of rows) {
+                const ext = path.extname(row.file_name).toLowerCase();
+                const candidate = path.join(this.storageRoot, `${row.id}${ext}`);
+                if (fs.existsSync(candidate)) {
+                    if (row.file_path !== candidate) update.run(candidate, new Date().toISOString(), row.id);
+                    continue;
+                }
+                // Existing versions stored the user's original path. Preserve
+                // the row and chunks, but copy the source into app storage when
+                // it is still available so future moves/deletes cannot break it.
+                if (fs.existsSync(row.file_path)) {
+                    fs.copyFileSync(row.file_path, candidate);
+                    update.run(candidate, new Date().toISOString(), row.id);
+                }
+            }
+        } catch (error) {
+            console.warn('[PersonalKnowledgeManager] stored-path repair skipped', {
+                database: typeof (this.db as any).name === 'string' ? (this.db as any).name : '(unknown)',
+                storageRoot: this.storageRoot,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
     }
 
     listFiles(): PersonalFileRecord[] {
@@ -396,8 +456,66 @@ export class PersonalKnowledgeManager {
             .slice(0, safeLimit);
     }
 
+    /**
+     * Search for a user question rather than its literal wording. Structural
+     * requests are resolved from persisted file/chunk order; semantic requests
+     * use the existing FTS/lexical index with a small concept-expansion set.
+     */
+    searchRelevant(query: string, limit = MAX_RESULTS): PersonalFileSearchResult[] {
+        const q = String(query ?? '').trim();
+        if (!q) return [];
+
+        const files = this.listFiles();
+        const lower = q.toLowerCase();
+        const named = files.filter((file) => {
+            const name = file.fileName.toLowerCase().replace(/[_-]+/g, ' ');
+            const tokens = name.split(/\s+/).filter((token) => token.length > 3 && !/^(?:file|document|notes?|pdf|according|uploaded|that|this|my)$/.test(token));
+            return tokens.length > 0 && tokens.filter((token) => lower.includes(token)).length >= Math.min(2, tokens.length);
+        });
+        const structural = STRUCTURAL_QUERY.test(q);
+        if (structural) {
+            const targetFiles = named.length ? named : files;
+            const ordinal = q.match(/\b(?:question|questions?)\s*(\d+)\b/i);
+            const firstCount = q.match(/\b(?:first|last)\s+(\d+)\s+questions?\b/i);
+            const wantLast = /\b(?:last|previous|preceding)\b/i.test(q);
+            const count = ordinal ? 1 : firstCount ? Number(firstCount[1]) : 1;
+            const chosen: PersonalFileSearchResult[] = [];
+            for (const file of targetFiles) {
+                const chunks = this.db.prepare(`
+                    SELECT pc.id, pc.file_id, pf.file_name, pc.text, pc.chunk_index, pc.start_char, pc.end_char
+                    FROM personal_file_chunks pc JOIN personal_files pf ON pf.id = pc.file_id
+                    WHERE pc.file_id = ? ORDER BY pc.chunk_index ASC
+                `).all(file.id) as any[];
+                const ordered = wantLast ? chunks.reverse() : chunks;
+                const questionChunks = ordered.filter((chunk) => /\?/.test(chunk.text) || /\b(?:question|q\.?\s*\d+)\b/i.test(chunk.text));
+                const source = questionChunks.length ? questionChunks : ordered;
+                const start = ordinal ? Math.max(0, Number(ordinal[1]) - 1) : 0;
+                for (const row of source.slice(start, start + Math.max(1, count))) {
+                    chosen.push({ fileId: row.file_id, fileName: row.file_name, chunkId: row.id, text: row.text, score: 1, startChar: row.start_char, endChar: row.end_char });
+                }
+                if (chosen.length >= Math.max(1, count)) break;
+            }
+            if (chosen.length) return chosen.slice(0, Math.max(1, count));
+        }
+
+        const merged = new Map<string, PersonalFileSearchResult>();
+        for (const variant of expandedQueries(q)) {
+            const scoped = named.length ? this.searchScoped(variant, named.map((file) => file.id), limit) : this.search(variant, limit);
+            for (const result of scoped) {
+                const previous = merged.get(result.chunkId);
+                if (!previous || result.score > previous.score) merged.set(result.chunkId, result);
+            }
+        }
+        return [...merged.values()].sort((a, b) => b.score - a.score).slice(0, Math.max(1, Math.min(MAX_RESULTS, limit)));
+    }
+
+    private searchScoped(query: string, fileIds: string[], limit: number): PersonalFileSearchResult[] {
+        const allowed = new Set(fileIds);
+        return this.search(query, Math.max(limit, MAX_RESULTS * 2)).filter((result) => allowed.has(result.fileId)).slice(0, limit);
+    }
+
     buildPromptContext(query: string, limit = 6, maxChars = 9000): string {
-        const results = this.search(query, limit);
+        const results = this.searchRelevant(query, limit);
         if (!results.length) return '';
 
         let used = 0;

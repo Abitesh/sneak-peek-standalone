@@ -5040,8 +5040,8 @@ let isMultimodal = !!(imagePaths?.length);
     if (process.env.NATIVELY_CONTEXT_TRACE === '1') {
       console.log('[FINAL REQUEST]', {
         contextChars: context?.length ?? 0,
-        modeEvidenceChars: modeContextBlock.length,
-        referenceContextAttached: modeContextBlock.length > 0 || /<personal_file_knowledge>|<evidence_pack>/i.test(userContent),
+        referenceContextChars: context?.length ?? 0,
+        referenceContextAttached: /<personal_file_knowledge>|<evidence_pack>|<reference_file|<uploaded_reference/i.test(userContent),
         profileContextAttached: /<candidate_|<profile_|profile_(?:resume|fact)/i.test(userContent),
         requestChars: userContent.length,
         model: this.currentModelId,

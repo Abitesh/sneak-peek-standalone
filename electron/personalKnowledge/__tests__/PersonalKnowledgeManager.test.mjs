@@ -65,6 +65,35 @@ test('Person 1 rejects oversized, empty, unsupported, and binary-mislabeled file
   }
 });
 
+test('Person 1 reopens from the same database with stored originals and searchable chunks', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'person1-restart-'));
+  const dbPath = path.join(dir, 'test.db');
+  const sourcePath = path.join(dir, 'project-notes.md');
+  fs.writeFileSync(sourcePath, '# Project Atlas\nThe ingestion pipeline uses SQLite FTS5 for local search.');
+
+  const { PersonalKnowledgeManager } = await import('../../../dist-electron/electron/personalKnowledge/PersonalKnowledgeManager.js');
+  let db = new Database(dbPath);
+  PersonalKnowledgeManager.instance = null;
+  const first = PersonalKnowledgeManager.getInstance(db);
+  const inserted = await first.ingestFile(sourcePath);
+  db.close();
+
+  try {
+    db = new Database(dbPath);
+    PersonalKnowledgeManager.instance = null;
+    const reopened = PersonalKnowledgeManager.getInstance(db);
+    const restored = reopened.getFile(inserted.id);
+
+    assert.equal(reopened.listFiles().length, 1);
+    assert.equal(reopened.search('SQLite FTS5').length, 1);
+    assert.equal(restored?.filePath.startsWith(path.join(dir, 'personal-files')), true);
+    assert.equal(fs.existsSync(restored.filePath), true);
+  } finally {
+    db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('SQLite FTS5 is available in the project runtime', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'person1-fts-'));
   const db = new Database(path.join(dir, 'test.db'));
