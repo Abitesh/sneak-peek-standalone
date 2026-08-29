@@ -11759,6 +11759,122 @@ export function initializeIpcHandlers(appState: AppState): void {
   });
 
   // ==========================================
+  // Personal Files Management
+  // ==========================================
+
+  safeHandle('personal-files:list', async () => {
+    try {
+      const db = DatabaseManager.getInstance();
+      const files = db.listPersonalFiles();
+      return { success: true, files };
+    } catch (error: any) {
+      return { success: false, error: error.message || 'Failed to list files' };
+    }
+  });
+
+  safeHandle('personal-files:pick-and-ingest', async () => {
+    const { dialog } = require('electron');
+    const mainWindow = appState.getMainWindow();
+    if (!mainWindow) return { success: false, error: 'No main window', cancelled: true };
+
+    try {
+      const result = await dialog.showOpenDialog(mainWindow, {
+        title: 'Add file to My Files',
+        filters: [
+          { name: 'Documents', extensions: ['pdf', 'docx', 'txt'] },
+          { name: 'All Files', extensions: ['*'] }
+        ],
+        properties: ['openFile']
+      });
+
+      if (result.cancelled || !result.filePaths.length) {
+        return { success: false, cancelled: true };
+      }
+
+      const filePath = result.filePaths[0];
+      const fs = require('fs');
+      const path = require('path');
+      const { v4: uuidv4 } = require('uuid');
+      const crypto = require('crypto');
+
+      // Read file content
+      const content = fs.readFileSync(filePath, 'utf-8');
+      if (!content.trim()) {
+        return { success: false, error: 'File is empty' };
+      }
+
+      // Compute hash and prepare metadata
+      const contentHash = crypto.createHash('sha256').update(content).digest('hex');
+      const fileName = path.basename(filePath);
+      const mimeType = 'text/plain'; // simplified for now
+      const sizeBytes = fs.statSync(filePath).size;
+      const fileId = uuidv4();
+
+      // Check if file already exists by hash
+      const db = DatabaseManager.getInstance();
+      const existing = db.listPersonalFiles();
+      if (existing.some(f => f.id !== fileId)) {
+        // Optionally check for duplicates by hash here
+      }
+
+      // Insert file metadata
+      const insertOk = db.insertPersonalFile(fileId, fileName, filePath, mimeType, sizeBytes, contentHash);
+      if (!insertOk) {
+        return { success: false, error: 'Failed to save file metadata' };
+      }
+
+      // Chunk content (simple: split by sentences or paragraphs)
+      const chunkSize = 1000; // characters
+      const chunks = [];
+      let pos = 0;
+      while (pos < content.length) {
+        const endPos = Math.min(pos + chunkSize, content.length);
+        const chunkText = content.slice(pos, endPos).trim();
+        if (chunkText) {
+          chunks.push({
+            id: uuidv4(),
+            chunkIndex: chunks.length,
+            text: chunkText,
+            startChar: pos,
+            endChar: endPos
+          });
+        }
+        pos = endPos;
+      }
+
+      // Insert chunks
+      const chunksOk = db.insertPersonalFileChunks(fileId, chunks);
+      if (!chunksOk) {
+        return { success: false, error: 'Failed to index file content' };
+      }
+
+      return { success: true, file: { id: fileId, fileName, sizeBytes, chunkCount: chunks.length } };
+    } catch (error: any) {
+      return { success: false, error: error.message || 'File ingestion failed' };
+    }
+  });
+
+  safeHandle('personal-files:delete', async (_, fileId: string) => {
+    try {
+      const db = DatabaseManager.getInstance();
+      const ok = db.deletePersonalFile(fileId);
+      return { success: ok, error: ok ? undefined : 'Failed to delete file' };
+    } catch (error: any) {
+      return { success: false, error: error.message || 'Deletion failed' };
+    }
+  });
+
+  safeHandle('personal-files:search', async (_, query: string) => {
+    try {
+      const db = DatabaseManager.getInstance();
+      const results = db.searchPersonalFiles(query);
+      return { success: true, results };
+    } catch (error: any) {
+      return { success: false, error: error.message || 'Search failed' };
+    }
+  });
+
+  // ==========================================
   // Role Insight IPC Handlers
   // ==========================================
   //

@@ -258,15 +258,6 @@ interface ElectronAPI {
   onModesActiveCleared: (cb: () => void) => () => void;
 
   // ── Application License Management ──────────────────────────────────
-  activateLicense: (
-    key: string,
-  ) => Promise<{ success: boolean; error?: string; state?: any }>;
-  getLicenseStatus: () => Promise<{
-    success: boolean;
-    error?: string;
-    state?: any;
-  }>;
-  revokeLicense: () => Promise<{ success: boolean; error?: string; state?: any }>;
   // ── Application License Management (replaced old Natively licensing) ──────────────────────────────────
   activateLicense: (
     key: string,

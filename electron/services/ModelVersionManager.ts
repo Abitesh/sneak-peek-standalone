@@ -709,9 +709,10 @@ export class ModelVersionManager {
     textDiscovered: Map<TextModelFamily, { modelId: string; version: ModelVersion }>
   ): Promise<void> {
     try {
+      // 20 second timeout for OpenAI (increased from 15s for reliability)
       const response = await fetch('https://api.openai.com/v1/models', {
         headers: { Authorization: `Bearer ${this.openaiApiKey}` },
-        signal: AbortSignal.timeout(15000),
+        signal: AbortSignal.timeout(20000),
       });
       if (!response.ok) {
         this.recordDiscoveryFailure('openai');
@@ -719,14 +720,35 @@ export class ModelVersionManager {
         return;
       }
       const json: any = await response.json();
-      const models: string[] = (json.data || []).map((m: any) => m.id);
+      
+      // Filter to only chat/text models we actually support
+      // OpenAI returns many models including deprecated, vision-only, and fine-tuning bases
+      const supportedPatterns = [
+        /^gpt-4(?:o|-turbo|-vision|-32k)/, // GPT-4 variants
+        /^gpt-3\.5-turbo/, // GPT-3.5
+        /^text-davinci/, // Deprecated but sometimes still available
+      ];
+      
+      const models: string[] = (json.data || [])
+        .map((m: any) => m.id)
+        .filter((modelId: string) => {
+          // Only include models that match our patterns
+          return supportedPatterns.some(pattern => pattern.test(modelId));
+        });
 
       this.findLatestInFamily(models, ModelFamily.OPENAI, discovered);
       this.findLatestInTextFamily(models, TextModelFamily.OPENAI, textDiscovered);
       this.recordDiscoverySuccess('openai');
+      if (models.length === 0) {
+        console.warn(`[ModelVersionManager] OpenAI: no supported models found in account`);
+      }
     } catch (err: any) {
       this.recordDiscoveryFailure('openai');
-      console.warn(`[ModelVersionManager] OpenAI discovery error: ${err.message}`);
+      if (err.name === 'AbortError' || err.message?.includes('timeout')) {
+        console.warn(`[ModelVersionManager] OpenAI model discovery timeout (20s limit exceeded)`);
+      } else {
+        console.warn(`[ModelVersionManager] OpenAI discovery error: ${err.message}`);
+      }
     }
   }
 
@@ -735,9 +757,11 @@ export class ModelVersionManager {
     textDiscovered: Map<TextModelFamily, { modelId: string; version: ModelVersion }>
   ): Promise<void> {
     try {
+      // Increased timeout from 15s to 30s for Gemini's often-slow API
+      // The API may return hundreds of models, so we need more time
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models?key=${this.geminiApiKey}`,
-        { signal: AbortSignal.timeout(15000) }
+        { signal: AbortSignal.timeout(30000) }
       );
       if (!response.ok) {
         this.recordDiscoveryFailure('gemini');
@@ -745,18 +769,57 @@ export class ModelVersionManager {
         return;
       }
       const json: any = await response.json();
-      const models: string[] = (json.models || []).map((m: any) =>
-        (m.name || '').replace(/^models\//, '')
-      );
+      
+      // Filter to only known, supported Gemini models
+      // The API returns many models; we only care about the stable ones we actually support
+      const knownGeminiModels = new Set([
+        'gemini-2.0-flash',
+        'gemini-2.0-flash-lite',
+        'gemini-2.0-flash-exp',
+        'gemini-2.0-pro-exp',
+        'gemini-1.5-flash',
+        'gemini-1.5-flash-8b',
+        'gemini-1.5-pro',
+        'gemini-1.0-pro-latest',
+        'gemini-3.7-flash',
+        'gemini-3.7-flash-lite',
+        'gemini-3.7-pro',
+        'gemini-pro',
+        'gemini-pro-vision',
+      ]);
+      
+      const models: string[] = (json.models || [])
+        .map((m: any) => (m.name || '').replace(/^models\//, ''))
+        .filter((modelId: string) => {
+          // Check if model name matches known patterns or is explicitly in our list
+          if (knownGeminiModels.has(modelId)) return true;
+          
+          // Also accept models that match our family patterns
+          if (/^gemini-(1\.[0-9]|2\.0|3\.[0-9])-(flash|pro)/.test(modelId)) return true;
+          
+          return false;
+        });
+
+      if (models.length === 0) {
+        // If no models matched our filter, log a diagnostic message
+        console.warn(`[ModelVersionManager] Gemini: no supported models found (API returned ${(json.models || []).length} total models)`);
+        this.recordDiscoveryFailure('gemini');
+        return;
+      }
 
       this.findLatestInFamily(models, ModelFamily.GEMINI_FLASH, discovered);
       this.findLatestInFamily(models, ModelFamily.GEMINI_PRO, discovered);
       this.findLatestInTextFamily(models, TextModelFamily.GEMINI_FLASH, textDiscovered);
       this.findLatestInTextFamily(models, TextModelFamily.GEMINI_PRO, textDiscovered);
       this.recordDiscoverySuccess('gemini');
+      console.log(`[ModelVersionManager] Gemini: discovered ${models.length} supported models`);
     } catch (err: any) {
       this.recordDiscoveryFailure('gemini');
-      console.warn(`[ModelVersionManager] Gemini discovery error: ${err.message}`);
+      if (err.name === 'AbortError' || err.message?.includes('timeout')) {
+        console.warn(`[ModelVersionManager] Gemini model discovery timeout (30s limit exceeded)`);
+      } else {
+        console.warn(`[ModelVersionManager] Gemini discovery error: ${err.message}`);
+      }
     }
   }
 

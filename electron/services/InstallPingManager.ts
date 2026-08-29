@@ -32,10 +32,16 @@
  * ================================================================================
  */
 
-import { app } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
+
+let app: { getPath?: (name: string) => string; getVersion?: () => string } | undefined;
+try {
+    app = require('electron').app;
+} catch {
+    app = undefined;
+}
 
 // ============================================================================
 // Configuration
@@ -47,9 +53,30 @@ import { v4 as uuidv4 } from 'uuid';
  */
 const INSTALL_PING_URL = 'https://divine-sun-927d.natively.workers.dev';
 
+function getAppUserDataDir(): string {
+    if (app && typeof app.getPath === 'function') {
+        try {
+            return app.getPath('userData');
+        } catch {
+            // fall through
+        }
+    }
+    return path.join(process.cwd(), '.natively-user-data');
+}
+
+function getInstallStateDir(): string {
+    const dir = getAppUserDataDir();
+    try {
+        fs.mkdirSync(dir, { recursive: true });
+    } catch {
+        // ignore: tests or non-Electron environment should still work
+    }
+    return dir;
+}
+
 // Local storage paths (inside user data directory)
-const INSTALL_ID_PATH = path.join(app.getPath('userData'), 'install_id.txt');
-const INSTALL_PING_SENT_PATH = path.join(app.getPath('userData'), 'install_ping_sent.txt');
+const INSTALL_ID_PATH = path.join(getInstallStateDir(), 'install_id.txt');
+const INSTALL_PING_SENT_PATH = path.join(getInstallStateDir(), 'install_ping_sent.txt');
 
 // ============================================================================
 // Helper Functions
@@ -132,7 +159,7 @@ export async function sendAnonymousInstallPing(): Promise<void> {
         }
 
         const installId = getOrCreateInstallId();
-        const version = app.getVersion();
+        const version = app && typeof app.getVersion === 'function' ? app.getVersion() : 'unknown';
         const platform = process.platform; // 'darwin' | 'win32' | 'linux'
 
         const payload = {

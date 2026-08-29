@@ -15,11 +15,13 @@ import * as path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 /** The complete shared document-format contract for Modes + Profile uploads. */
+// Keep the upload allowlist intentionally conservative: Profile Intelligence
+// and shared Modes uploads are for user documents, not arbitrary source files.
+// This matches the repository's documented contract and prevents accidental
+// ingestion of executable/source-code files as profile documents.
 export const SAFE_DOCUMENT_EXTENSIONS = new Set([
   '.txt', '.md', '.markdown', '.json', '.csv', '.tsv',
   '.xml', '.html', '.htm', '.log', '.pdf', '.docx',
-  '.js', '.jsx', '.ts', '.tsx', '.py', '.java', '.c', '.cpp', '.h', '.hpp',
-  '.cs', '.go', '.rs', '.sql', '.sh', '.yaml', '.yml', '.toml',
 ]);
 
 /** 50 MB hard cap — should be enforced by the upload UI's progress bar first. */

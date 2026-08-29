@@ -3406,6 +3406,131 @@ export class DatabaseManager {
         });
     }
 
+    // ============================================
+    // Personal Files Management
+    // ============================================
+
+    public listPersonalFiles(): Array<{ id: string; fileName: string; mimeType: string; sizeBytes: number; createdAt: string; updatedAt: string; chunkCount: number }> {
+        if (!this.db) return [];
+        try {
+            const stmt = this.db.prepare(`
+                SELECT pf.id, pf.file_name, pf.mime_type, pf.size_bytes, pf.created_at, pf.updated_at,
+                       COUNT(pfc.id) as chunk_count
+                FROM personal_files pf
+                LEFT JOIN personal_file_chunks pfc ON pf.id = pfc.file_id
+                GROUP BY pf.id
+                ORDER BY pf.created_at DESC
+            `);
+            return stmt.all() as any[];
+        } catch (error) {
+            console.error('[DatabaseManager] Error listing personal files:', error);
+            return [];
+        }
+    }
+
+    public getPersonalFile(fileId: string): { id: string; fileName: string; filePath: string; mimeType: string; sizeBytes: number; contentHash: string; createdAt: string; updatedAt: string } | null {
+        if (!this.db) return null;
+        try {
+            const stmt = this.db.prepare('SELECT * FROM personal_files WHERE id = ?');
+            return stmt.get(fileId) as any;
+        } catch (error) {
+            console.error('[DatabaseManager] Error getting personal file:', error);
+            return null;
+        }
+    }
+
+    public insertPersonalFile(fileId: string, fileName: string, filePath: string, mimeType: string, sizeBytes: number, contentHash: string): boolean {
+        if (!this.db) return false;
+        try {
+            const now = new Date().toISOString();
+            const stmt = this.db.prepare(`
+                INSERT OR REPLACE INTO personal_files 
+                (id, file_name, file_path, mime_type, size_bytes, content_hash, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            `);
+            stmt.run(fileId, fileName, filePath, mimeType, sizeBytes, contentHash, now, now);
+            return true;
+        } catch (error) {
+            console.error('[DatabaseManager] Error inserting personal file:', error);
+            return false;
+        }
+    }
+
+    public deletePersonalFile(fileId: string): boolean {
+        if (!this.db) return false;
+        try {
+            const stmt = this.db.prepare('DELETE FROM personal_files WHERE id = ?');
+            stmt.run(fileId);
+            return true;
+        } catch (error) {
+            console.error('[DatabaseManager] Error deleting personal file:', error);
+            return false;
+        }
+    }
+
+    public insertPersonalFileChunks(fileId: string, chunks: Array<{ id: string; chunkIndex: number; text: string; startChar: number; endChar: number }>): boolean {
+        if (!this.db) return false;
+        try {
+            const stmt = this.db.prepare(`
+                INSERT INTO personal_file_chunks (id, file_id, chunk_index, text, start_char, end_char)
+                VALUES (?, ?, ?, ?, ?, ?)
+            `);
+            this.db.transaction(() => {
+                for (const chunk of chunks) {
+                    stmt.run(chunk.id, fileId, chunk.chunkIndex, chunk.text, chunk.startChar, chunk.endChar);
+                }
+            })();
+            return true;
+        } catch (error) {
+            console.error('[DatabaseManager] Error inserting personal file chunks:', error);
+            return false;
+        }
+    }
+
+    public searchPersonalFiles(query: string, limit: number = 20): Array<{ fileId: string; fileName: string; chunkId: string; text: string; score: number }> {
+        if (!this.db || !query.trim()) return [];
+        try {
+            const stmt = this.db.prepare(`
+                SELECT pfc.file_id, pf.file_name, pfc.id as chunk_id, pfc.text,
+                       CASE WHEN pf.file_name LIKE ? THEN 10 ELSE 1 END as score
+                FROM personal_file_chunks_fts fts
+                JOIN personal_file_chunks pfc ON fts.chunk_id = pfc.id
+                JOIN personal_files pf ON pfc.file_id = pf.id
+                WHERE personal_file_chunks_fts MATCH ?
+                ORDER BY score DESC, pfc.chunk_index
+                LIMIT ?
+            `);
+            const searchPattern = `%${query}%`;
+            return stmt.all(searchPattern, query, limit) as any[];
+        } catch (error) {
+            console.error('[DatabaseManager] Error searching personal files:', error);
+            return [];
+        }
+    }
+
+    public getPersonalFileChunks(fileId: string): Array<{ id: string; chunkIndex: number; text: string; startChar: number; endChar: number }> {
+        if (!this.db) return [];
+        try {
+            const stmt = this.db.prepare('SELECT * FROM personal_file_chunks WHERE file_id = ? ORDER BY chunk_index ASC');
+            return stmt.all(fileId) as any[];
+        } catch (error) {
+            console.error('[DatabaseManager] Error getting personal file chunks:', error);
+            return [];
+        }
+    }
+
+    public clearPersonalFileChunks(fileId: string): boolean {
+        if (!this.db) return false;
+        try {
+            const stmt = this.db.prepare('DELETE FROM personal_file_chunks WHERE file_id = ?');
+            stmt.run(fileId);
+            return true;
+        } catch (error) {
+            console.error('[DatabaseManager] Error clearing personal file chunks:', error);
+            return false;
+        }
+    }
+
     public clearAllData(): boolean {
         if (!this.db) return false;
 

@@ -1293,33 +1293,35 @@ interface ScreenshotCaptureSession {
   wasStealthTypingActive: boolean;
 }
 
-// Knowledge modules loaded conditionally
-// Now using application-owned implementations instead of unavailable premium module
+// Knowledge modules loaded from source-controlled premium directory
+// Using our application-owned implementations
 let KnowledgeOrchestratorClass: any = null;
 let KnowledgeDatabaseManagerClass: any = null;
 // Phase 1: shared comp-evidence detector for transcript-aware intent routing.
 let textHasCompEvidence: ((text: string) => boolean) | null = null;
 
-// Try to load application-owned implementations first
+// Load from our source-controlled premium directory
 try {
-  KnowledgeOrchestratorClass = require('./services/knowledge/KnowledgeOrchestrator').KnowledgeOrchestrator;
-  console.log('[Main] Application-owned KnowledgeOrchestrator loaded successfully');
-} catch (e) {
-  console.error('[Main] Failed to load application-owned KnowledgeOrchestrator:', e);
+  KnowledgeOrchestratorClass = require('../premium/electron/knowledge/KnowledgeOrchestrator').KnowledgeOrchestrator;
+  console.log('[Main] KnowledgeOrchestrator loaded from premium directory');
+} catch (e: any) {
+  console.error('[Main] Failed to load KnowledgeOrchestrator:', e?.message || e);
 }
 
-// Legacy fallback (premium module no longer available)
+// Load KnowledgeDatabaseManager (stub)
 try {
   KnowledgeDatabaseManagerClass = require('../premium/electron/knowledge/KnowledgeDatabaseManager').KnowledgeDatabaseManager;
-} catch (e) {
-  console.log('[Main] Knowledge database manager not available (premium module unavailable)');
+  console.log('[Main] KnowledgeDatabaseManager loaded (stub)');
+} catch (e: any) {
+  console.error('[Main] Failed to load KnowledgeDatabaseManager:', e?.message || e);
 }
 
-// Try to load comp-evidence detector (premium module, not available)
+// Load comp-evidence detector from our premium directory
 try {
   textHasCompEvidence = require('../premium/electron/knowledge/NegotiationConversationTracker').textHasCompEvidence;
-} catch {
-  console.log('[Main] Negotiation conversation tracker not available (premium module unavailable)');
+  console.log('[Main] Negotiation conversation tracker loaded');
+} catch (e: any) {
+  console.error('[Main] Failed to load negotiation conversation tracker:', e?.message || e);
 }
 
 import { CredentialsManager } from "./services/CredentialsManager"

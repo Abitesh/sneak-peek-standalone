@@ -8,6 +8,9 @@
 /**
  * Check if recent conversation text contains compensation-related evidence
  * Scans the last 1-2 INTERVIEWER turns for compensation mentions
+ * 
+ * This detector is intentionally permissive to catch even shorthand comp mentions
+ * (e.g., "ctc", "lpa", "yoy") that might indicate salary discussion.
  */
 export function textHasCompEvidence(conversationText: string | null): boolean {
   if (!conversationText || typeof conversationText !== 'string') {
@@ -16,16 +19,31 @@ export function textHasCompEvidence(conversationText: string | null): boolean {
 
   const lowerText = conversationText.toLowerCase();
   
-  // Keywords indicating compensation discussion
-  const compKeywords = [
-    'salary', 'compensation', 'pay', 'budget', 'range', 'offer',
-    'negotiate', 'negotiation', 'bonus', 'equity', 'options',
-    'benefits', 'package', 'total comp', 'base', 'commission',
-    'raise', 'increase', 'stock', 'rrsu', 'vest', 'signing bonus'
+  // Keywords and patterns indicating compensation discussion
+  const compPatterns = [
+    // Direct salary/compensation terms
+    /\b(salary|compensation|pay|compensation|wage|wages)\b/,
+    /\b(budget|range|offer|package)\b/,
+    /\b(negotiate|negotiation|negotiate)\b/,
+    
+    // Bonus/equity terms
+    /\b(bonus|equity|options|stock|rsu|vest|vestment)\b/,
+    /\b(signing\s+bonus|performance\s+bonus)\b/,
+    
+    // Benefits
+    /\b(benefits|pto|vacation|healthcare|insurance)\b/,
+    
+    // International comp terms (CTC, LPA, YoY)
+    /\b(ctc|lpa|yoy|gross|net)\b/,
+    
+    // Amount-like patterns (numbers with currency)
+    /\b\d+k\b/i,  // 150k, 200k
+    /\$\s*\d+/,   // $150,000
+    /^\d+\s*-\s*\d+/,  // 120-140k range
   ];
 
-  // Check if any compensation keywords appear in the text
-  return compKeywords.some(keyword => lowerText.includes(keyword));
+  // Check if any compensation patterns match
+  return compPatterns.some(pattern => pattern.test(lowerText));
 }
 
 export class NegotiationConversationTracker {
