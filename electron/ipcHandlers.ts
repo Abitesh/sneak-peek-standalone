@@ -9071,6 +9071,7 @@ export function initializeIpcHandlers(appState: AppState): void {
         let response;
 
         if (provider === 'gemini') {
+          // Test with the exact model that the app uses: gemini-3.7-flash
           const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent`;
           response = await axios.post(
             url,
@@ -9116,18 +9117,44 @@ export function initializeIpcHandlers(appState: AppState): void {
           }
           if (lastGroqError) throw lastGroqError;
         } else if (provider === 'openai') {
-          response = await axios.post(
-            'https://api.openai.com/v1/chat/completions',
-            {
-              model: 'gpt-4o-mini',
-              messages: [{ role: 'user', content: 'Hello' }],
-            },
-            {
-              headers: { Authorization: `Bearer ${apiKey}` },
-              timeout: 15000,
-            },
-          );
+          // FIXED: Test with gpt-5.4 (the actual model configured in the app),
+          // not gpt-4o-mini. Fallback to gpt-4o if gpt-5.4 fails with model-not-found.
+          const candidates = ['gpt-5.4', 'gpt-4o'];
+          let lastOpenaiError: any = null;
+          for (const model of candidates) {
+            try {
+              response = await axios.post(
+                'https://api.openai.com/v1/chat/completions',
+                {
+                  model,
+                  messages: [{ role: 'user', content: 'Hello' }],
+                  max_tokens: 10,
+                },
+                {
+                  headers: { Authorization: `Bearer ${apiKey}` },
+                  timeout: 15000,
+                },
+              );
+              if (model !== candidates[0]) {
+                console.warn(`[IPC] OpenAI test: ${candidates[0]} not found; using ${model}`);
+              }
+              lastOpenaiError = null;
+              break;
+            } catch (openaiErr: any) {
+              lastOpenaiError = openaiErr;
+              // If it's a model-not-found error, try the next one
+              if (openaiErr?.response?.status === 404 || 
+                  openaiErr?.response?.data?.error?.code === 'model_not_found' ||
+                  openaiErr?.response?.data?.error?.type === 'invalid_request_error') {
+                continue;
+              }
+              // Other errors (auth, rate limit, etc) fail immediately
+              break;
+            }
+          }
+          if (lastOpenaiError) throw lastOpenaiError;
         } else if (provider === 'claude') {
+          // Test with claude-sonnet-4-6 (the model configured in the app)
           response = await axios.post(
             'https://api.anthropic.com/v1/messages',
             {
@@ -9145,26 +9172,72 @@ export function initializeIpcHandlers(appState: AppState): void {
             },
           );
         } else if (provider === 'deepseek') {
-          response = await axios.post(
-            'https://api.deepseek.com/chat/completions',
-            {
-              model: 'deepseek-v4-flash',
-              max_tokens: 10,
-              messages: [{ role: 'user', content: 'Hello' }],
-            },
-            {
-              headers: {
-                Authorization: `Bearer ${apiKey}`,
-                'content-type': 'application/json',
-              },
-              timeout: 15000,
-            },
-          );
+          // Test with deepseek-v4-flash (the first model in the app's ladder)
+          // Fallback to deepseek-v4-pro if the first one fails
+          const candidates = ['deepseek-v4-flash', 'deepseek-v4-pro'];
+          let lastDeepseekError: any = null;
+          for (const model of candidates) {
+            try {
+              response = await axios.post(
+                'https://api.deepseek.com/chat/completions',
+                {
+                  model,
+                  max_tokens: 10,
+                  messages: [{ role: 'user', content: 'Hello' }],
+                },
+                {
+                  headers: {
+                    Authorization: `Bearer ${apiKey}`,
+                    'content-type': 'application/json',
+                  },
+                  timeout: 15000,
+                },
+              );
+              if (model !== candidates[0]) {
+                console.warn(`[IPC] DeepSeek test: ${candidates[0]} not found; using ${model}`);
+              }
+              lastDeepseekError = null;
+              break;
+            } catch (deepseekErr: any) {
+              lastDeepseekError = deepseekErr;
+              // If it's a model-not-found error, try the next one
+              if (deepseekErr?.response?.status === 404 || 
+                  deepseekErr?.response?.data?.error?.message?.includes('model not found')) {
+                continue;
+              }
+              // Other errors fail immediately
+              break;
+            }
+          }
+          if (lastDeepseekError) throw lastDeepseekError;
         }
         else if (provider === 'nvidia_nim') {
-          response = await axios.post('https://integrate.api.nvidia.com/v1/chat/completions', {
-            model: 'meta/llama-3.1-8b-instruct', messages: [{ role: 'user', content: 'Hello' }], max_tokens: 10,
-          }, { headers: { Authorization: `Bearer ${apiKey}` }, timeout: 15000 });
+          // Test with the first model in the app's ladder
+          const candidates = ['meta/llama-3.1-8b-instruct', 'z-ai/glm4.7'];
+          let lastNvidiaError: any = null;
+          for (const model of candidates) {
+            try {
+              response = await axios.post('https://integrate.api.nvidia.com/v1/chat/completions', {
+                model,
+                messages: [{ role: 'user', content: 'Hello' }],
+                max_tokens: 10,
+              }, { headers: { Authorization: `Bearer ${apiKey}` }, timeout: 15000 });
+              if (model !== candidates[0]) {
+                console.warn(`[IPC] Nvidia NIM test: ${candidates[0]} not found; using ${model}`);
+              }
+              lastNvidiaError = null;
+              break;
+            } catch (nvidiaErr: any) {
+              lastNvidiaError = nvidiaErr;
+              // Try next model on failure
+              if (nvidiaErr?.response?.status === 404 || 
+                  nvidiaErr?.response?.data?.error?.message?.includes('model not found')) {
+                continue;
+              }
+              break;
+            }
+          }
+          if (lastNvidiaError) throw lastNvidiaError;
         }
 
         if (response && (response.status === 200 || response.status === 201)) {
@@ -9369,9 +9442,36 @@ export function initializeIpcHandlers(appState: AppState): void {
       });
     } catch { /* broadcast best-effort */ }
   };
-  codexOAuth.on('login:complete', (info: any) => broadcastCodexLoginEvent('login:complete', info));
+  codexOAuth.on('login:complete', (info: any) => {
+    broadcastCodexLoginEvent('login:complete', info);
+    // After successful Codex OAuth login, automatically enable Codex in the config
+    // so it appears as an available provider in the model selector and can be used for chat.
+    try {
+      const llmHelper = appState.processingHelper.getLLMHelper();
+      const currentConfig = llmHelper.getCodexCliConfig();
+      if (currentConfig && !currentConfig.enabled) {
+        console.log('[Codex] Enabling Codex after successful OAuth login');
+        llmHelper.setCodexCliConfig({ ...currentConfig, enabled: true });
+        // Persist the setting
+        try {
+          const { SettingsManager } = require('./services/SettingsManager');
+          const sm = SettingsManager.getInstance();
+          sm.set('codexCliEnabled', true);
+        } catch { /* Settings update is best-effort */ }
+      }
+    } catch (err) {
+      console.warn('[Codex] Failed to enable Codex after login:', err);
+    }
+    // After successful Codex OAuth login, notify renderer that credentials changed
+    // so the model selector window reloads and shows Codex as an available provider.
+    broadcastCredentialsChanged();
+  });
   codexOAuth.on('login:failed', (err: Error) => broadcastCodexLoginEvent('login:failed', { message: err?.message || String(err) }));
-  codexOAuth.on('tokens:refreshed', (info: any) => broadcastCodexLoginEvent('tokens:refreshed', info));
+  codexOAuth.on('tokens:refreshed', (info: any) => {
+    broadcastCodexLoginEvent('tokens:refreshed', info);
+    // After token refresh, also notify about credential change in case the UI needs to update.
+    broadcastCredentialsChanged();
+  });
   codexOAuth.on('signed-out', async () => {
     broadcastCodexLoginEvent('signed-out', undefined);
     await refreshRuntimeDefaultIfUnavailable();

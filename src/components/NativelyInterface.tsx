@@ -5248,7 +5248,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
   // 3 screenshot-branch strings below are not run through useT()).
   const QUICK_ACTION_LABELS: Record<string, string> = {
     what_to_say: 'What should I say?',
-    recap: 'Recap',
+    recap: 'Elaborate with examples',
     follow_up_questions: 'Follow-up questions',
     clarify: 'Clarify',
     code_hint: 'Code hint',
@@ -5422,6 +5422,13 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
       setLatestVisionProviderUsed(result.visionProviderUsed);
       setLatestVisionModelUsed(result.visionModelUsed);
       setLatestVisionFailureReason(result.visionFailureReason);
+      if (result.answer != null) {
+        try {
+          await window.electronAPI.generateFollowUpQuestions();
+        } catch {
+          // Best-effort: keep the answer visible even if follow-up generation fails.
+        }
+      }
       if (result.answer == null) {
         const feedback =
           result.error ??
@@ -6152,14 +6159,17 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
     if (isManualRecording) {
       if (!tryBeginOverlayAction('answer_now')) return;
       try {
-        // Stop recording - send accumulated voice input to Gemini
+        // Stop recording, finalize the active STT session, then wait a beat for
+        // final transcript chunks to land before consuming the transcript.
         isRecordingRef.current = false;
         setIsManualRecording(false);
         setManualTranscript('');
 
         window.electronAPI
-          .finalizeMicSTT()
+          ?.finalizeMicSTT?.()
           .catch((err) => console.error('[NativelyInterface] Failed to send finalizeMicSTT:', err));
+
+        await new Promise((resolve) => setTimeout(resolve, 220));
 
         const currentAttachments = attachedContext;
         setAttachedContext([]);
@@ -8513,6 +8523,27 @@ Provide only the answer, nothing else.`;
                   layout={false}
                   style={{ scrollbarWidth: 'none', maxHeight: scrollMaxH }}
                 >
+                  {/* Active recording state stays pinned above the message list so it
+                      remains visible while the conversation scrolls underneath it. */}
+                  {isManualRecording && (
+                    <div className="sticky top-0 z-20 mb-2 flex flex-col items-end gap-2 rounded-[16px] border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 backdrop-blur-sm">
+                      <div className="flex w-full items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.18em] text-emerald-300/80">
+                          <div className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                          <span>{t('Listening')}</span>
+                        </div>
+                        <span className="text-[10px] text-emerald-300/70">{t('Live transcription')}</span>
+                      </div>
+                      {(manualTranscript || voiceInput) && (
+                        <div className="w-full max-w-[90%] self-end rounded-[14px] rounded-tr-[4px] border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-left text-[12.5px] text-emerald-200">
+                          {voiceInput}
+                          {voiceInput && manualTranscript ? ' ' : ''}
+                          {manualTranscript}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* Every row spans the full inner width of the scroll
                                         container, which itself rides the shell's animated
                                         width. Bubble max-widths are percentages so the text
@@ -8540,37 +8571,6 @@ Provide only the answer, nothing else.`;
                       renderMessageText={renderMessageText}
                     />
                   ))}
-
-                  {/* Active Recording State with Live Transcription */}
-                  {isManualRecording && (
-                    <div className="flex flex-col items-end gap-1 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                      {/* Live transcription preview */}
-                      {(manualTranscript || voiceInput) && (
-                        <div className="max-w-[85%] px-3.5 py-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-[18px] rounded-tr-[4px]">
-                          <span className="text-[13px] text-emerald-300">
-                            {voiceInput}
-                            {voiceInput && manualTranscript ? ' ' : ''}
-                            {manualTranscript}
-                          </span>
-                        </div>
-                      )}
-                      <div className="px-3 py-2 flex gap-1.5 items-center bg-emerald-500/10 border border-emerald-500/20 rounded-full">
-                        <div
-                          className="w-2 h-2 bg-emerald-400 rounded-full animate-bounce"
-                          style={{ animationDelay: '0ms' }}
-                        />
-                        <div
-                          className="w-2 h-2 bg-emerald-400 rounded-full animate-bounce"
-                          style={{ animationDelay: '150ms' }}
-                        />
-                        <div
-                          className="w-2 h-2 bg-emerald-400 rounded-full animate-bounce"
-                          style={{ animationDelay: '300ms' }}
-                        />
-                        <span className="text-[10px] text-emerald-400/70 ml-1">{t('Listening...')}</span>
-                      </div>
-                    </div>
-                  )}
 
                   {/*
                    * Blinking-dot "AI is thinking" indicator (no card chrome —
