@@ -53,6 +53,8 @@ export class KnowledgeOrchestrator {
   private negotiationTracker: any = null;
   private companyDossier: Map<string, any> = new Map();
   private generateContentFn: ((contents: any[]) => Promise<any>) | null = null;
+  private conversationContextProvider: (() => any) | null = null;
+  private depthScoringHistory: string[] = [];
 
   constructor(db: DatabaseManager) {
     this.db = db;
@@ -197,6 +199,44 @@ export class KnowledgeOrchestrator {
     return text.substring(0, 200);
   }
 
+  setConversationContextProvider(fn: () => any): void {
+    this.conversationContextProvider = fn;
+  }
+
+  feedForDepthScoring(message: string): void {
+    if (!message || !message.trim()) return;
+    this.depthScoringHistory.push(message.trim());
+    if (this.depthScoringHistory.length > 50) {
+      this.depthScoringHistory = this.depthScoringHistory.slice(-50);
+    }
+    try {
+      this.conversationContextProvider?.();
+    } catch {
+      // Best-effort only.
+    }
+  }
+
+  feedInterviewerUtterance(message: string): void {
+    this.feedForDepthScoring(message);
+  }
+
+  getNegotiationTracker(): any {
+    if (!this.negotiationTracker) {
+      this.negotiationTracker = {
+        conversationHistory: [],
+        salaryRange: { min: null, max: null },
+        keyPoints: [],
+        createdAt: new Date().toISOString(),
+      };
+    }
+    return this.negotiationTracker;
+  }
+
+  resetNegotiationSession(): void {
+    this.negotiationTracker = null;
+    this.negotiationScript = null;
+  }
+
   /**
    * Get current profile status
    */
@@ -255,21 +295,6 @@ export class KnowledgeOrchestrator {
    */
   setCoverLetter(letter: string): void {
     this.coverLetter = letter;
-  }
-
-  /**
-   * Get negotiation tracker
-   */
-  getNegotiationTracker(): any {
-    if (!this.negotiationTracker) {
-      this.negotiationTracker = {
-        conversationHistory: [],
-        salaryRange: { min: null, max: null },
-        keyPoints: [],
-        createdAt: new Date().toISOString(),
-      };
-    }
-    return this.negotiationTracker;
   }
 
   /**

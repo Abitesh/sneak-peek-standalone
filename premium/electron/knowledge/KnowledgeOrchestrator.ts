@@ -36,6 +36,7 @@ export class KnowledgeOrchestrator {
   private embedQueryFn: ((text: string) => Promise<{embedding: number[], space: any} | null>) | null = null;
   private fastQueryEmbedFn: (() => any) | null = null;
   private conversationContextProvider: (() => any) | null = null;
+  private depthScoringHistory: string[] = [];
 
   constructor(db: DatabaseManager) {
     this.db = db;
@@ -103,6 +104,45 @@ export class KnowledgeOrchestrator {
    */
   setConversationContextProvider(fn: () => any): void {
     this.conversationContextProvider = fn;
+  }
+
+  /**
+   * Compatibility hook used by the live chat pipeline. It keeps receiving the
+   * user's question so the depth scorer and any context provider can observe it
+   * without requiring the full premium profile pipeline to be active.
+   */
+  feedForDepthScoring(message: string): void {
+    if (!message || !message.trim()) return;
+    this.depthScoringHistory.push(message.trim());
+    if (this.depthScoringHistory.length > 50) {
+      this.depthScoringHistory = this.depthScoringHistory.slice(-50);
+    }
+    try {
+      this.conversationContextProvider?.();
+    } catch {
+      // Best-effort only; a context provider failure must never break the answer.
+    }
+  }
+
+  feedInterviewerUtterance(message: string): void {
+    this.feedForDepthScoring(message);
+  }
+
+  getNegotiationTracker(): any {
+    if (!this.negotiationTracker) {
+      this.negotiationTracker = {
+        conversationHistory: [],
+        salaryRange: { min: null, max: null },
+        keyPoints: [],
+        createdAt: new Date().toISOString(),
+      };
+    }
+    return this.negotiationTracker;
+  }
+
+  resetNegotiationSession(): void {
+    this.negotiationTracker = null;
+    this.negotiationScript = null;
   }
 
   /**

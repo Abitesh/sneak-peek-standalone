@@ -5156,6 +5156,7 @@ let isMultimodal = !!(imagePaths?.length);
     // PRIORITIZE USER'S SELECTED PROVIDER
     // Ensure the model the user selected handles the request first
     // before falling back to others.
+    // The user's explicit provider selection is ALWAYS respected.
     // ============================================================
     const currentFamilyLabel = this.currentModelId === 'natively' ? 'Natively'
       : this.isClaudeModel(this.currentModelId) ? 'Claude'
@@ -5173,15 +5174,8 @@ let isMultimodal = !!(imagePaths?.length);
       });
     }
 
-    // Natively is always first when configured, regardless of which model is selected.
-    // The sort above may have displaced it — restore it to position 0.
-    if (this.hasNatively() && providers[0]?.name !== 'Natively API') {
-      const idx = providers.findIndex(p => p.name === 'Natively API');
-      if (idx > 0) {
-        const [entry] = providers.splice(idx, 1);
-        providers.unshift(entry);
-      }
-    }
+    // REMOVED: Legacy code that forcibly reordered Natively to position 0,
+    // overriding user's explicit provider selection. User's choice is now respected.
 
     // ============================================================
     // RELENTLESS RETRY: Try all providers, then retry entire chain

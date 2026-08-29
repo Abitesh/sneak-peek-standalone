@@ -17,10 +17,16 @@ type PersonalFile = {
     chunkCount: number;
 };
 
-const formatBytes = (bytes: number) => {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+const normalizeSizeBytes = (value: number | string | undefined | null): number => {
+    const parsed = Number(value ?? 0);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+};
+
+const formatBytes = (bytes: number | string | undefined | null) => {
+    const safeBytes = normalizeSizeBytes(bytes);
+    if (safeBytes < 1024) return `${safeBytes} B`;
+    if (safeBytes < 1024 * 1024) return `${(safeBytes / 1024).toFixed(1)} KB`;
+    return `${(safeBytes / 1024 / 1024).toFixed(1)} MB`;
 };
 
 export function MyFilesPanel() {
@@ -33,8 +39,13 @@ export function MyFilesPanel() {
         setLoading(true);
         try {
             const result = await window.electronAPI?.personalFilesList?.();
-            if (result?.success) setFiles(result.files ?? []);
-            else setError(result?.error ?? 'Could not load My Files.');
+            if (result?.success) {
+                setFiles((result.files ?? []).map((file: any) => ({
+                    ...file,
+                    sizeBytes: normalizeSizeBytes(file?.sizeBytes ?? file?.size_bytes),
+                    chunkCount: Number.isFinite(Number(file?.chunkCount ?? file?.chunk_count)) ? Number(file?.chunkCount ?? file?.chunk_count) : 0,
+                })));
+            } else setError(result?.error ?? 'Could not load My Files.');
         } catch (e: any) {
             setError(e?.message ?? 'Could not load My Files.');
         } finally {
