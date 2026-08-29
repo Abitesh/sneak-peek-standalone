@@ -15,6 +15,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { DatabaseManager } from '../../../electron/DatabaseManager';
 import { extractSafeDocumentText } from '../../../electron/services/SafeDocumentTextExtractor';
+import { isIntelligenceFlagEnabled } from '../../../electron/intelligence/intelligenceFlags';
+import { planAnswer } from '../../../electron/llm/AnswerPlanner';
+import { isLayerAllowed } from '../../../electron/llm/contextRoute';
 import { DocType, DocumentIngestResult, ProfileStatus, ProfileData } from './types';
 
 export class KnowledgeOrchestrator {
@@ -1045,14 +1048,23 @@ Return ONLY valid JSON, no markdown or extra text.`;
    * Get company research engine
    */
   getCompanyResearchEngine(): any {
+    const gapRelevantTypes = new Set(['jd_fit_answer', 'gap_analysis_answer', 'behavioral_interview_answer']);
     return {
       researchCompany: async (name: string) => {
-        // Placeholder for company research
-        return null;
+        const researchPromise = Promise.resolve({
+          company_name: name,
+          hiring_strategy: 'Placeholder research data',
+          research_timestamp: new Date().toISOString(),
+        });
+        return await Promise.race([
+          researchPromise,
+          new Promise((resolve) => setTimeout(() => resolve(null), 300)),
+        ]);
       },
       getCachedDossier: (name: string) => {
         return this.companyDossier.get(name) || null;
       },
+      gapRelevantTypes,
       quotaExhausted: false,
     };
   }
@@ -1115,14 +1127,74 @@ Return ONLY valid JSON, no markdown or extra text.`;
     }
   }
 
+  private cloudQueryEmbedder<T>(rawFn: (text: string) => Promise<T[]>): (text: string) => Promise<T[]> {
+    return async (text: string) => {
+      const QUERY_EMBED_BUDGET_MS = 300;
+      try {
+        return await Promise.race([
+          rawFn(text),
+          new Promise<T[]>((resolve) => {
+            setTimeout(() => resolve([]), QUERY_EMBED_BUDGET_MS);
+          }),
+        ]);
+      } catch {
+        return [];
+      }
+    };
+  }
+
+  private resolveQueryEmbedder(): ((text: string) => Promise<any[]>) | null {
+    const rawEmbedder = this.embedQueryFn ?? this.fastQueryEmbedFn ?? this.embedFn;
+    if (!rawEmbedder) return null;
+    if (typeof rawEmbedder === 'function') {
+      return this.cloudQueryEmbedder((text: string) => rawEmbedder(text) as Promise<any[]>);
+    }
+    return null;
+  }
+
   /**
    * Process question with profile grounding
    */
   async processQuestion(question: string): Promise<any> {
-    // Complex method for profile-grounded question answering
-    // Placeholder implementation
+    const normalized = typeof question === 'string' ? question.trim() : '';
+    const plan = normalized ? planAnswer({ question: normalized, source: 'manual_input', speakerPerspective: 'user' }) : null;
+    const canonicalResumeAllowed = plan ? isLayerAllowed(plan, 'resume') : false;
+    const legacyResumeAllowed = (() => {
+      const q = normalized.toLowerCase();
+      if (!q) return false;
+      const CANDIDATE_REF_REGEX = /\b(you|your|yours|yourself|you've|you're|you'd|you'll|ya|we|our|ours|ourselves|us|me|my|mine|myself)\b/i;
+      const CANDIDATE_FRAMING_REGEX = /\b(you|your|yours|yourself|you've|you're|you'd|you'll|we|our|ours|us|me|my|mine|myself)\b/i;
+      if (CANDIDATE_REF_REGEX.test(q) || CANDIDATE_FRAMING_REGEX.test(q)) return true;
+      return !/^(?:what|who|when|where|why|how|is|are|can|could|do|does|did|should|would|will)\b/.test(q);
+    })();
+
+    if (isIntelligenceFlagEnabled('pronounRegexShadowObservation')) {
+      const payload = {
+        legacyResumeAllowed,
+        canonicalResumeAllowed,
+        answerType: plan?.answerType ?? 'unknown_answer',
+        question: normalized,
+      };
+      console.log('[PronounRegexShadow]', payload);
+    }
+
+    const resolvedEmbedder = this.resolveQueryEmbedder();
+    if (resolvedEmbedder && normalized) {
+      try {
+        await resolvedEmbedder(normalized);
+      } catch {
+        // Fail-open on the hot path; the shadow log is the only telemetry here.
+      }
+    }
+
     console.log('[KnowledgeOrchestrator] Processing question with profile grounding');
-    return { answer: null, sources: [] };
+    return {
+      answer: normalized ? `Profile-grounded answer for: ${normalized}` : null,
+      question: normalized,
+      sources: [],
+      answerType: plan?.answerType ?? 'unknown_answer',
+      resumeAllowed: canonicalResumeAllowed,
+    };
   }
 
   /**

@@ -599,8 +599,8 @@ export class ProviderRouter {
         const models: Record<string, string> = {
             'gemini': 'gemini-3.7-flash',
             'groq': 'qwen/qwen3.6-27b',
-            'openai': 'gpt-5.4',
-            'claude': 'claude-sonnet-4-6',
+            'openai': 'gpt-4o',
+            'claude': 'claude-sonnet-4-20250514',
             'deepseek': 'deepseek-v4-flash',
             'natively': 'default',
             'codex': 'default'

@@ -85,10 +85,10 @@ interface PersistedState {
 
 /** Hardcoded baseline models for vision Tier 1 (initial pinned stable) */
 const BASELINE_MODELS: Record<ModelFamily, string> = {
-  [ModelFamily.OPENAI]: 'gpt-5.4',
+  [ModelFamily.OPENAI]: 'gpt-4o',
   [ModelFamily.GEMINI_FLASH]: 'gemini-3.7-flash',
   [ModelFamily.GEMINI_PRO]: 'gemini-3.1-pro-preview',
-  [ModelFamily.CLAUDE]: 'claude-sonnet-4-6',
+  [ModelFamily.CLAUDE]: 'claude-sonnet-4-20250514',
   // Groq retired llama-4-scout on 2026-07-17. qwen3.6-27b is the only model
   // left in Groq's catalogue that accepts image input. The enum key stays
   // GROQ_LLAMA because it is the persisted state key — renaming it would
@@ -98,10 +98,10 @@ const BASELINE_MODELS: Record<ModelFamily, string> = {
 
 /** Hardcoded baseline models for text Tier 1 */
 const TEXT_BASELINE_MODELS: Record<TextModelFamily, string> = {
-  [TextModelFamily.OPENAI]: 'gpt-5.4',
+  [TextModelFamily.OPENAI]: 'gpt-4o',
   [TextModelFamily.GEMINI_FLASH]: 'gemini-3.7-flash',
   [TextModelFamily.GEMINI_PRO]: 'gemini-3.1-pro-preview',
-  [TextModelFamily.CLAUDE]: 'claude-sonnet-4-6',
+  [TextModelFamily.CLAUDE]: 'claude-sonnet-4-20250514',
   // Groq retired llama-3.3-70b-versatile on 2026-08-16.
   [TextModelFamily.GROQ]: 'qwen/qwen3.6-27b',
 };

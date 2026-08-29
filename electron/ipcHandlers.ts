@@ -273,8 +273,8 @@ export function initializeIpcHandlers(appState: AppState): void {
       // installed as the fallback.
       const next = modelAvailable('natively') ? 'natively'
         : modelAvailable('gemini-3.7-flash') ? 'gemini-3.7-flash'
-        : modelAvailable('gpt-5.4') ? 'gpt-5.4'
-        : modelAvailable('claude-sonnet-4-6') ? 'claude-sonnet-4-6'
+        : modelAvailable('gpt-4o') ? 'gpt-4o'
+        : modelAvailable('claude-sonnet-4-20250514') ? 'claude-sonnet-4-20250514'
         : modelAvailable('qwen/qwen3.6-27b') ? 'qwen/qwen3.6-27b'
         : modelAvailable('deepseek-v4-flash') ? 'deepseek-v4-flash'
         : (codexConfig.enabled === true && codexSignedIn && modelAvailable('codex-cli')) ? 'codex-cli'
@@ -9117,9 +9117,9 @@ export function initializeIpcHandlers(appState: AppState): void {
           }
           if (lastGroqError) throw lastGroqError;
         } else if (provider === 'openai') {
-          // FIXED: Test with gpt-5.4 (the actual model configured in the app),
-          // not gpt-4o-mini. Fallback to gpt-4o if gpt-5.4 fails with model-not-found.
-          const candidates = ['gpt-5.4', 'gpt-4o'];
+          // Test with gpt-4o (the current model configured in the app).
+          // Fallback to gpt-4o-mini if the first one is unavailable.
+          const candidates = ['gpt-4o', 'gpt-4o-mini'];
           let lastOpenaiError: any = null;
           for (const model of candidates) {
             try {
@@ -9136,7 +9136,7 @@ export function initializeIpcHandlers(appState: AppState): void {
                 },
               );
               if (model !== candidates[0]) {
-                console.warn(`[IPC] OpenAI test: ${candidates[0]} not found; using ${model}`);
+                console.warn(`[IPC] OpenAI test: ${candidates[0]} not available; verified with ${model}`);
               }
               lastOpenaiError = null;
               break;
@@ -9154,23 +9154,45 @@ export function initializeIpcHandlers(appState: AppState): void {
           }
           if (lastOpenaiError) throw lastOpenaiError;
         } else if (provider === 'claude') {
-          // Test with claude-sonnet-4-6 (the model configured in the app)
-          response = await axios.post(
-            'https://api.anthropic.com/v1/messages',
-            {
-              model: 'claude-sonnet-4-6',
-              max_tokens: 10,
-              messages: [{ role: 'user', content: 'Hello' }],
-            },
-            {
-              headers: {
-                'x-api-key': apiKey,
-                'anthropic-version': '2023-06-01',
-                'content-type': 'application/json',
-              },
-              timeout: 15000,
-            },
-          );
+          // Test with claude-sonnet-4-20250514 (the current model configured in the app)
+          // Fallback to claude-opus-4-1 if the primary is unavailable
+          const candidates = ['claude-sonnet-4-20250514', 'claude-opus-4-1'];
+          let lastClaudeError: any = null;
+          for (const model of candidates) {
+            try {
+              response = await axios.post(
+                'https://api.anthropic.com/v1/messages',
+                {
+                  model,
+                  max_tokens: 10,
+                  messages: [{ role: 'user', content: 'Hello' }],
+                },
+                {
+                  headers: {
+                    'x-api-key': apiKey,
+                    'anthropic-version': '2023-06-01',
+                    'content-type': 'application/json',
+                  },
+                  timeout: 15000,
+                },
+              );
+              if (model !== candidates[0]) {
+                console.warn(`[IPC] Claude test: ${candidates[0]} not available; verified with ${model}`);
+              }
+              lastClaudeError = null;
+              break;
+            } catch (claudeErr: any) {
+              lastClaudeError = claudeErr;
+              // If it's a model-not-found error, try the next one
+              if (claudeErr?.response?.status === 404 || 
+                  claudeErr?.response?.data?.error?.code === 'model_not_found' ||
+                  claudeErr?.response?.data?.error?.type === 'invalid_request_error') {
+                continue;
+              }
+              break;
+            }
+          }
+          if (lastClaudeError) throw lastClaudeError;
         } else if (provider === 'deepseek') {
           // Test with deepseek-v4-flash (the first model in the app's ladder)
           // Fallback to deepseek-v4-pro if the first one fails
