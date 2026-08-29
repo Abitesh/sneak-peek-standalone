@@ -325,16 +325,20 @@ export function initializeIpcHandlers(appState: AppState): void {
   };
 
   /**
-   * Returns true if the user has an active premium license OR an unexpired free trial.
+   * Returns true if the user has an active application license OR an unexpired free trial.
    * Used to gate profile intelligence features (resume upload, JD upload, company research, etc.).
    */
   const isProOrTrialActive = (): boolean => {
-    // 1. Full premium license (Dodo / Gumroad / Natively API subscription)
+    // 1. Application-owned license (AVIABI-2005-2007-1977 or signed license)
     try {
-      const { LicenseManager } = require('../premium/electron/services/LicenseManager');
-      if (LicenseManager.getInstance().isPremium()) return true;
-    } catch {
-      /* premium module not available */
+      const { AppLicenseService } = require('./services/licensing/AppLicenseService');
+      const license = AppLicenseService.getInstance();
+      if (license.isPremium()) {
+        console.log('[License] Application license is active');
+        return true;
+      }
+    } catch (error) {
+      console.warn('[License] Failed to check application license:', error);
     }
 
     // 2. Active free trial (token present and not expired)
@@ -345,8 +349,13 @@ export function initializeIpcHandlers(appState: AppState): void {
       if (!token) return false;
       const expiresAt = cm.getTrialExpiresAt();
       if (!expiresAt) return false;
-      return new Date(expiresAt).getTime() > Date.now();
-    } catch {
+      const isTrialActive = new Date(expiresAt).getTime() > Date.now();
+      if (isTrialActive) {
+        console.log('[License] Free trial is active');
+      }
+      return isTrialActive;
+    } catch (error) {
+      console.warn('[License] Failed to check trial status:', error);
       return false;
     }
   };
@@ -7049,6 +7058,103 @@ export function initializeIpcHandlers(appState: AppState): void {
     }
   });
 
+  // ── Application License Management ──────────────────────────────────────
+  // Replaces Natively API licensing with application-owned license system
+
+  safeHandle('license:activate', async (_, licenseKey: string) => {
+    try {
+      const { AppLicenseService } = require('./services/licensing/AppLicenseService');
+      const license = AppLicenseService.getInstance();
+
+      if (!licenseKey || typeof licenseKey !== 'string') {
+        return {
+          success: false,
+          error: 'License key is required',
+        };
+      }
+
+      const state = license.activateLicense(licenseKey);
+
+      if (!state.isLicensed) {
+        return {
+          success: false,
+          error: 'Invalid license key',
+        };
+      }
+
+      console.log('[IPC] Application license activated');
+
+      // Broadcast license change to all windows
+      BrowserWindow.getAllWindows().forEach((win) => {
+        if (!win.isDestroyed()) {
+          win.webContents.send('license-status-changed', {
+            isLicensed: true,
+            isPremium: true,
+          });
+        }
+      });
+
+      return {
+        success: true,
+        state,
+      };
+    } catch (error: any) {
+      console.error('[IPC] license:activate failed:', error);
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
+  });
+
+  safeHandle('license:status', async () => {
+    try {
+      const { AppLicenseService } = require('./services/licensing/AppLicenseService');
+      const license = AppLicenseService.getInstance();
+      return {
+        success: true,
+        state: license.getLicenseState(),
+      };
+    } catch (error: any) {
+      console.error('[IPC] license:status failed:', error);
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
+  });
+
+  safeHandle('license:revoke', async () => {
+    try {
+      const { AppLicenseService } = require('./services/licensing/AppLicenseService');
+      const license = AppLicenseService.getInstance();
+      const state = license.revokeLicense();
+
+      console.log('[IPC] Application license revoked');
+
+      // Broadcast license change to all windows
+      BrowserWindow.getAllWindows().forEach((win) => {
+        if (!win.isDestroyed()) {
+          win.webContents.send('license-status-changed', {
+            isLicensed: false,
+            isPremium: false,
+          });
+        }
+      });
+
+      return {
+        success: true,
+        state,
+      };
+    } catch (error: any) {
+      console.error('[IPC] license:revoke failed:', error);
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
+  });
+
   // ── Usage cache (60-second TTL, keyed by API key) ──────────────────────────
   const _usageCache = new Map<string, { data: any; ts: number }>();
   const USAGE_CACHE_TTL_MS = 60_000;
@@ -11148,7 +11254,7 @@ export function initializeIpcHandlers(appState: AppState): void {
       if (!orchestrator) {
         return {
           success: false,
-          error: 'Knowledge engine not initialized. Please ensure API keys are configured.',
+          error: 'Profile Intelligence is not available in this build. The required KnowledgeOrchestrator module is missing.',
         };
       }
       const { DocType } = require('../premium/electron/knowledge/types');
@@ -11241,7 +11347,7 @@ export function initializeIpcHandlers(appState: AppState): void {
     try {
       const orchestrator = appState.getKnowledgeOrchestrator();
       if (!orchestrator) {
-        return { success: false, error: 'Knowledge engine not initialized' };
+        return { success: false, error: 'Profile Intelligence is not available in this build.' };
       }
       orchestrator.setKnowledgeMode(enabled);
 
@@ -11263,7 +11369,7 @@ export function initializeIpcHandlers(appState: AppState): void {
     try {
       const orchestrator = appState.getKnowledgeOrchestrator();
       if (!orchestrator) {
-        return { success: false, error: 'Knowledge engine not initialized' };
+        return { success: false, error: 'Profile Intelligence is not available in this build.' };
       }
       const { DocType } = require('../premium/electron/knowledge/types');
       // Both tiers in ONE transaction. Deleting only Tier 1 here left Tier 2's
@@ -11358,7 +11464,7 @@ export function initializeIpcHandlers(appState: AppState): void {
       if (!orchestrator) {
         return {
           success: false,
-          error: 'Knowledge engine not initialized. Please ensure API keys are configured.',
+          error: 'Profile Intelligence is not available in this build. The required KnowledgeOrchestrator module is missing.',
         };
       }
       const { DocType } = require('../premium/electron/knowledge/types');
@@ -11390,7 +11496,7 @@ export function initializeIpcHandlers(appState: AppState): void {
     try {
       const orchestrator = appState.getKnowledgeOrchestrator();
       if (!orchestrator) {
-        return { success: false, error: 'Knowledge engine not initialized' };
+        return { success: false, error: 'Profile Intelligence is not available in this build.' };
       }
       const { DocType } = require('../premium/electron/knowledge/types');
       // Same cross-tier transaction as profile:delete above — see the comment
@@ -11512,7 +11618,7 @@ export function initializeIpcHandlers(appState: AppState): void {
       }
       const orchestrator = appState.getKnowledgeOrchestrator();
       if (!orchestrator) {
-        return { success: false, error: 'Knowledge engine not initialized' };
+        return { success: false, error: 'Profile Intelligence is not available in this build.' };
       }
       const engine = orchestrator.getCompanyResearchEngine();
 
@@ -11562,7 +11668,7 @@ export function initializeIpcHandlers(appState: AppState): void {
       }
       const orchestrator = appState.getKnowledgeOrchestrator();
       if (!orchestrator) {
-        return { success: false, error: 'Knowledge engine not initialized' };
+        return { success: false, error: 'Profile Intelligence is not available in this build.' };
       }
       const status = orchestrator.getStatus();
       if (!status.hasResume) {
@@ -11600,7 +11706,7 @@ export function initializeIpcHandlers(appState: AppState): void {
       }
       const orchestrator = appState.getKnowledgeOrchestrator();
       if (!orchestrator) {
-        return { success: false, error: 'Knowledge engine not initialized' };
+        return { success: false, error: 'Profile Intelligence is not available in this build.' };
       }
       const status = orchestrator.getStatus();
       if (!status.hasResume) {
@@ -11900,7 +12006,7 @@ export function initializeIpcHandlers(appState: AppState): void {
         return { success: false, error: 'Paste the full job description — this looks too short to analyse.' };
       }
       const orchestrator = appState.getKnowledgeOrchestrator();
-      if (!orchestrator) return { success: false, error: 'Knowledge engine not initialized.' };
+      if (!orchestrator) return { success: false, error: 'Profile Intelligence is not available in this build.' };
 
       const os = require('os');
       const fsp = require('fs/promises');
@@ -11944,7 +12050,7 @@ export function initializeIpcHandlers(appState: AppState): void {
         return { success: false, error: 'Enter a valid job posting URL starting with http:// or https://' };
       }
       const orchestrator = appState.getKnowledgeOrchestrator();
-      if (!orchestrator) return { success: false, error: 'Knowledge engine not initialized.' };
+      if (!orchestrator) return { success: false, error: 'Profile Intelligence is not available in this build.' };
 
       const { resolveCompanySearchProvider } = require('./services/resolveCompanySearchProvider');
       const provider = resolveCompanySearchProvider();

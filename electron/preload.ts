@@ -257,6 +257,30 @@ interface ElectronAPI {
   onTrialEnded: (cb: (data: { choice: string }) => void) => () => void;
   onModesActiveCleared: (cb: () => void) => () => void;
 
+  // ── Application License Management ──────────────────────────────────
+  activateLicense: (
+    key: string,
+  ) => Promise<{ success: boolean; error?: string; state?: any }>;
+  getLicenseStatus: () => Promise<{
+    success: boolean;
+    error?: string;
+    state?: any;
+  }>;
+  revokeLicense: () => Promise<{ success: boolean; error?: string; state?: any }>;
+  // ── Application License Management (replaced old Natively licensing) ──────────────────────────────────
+  activateLicense: (
+    key: string,
+  ) => Promise<{ success: boolean; error?: string; state?: any }>;
+  getLicenseStatus: () => Promise<{
+    success: boolean;
+    error?: string;
+    state?: any;
+  }>;
+  revokeLicense: () => Promise<{ success: boolean; error?: string; state?: any }>;
+  onLicenseStatusChanged: (
+    cb: (data: { isLicensed: boolean; isPremium: boolean }) => void,
+  ) => () => void;
+
   // STT Provider Management
   setSttProvider: (
     provider:
@@ -1538,6 +1562,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('trial-ended', sub);
   },
 
+  // ── Application License Management ──────────────────────────────────
+  activateLicense: (key: string) => ipcRenderer.invoke('license:activate', key),
+  getLicenseStatus: () => ipcRenderer.invoke('license:status'),
+  revokeLicense: () => ipcRenderer.invoke('license:revoke'),
+  onLicenseStatusChanged: (cb: (data: { isLicensed: boolean; isPremium: boolean }) => void) => {
+    const sub = (_: any, data: any) => cb(data);
+    ipcRenderer.on('license-status-changed', sub);
+    return () => ipcRenderer.removeListener('license-status-changed', sub);
+  },
+
   // STT Provider Management
   setSttProvider: (
     provider:
@@ -2579,20 +2613,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setProviderPreferredModel: (provider: 'gemini' | 'groq' | 'openai' | 'claude' | 'deepseek' | 'nvidia_nim' | 'litellm', modelId: string) =>
     ipcRenderer.invoke('set-provider-preferred-model', provider, modelId),
 
-  // License Management
-  licenseActivate: (key: string) => ipcRenderer.invoke('license:activate', key),
-  licenseCheckPremium: () => ipcRenderer.invoke('license:check-premium'),
-  licenseGetDetails: () => ipcRenderer.invoke('license:get-details'),
-  licenseCheckPremiumAsync: () => ipcRenderer.invoke('license:check-premium-async'),
-  licenseDeactivate: () => ipcRenderer.invoke('license:deactivate'),
-  licenseGetHardwareId: () => ipcRenderer.invoke('license:get-hardware-id'),
-  onLicenseStatusChanged: (callback: (data: { isPremium: boolean; plan?: string }) => void) => {
-    const subscription = (_: any, data: { isPremium: boolean; plan?: string }) => callback(data);
-    ipcRenderer.on('license-status-changed', subscription);
-    return () => {
-      ipcRenderer.removeListener('license-status-changed', subscription);
-    };
-  },
+  // Old License Management Removed - Replaced with application-owned AppLicenseService
 
   onModesActiveCleared: (callback: () => void) => {
     const subscription = () => callback();

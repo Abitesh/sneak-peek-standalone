@@ -1293,17 +1293,33 @@ interface ScreenshotCaptureSession {
   wasStealthTypingActive: boolean;
 }
 
-// Premium: Knowledge modules loaded conditionally
+// Knowledge modules loaded conditionally
+// Now using application-owned implementations instead of unavailable premium module
 let KnowledgeOrchestratorClass: any = null;
 let KnowledgeDatabaseManagerClass: any = null;
 // Phase 1: shared comp-evidence detector for transcript-aware intent routing.
 let textHasCompEvidence: ((text: string) => boolean) | null = null;
+
+// Try to load application-owned implementations first
 try {
-    KnowledgeOrchestratorClass = require('../premium/electron/knowledge/KnowledgeOrchestrator').KnowledgeOrchestrator;
-    KnowledgeDatabaseManagerClass = require('../premium/electron/knowledge/KnowledgeDatabaseManager').KnowledgeDatabaseManager;
-    textHasCompEvidence = require('../premium/electron/knowledge/NegotiationConversationTracker').textHasCompEvidence;
+  KnowledgeOrchestratorClass = require('./services/knowledge/KnowledgeOrchestrator').KnowledgeOrchestrator;
+  console.log('[Main] Application-owned KnowledgeOrchestrator loaded successfully');
+} catch (e) {
+  console.error('[Main] Failed to load application-owned KnowledgeOrchestrator:', e);
+}
+
+// Legacy fallback (premium module no longer available)
+try {
+  KnowledgeDatabaseManagerClass = require('../premium/electron/knowledge/KnowledgeDatabaseManager').KnowledgeDatabaseManager;
+} catch (e) {
+  console.log('[Main] Knowledge database manager not available (premium module unavailable)');
+}
+
+// Try to load comp-evidence detector (premium module, not available)
+try {
+  textHasCompEvidence = require('../premium/electron/knowledge/NegotiationConversationTracker').textHasCompEvidence;
 } catch {
-    console.log('[Main] Knowledge modules not available — profile intelligence disabled.');
+  console.log('[Main] Negotiation conversation tracker not available (premium module unavailable)');
 }
 
 import { CredentialsManager } from "./services/CredentialsManager"
@@ -2552,18 +2568,9 @@ export class AppState {
       const db = DatabaseManager.getInstance();
       const sqliteDb = db.getDb();
 
-      if (sqliteDb && KnowledgeDatabaseManagerClass && KnowledgeOrchestratorClass) {
-        const knowledgeDb = new KnowledgeDatabaseManagerClass(sqliteDb);
-        this.knowledgeOrchestrator = new KnowledgeOrchestratorClass(knowledgeDb);
-
-        // Role Insight owns its own tables in the same SQLite file. It needs the
-        // raw handle, which KnowledgeDatabaseManager does not expose, so it is
-        // attached here. Guarded: a failure disables only Role Insight.
-        try {
-          this.knowledgeOrchestrator.attachRoleInsight?.(sqliteDb);
-        } catch (e) {
-          console.warn('[AppState] Role Insight attach skipped:', e);
-        }
+      if (KnowledgeOrchestratorClass) {
+        // Use application-owned KnowledgeOrchestrator (wraps DatabaseManager directly)
+        this.knowledgeOrchestrator = new KnowledgeOrchestratorClass(db);
 
         // Wire up LLM functions
         const llmHelper = this.processingHelper.getLLMHelper();
