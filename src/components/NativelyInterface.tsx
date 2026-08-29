@@ -6261,9 +6261,13 @@ Instructions:
 2. Provide a direct, helpful answer.
 3. Be concise.`;
           } else {
-            const ragResult = await window.electronAPI.ragQueryLive?.(question);
-            if (ragResult?.success) {
-              return;
+            // Only try meeting RAG if a meeting is currently active
+            const isMeetingActive = await window.electronAPI.getMeetingActive();
+            if (isMeetingActive) {
+              const ragResult = await window.electronAPI.ragQueryLive?.(question);
+              if (ragResult?.success) {
+                return;
+              }
             }
 
             prompt = `You are a real-time interview assistant. The user just repeated or paraphrased a question from their interviewer.
@@ -6447,12 +6451,15 @@ Provide only the answer, nothing else.`;
     pinAnswerPanel();
 
     try {
-      // JIT RAG pre-flight: try to use indexed meeting context first
+      // JIT RAG pre-flight: only try indexed meeting context if a meeting is active
       if (currentAttachments.length === 0) {
-        const ragResult = await window.electronAPI.ragQueryLive?.(userText || '');
-        if (ragResult?.success) {
-          // JIT RAG handled it — response streamed via rag:stream-chunk events
-          return;
+        const isMeetingActive = await window.electronAPI.getMeetingActive();
+        if (isMeetingActive) {
+          const ragResult = await window.electronAPI.ragQueryLive?.(userText || '');
+          if (ragResult?.success) {
+            // JIT RAG handled it — response streamed via rag:stream-chunk events
+            return;
+          }
         }
       }
 
