@@ -316,16 +316,19 @@ export class HindsightManager {
   }
 
   /**
-   * Did the user opt into auto-starting the companion server? Hotfix 2026-07-09:
-   * default OFF. Zero-config default-on spawned heavy dev/source sidecars and made
-   * crash recovery fragile; users can still enable it explicitly in settings/env.
+   * Did the user opt into auto-starting the companion server?
+   *
+   * Default is ON when unset so the runtime and Settings UI stay aligned. This keeps
+   * the user-provisioned Hindsight sidecar auto-spawning on first launch without forcing
+   * a persisted opt-in. An explicit `false` still disables it.
    */
   private isAutoStartEnabled(): boolean {
     try {
       const s = this.settings();
-      return (s?.get('hindsightAutoStart') as boolean | undefined) ?? false;
+      const value = s?.get('hindsightAutoStart') as boolean | undefined;
+      return value !== false;
     } catch {
-      return false;
+      return true;
     }
   }
 
@@ -439,19 +442,20 @@ export class HindsightManager {
       const explicit = (process.env.HINDSIGHT_SERVER_COMMAND
         || (s?.get('hindsightServerCommand') as string | undefined)
         || '').trim();
-      // Default OFF for stability: auto-starting a heavy local Python/Postgres
-      // sidecar should be an explicit opt-in. An explicit launch command counts
-      // as opt-in unless the user explicitly disabled auto-start.
+      // Default ON when unset so the Settings UI and manager stay aligned. The only
+      // explicit opt-out is `false`; a UI or env-defined command still qualifies as opt-in
+      // even if the setting has never been touched.
       const autoStartSetting = s?.get('hindsightAutoStart') as boolean | undefined;
       if (autoStartSetting === false) return null;
-      if (autoStartSetting !== true && !explicit) return null;
+      if (explicit) return explicit;
+
       // CLOUD GUARD — Hindsight Cloud is user-managed (lives at a remote URL). We never try
       // to `bash scripts/...` against a remote URL — that would launch a local Python server
       // and ignore the configured Cloud target. The user is responsible for the Cloud
       // endpoint being healthy; the app only health-checks it.
       const cfg = this.getHindsightConfig();
       if (cfg && !isLocalTarget(cfg.baseUrl)) return null;
-      if (explicit) return explicit;
+
       // Zero-config fallback: run the bundled launcher IFF it exists on disk. Quote the path
       // (it's absolute and may contain spaces, e.g. "/Users/.../Application Support/...").
       const script = this.locateLauncherScript();
@@ -526,6 +530,10 @@ export class HindsightManager {
       this.reapPreviousManagedServer();
       const cfg = this.getHindsightConfig();
       if (!cfg) return;                 // no baseUrl → feature off, stay Noop
+      if (!this.isAutoStartEnabled()) {
+        console.log('[HindsightManager] start skipped: auto-start disabled by settings.');
+        return;
+      }
       // SELF-HEALING AUTO-FLIP — `hindsightMemory` is default-OFF in the flag registry
       // (electron/intelligence/intelligenceFlags.ts:142), so a user with a baseUrl
       // configured + autoStart ON + the companion installed would still hit the
