@@ -69,6 +69,14 @@ describe('HindsightManager.getHindsightConfig', () => {
     assert.equal(cfg.apiKey, undefined);
   });
 
+  test('auto-start defaults to enabled when the setting is unset', () => {
+    const mgr = HindsightManager.getInstance();
+    const settings = mgr['settings']?.();
+    if (settings) settings.set('hindsightAutoStart', undefined);
+    assert.equal(mgr.isAutoStartEnabled(), true);
+    assert.ok(mgr['autoStartCommand'](), 'expected a default launch command when auto-start is unset');
+  });
+
   test('returns null when hindsightExplicitlyDisabled is set (user opted out)', () => {
     // The compiled HindsightManager bundle has its OWN bundled SettingsManager singleton
     // (esbuild inline), distinct from any ESM-imported one. Writing to the external
@@ -244,9 +252,8 @@ describe('HindsightManager.healthCheck + isAvailable', () => {
   });
 });
 
-// autoStartCommand() — explicit opt-in launcher resolution. Hotfix 2026-07-09
-// makes zero-config auto-start default OFF; explicit HINDSIGHT_SERVER_COMMAND or
-// hindsightAutoStart=true can still enable local sidecar spawning.
+// autoStartCommand() — default-ON when unset so the Settings UI and runtime remain in sync.
+// A custom launch command or explicit false still override the default.
 describe('HindsightManager.autoStartCommand (zero-config default)', () => {
   const COMMAND_ENV = 'HINDSIGHT_SERVER_COMMAND';
   let savedCwd;
@@ -259,8 +266,9 @@ describe('HindsightManager.autoStartCommand (zero-config default)', () => {
     assert.equal(cmd, 'my-custom-launcher --foo');
   });
 
-  test('default local launcher stays off until autoStart is explicitly enabled', async () => {
-    assert.equal(HindsightManager.getInstance().autoStartCommand(), null);
+  test('default local launcher resolves when the setting is unset', async () => {
+    const cmd = HindsightManager.getInstance().autoStartCommand();
+    assert.ok(cmd, 'expected the bundled launcher to be used when autoStart is unset');
   });
 
   test('locateLauncherScript returns null + no default when the script is absent (packaged-build degrade)', async () => {
@@ -300,26 +308,14 @@ describe('HindsightManager.augmentPath (Finder-launch PATH caveat)', () => {
   });
 });
 
-// SELF-HEALING AUTO-FLIP — the bug that was structurally dead before fix #1. When the
-// user has a baseUrl configured + autoStart ON, start() must idempotently flip the
-// `hindsightMemory` intelligence flag ON (the registry default is OFF, so without this
-// flip the spawn never happens).
-//
-// We deliberately DO NOT mock child_process.spawn — these tests only verify the
-// auto-flip helpers, not the spawn outcome.
-//
-// Test strategy: the compiled HindsightManager.js bundle inlines intelligenceFlags.js,
-// so we can't intercept the registry's setIntelligenceFlag via require.cache. Instead
-// we unit-test the two PRIVATE helpers we added in fix #1 — `isAutoStartEnabled()` and
-// the flag-flip guard logic — by exercising them directly. The full start() path is
-// covered by the existing pre-fix tests (the OFF path stays Noop) plus production
-// runtime verification (the auto-enable log line + persisted settings flip).
+// SELF-HEALING AUTO-FLIP — when the user has a baseUrl configured and the setting is
+// unset, start() must be able to enable the session-local memory gate without requiring
+// a persisted override. This keeps the default behavior derived from the Settings UI
+// contract: an unset setting equals enabled.
 describe('HindsightManager.start() self-healing auto-flip (unit)', () => {
-  // isAutoStartEnabled now defaults OFF. Local sidecar startup must be explicit
-  // to avoid spawning heavy Python/Postgres trees on every dev/source launch.
-  test('isAutoStartEnabled() defaults false unless explicitly enabled', () => {
-    assert.equal(HindsightManager.getInstance().isAutoStartEnabled(), false,
-      'autoStart defaults to false for stability');
+  test('isAutoStartEnabled() defaults true when unset', () => {
+    assert.equal(HindsightManager.getInstance().isAutoStartEnabled(), true,
+      'autoStart defaults to true when unset');
   });
 
   test('start() with NO baseUrl exits at the getHindsightConfig guard (no flip, no spawn)', async () => {
@@ -330,22 +326,24 @@ describe('HindsightManager.start() self-healing auto-flip (unit)', () => {
     await assert.doesNotReject(() => HindsightManager.getInstance().start());
   });
 
-  test('start() with baseUrl but UNREACHABLE server and flag already ON stays Noop unless autoStart is explicit', async () => {
+  test('start() with baseUrl but UNREACHABLE server and flag already ON stays Noop when autoStart is explicitly disabled', async () => {
     process.env.HINDSIGHT_BASE_URL = 'http://127.0.0.1:59999';
     process.env.NATIVELY_HINDSIGHT_MEMORY = '1'; // flag ON
     const logs = [];
     const orig = console.log;
     console.log = (...a) => logs.push(a.join(' '));
     try {
-      await HindsightManager.getInstance().start();
+      const mgr = HindsightManager.getInstance();
+      if (mgr['settings']?.()) mgr['settings']().set('hindsightAutoStart', false);
+      await mgr.start();
       const flipLogs = logs.filter((m) => m.includes('session-enabling hindsightMemory'));
-      assert.equal(flipLogs.length, 0, 'flag already ON → no session auto-enable log expected');
-      const noopLogs = logs.filter((m) => m.includes('staying Noop until a server appears'));
-      assert.equal(noopLogs.length, 1,
-        'flag ON alone is not enough — autoStart must be explicitly enabled');
+      assert.equal(flipLogs.length, 0, 'explicit disable blocks the session auto-enable');
+      const serverLogs = logs.filter((m) => m.includes('server not detected') || m.includes('auto-starting'));
+      assert.equal(serverLogs.length, 0, 'explicit disable should return before any spawn attempt');
     } finally {
       console.log = orig;
       delete process.env.NATIVELY_HINDSIGHT_MEMORY;
+      if (HindsightManager.getInstance()['settings']?.()) HindsightManager.getInstance()['settings']().set('hindsightAutoStart', undefined);
     }
   });
 });

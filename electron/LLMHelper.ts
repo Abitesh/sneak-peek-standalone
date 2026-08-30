@@ -4991,6 +4991,19 @@ let isMultimodal = !!(imagePaths?.length);
       }
     }
 
+    // Ollama is a provider in its own right, not merely a manually selected
+    // mode. A stale cloud default must not make a healthy local model
+    // unreachable when every cloud attempt fails or has no credentials.
+    if (!isMultimodal && !this.useOllama) {
+      const localModel = (await this.getOllamaModels())[0];
+      if (localModel && !this.isProviderDisabled('ollama')) {
+        providers.push({
+          name: `Ollama (${localModel})`,
+          execute: () => this.streamWithOllama(message, undefined, this.resolveLocalSystemPrompt(geminiSystemForCache ?? TINY_SYSTEM_PROMPT), undefined, abortSignal, localModel),
+        });
+      }
+    }
+
     if (providers.length === 0) {
       if (isMultimodal && imagePaths && this.deepseekClient) {
         yield "DeepSeek is configured for text-only requests. Add a vision-capable provider like Gemini, OpenAI, Claude, Groq, or Natively to analyze images.";
@@ -7185,7 +7198,37 @@ let isMultimodal = !!(imagePaths?.length);
       }
     }
 
-    // Last-resort: configured-but-not-selected Custom provider (e.g. OpenRouter
+    // A saved cloud model can be stale or its credentials can be invalid. Probe
+    // Ollama independently and use the discovered model directly; do not make
+    // the cloud selection authoritative and do not require a prior local switch.
+    if (!isMultimodal && !this.isProviderDisabled('ollama')) {
+      const localModel = (await this.getOllamaModels())[0];
+      if (localModel) {
+        try {
+          yield* this.trackCommit(
+            this.streamWithOllama(
+              contextOsGoverningBlock ? userContent : message,
+              contextOsGoverningBlock ? undefined : combinedContext || undefined,
+              this.resolveLocalSystemPrompt(finalSystemPrompt),
+              undefined,
+              abortSignal,
+              localModel,
+            ),
+            commit,
+          );
+          return;
+        } catch (e: any) {
+          if (commit.emitted) {
+            yield LLMHelper.TRUNCATION_SENTINEL;
+            return;
+          }
+          this.recordProviderFailure(`Ollama (${localModel})`, e?.message || String(e));
+          console.warn('[LLMHelper] Ollama fallback failed:', e?.message || e);
+        }
+      }
+    }
+
+    // 5. Last-resort: configured-but-not-selected Custom provider (e.g. OpenRouter
     // via cURL). This is the path that the user's bug report hits: they have an
     // OpenRouter key configured but selected Gemini as their primary model.
     // `this.customProvider` is null in that scenario (setModel wipes it on a
@@ -8291,8 +8334,18 @@ let isMultimodal = !!(imagePaths?.length);
       if (!response.ok) return [];
 
       const data = await response.json();
-      if (data && data.models) {
-        return data.models.map((m: any) => m.name);
+      if (data && Array.isArray(data.models)) {
+        return data.models
+          .filter((model: any) => {
+            const capabilities = Array.isArray(model?.capabilities) ? model.capabilities : null;
+            if (capabilities) return capabilities.includes('completion') || capabilities.includes('chat');
+            // Older Ollama versions omit capabilities from /api/tags. Keep
+            // embedding-only models out of the chat selector by their stable
+            // naming convention; unknown models remain selectable.
+            return !/embed|embedding/i.test(String(model?.name || ''));
+          })
+          .map((model: any) => model.name)
+          .filter((name: any): name is string => typeof name === 'string' && name.trim().length > 0);
       }
 
       return [];
