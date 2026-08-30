@@ -46,6 +46,8 @@ interface ProviderCardProps {
     keyPlaceholder: string;
     keyUrl: string;
     onPreferredModelChange?: (modelId: string) => void;
+    /** Called after models are successfully fetched to reload parent state */
+    onModelsRefreshed?: () => Promise<void>;
 }
 
 export const ProviderCard: React.FC<ProviderCardProps> = ({
@@ -74,6 +76,7 @@ export const ProviderCard: React.FC<ProviderCardProps> = ({
     keyPlaceholder,
     keyUrl,
     onPreferredModelChange,
+    onModelsRefreshed,
 }) => {
     const t = useT();
     const [isFetching, setIsFetching] = useState(false);
@@ -126,12 +129,14 @@ export const ProviderCard: React.FC<ProviderCardProps> = ({
                     if (!existsInList && !selectedModel && !preferredModel) {
                         const firstModel = result.models[0].id;
                         setSelectedModel(firstModel);
-                        // @ts-ignore
-                        await window.electronAPI?.setProviderPreferredModel(providerId, firstModel);
                         if (onPreferredModelChange) {
                             onPreferredModelChange(firstModel);
                         }
                     }
+                }
+                // Notify parent to reload cloudFetchedModels state
+                if (onModelsRefreshed) {
+                    await onModelsRefreshed();
                 }
             } else {
                 setFetchError(result?.error || 'Failed to fetch models');

@@ -8031,7 +8031,9 @@ export function initializeIpcHandlers(appState: AppState): void {
         }
 
         if (!key) {
-          return { success: false, error: 'No API key available. Please save a key first.' };
+          const { normalizeProviderError } = require('./utils/ProviderErrorNormalizer');
+          const normalizedError = normalizeProviderError(provider, new Error('No API key available'), undefined);
+          return { success: false, error: normalizedError };
         }
 
         const { fetchProviderModels } = require('./utils/modelFetcher');
@@ -8056,9 +8058,9 @@ export function initializeIpcHandlers(appState: AppState): void {
         return { success: true, models };
       } catch (error: any) {
         console.error(`[IPC] Failed to fetch ${provider} models:`, error);
-        const msg =
-          error?.response?.data?.error?.message || error.message || 'Failed to fetch models';
-        return { success: false, error: msg };
+        const { normalizeProviderError } = require('./utils/ProviderErrorNormalizer');
+        const normalizedError = normalizeProviderError(provider, error, undefined);
+        return { success: false, error: normalizedError };
       }
     },
   );

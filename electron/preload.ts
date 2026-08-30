@@ -129,7 +129,6 @@ interface ElectronAPI {
   getDisabledProviders: () => Promise<string[]>;
   setDisabledProviders: (providers: string[]) => Promise<{ success: boolean; error?: string }>;
   setCloudEnabledModels: (provider: string, models: string[]) => Promise<{ success: boolean; error?: string }>;
-  setNativelyApiKey: (apiKey: string) => Promise<{ success: boolean; error?: string }>;
   // ── In-app review / testimonial prompt ─────────────────────────────────
   reviewGetPromptState: () => Promise<{
     ok: boolean;
@@ -161,38 +160,6 @@ interface ElectronAPI {
     can_use_publicly: boolean;
     display_name_publicly: boolean;
   }) => Promise<{ ok: boolean; error?: string; status?: number }>;
-  getNativelyPricing: () => Promise<{
-    ok: boolean;
-    currency?: string;
-    fetchedAt?: string;
-    stale?: boolean;
-    products?: Record<string, {
-      id: string;
-      dodoProductId: string;
-      name: string;
-      amount: number | null;
-      currency: string;
-      formattedPrice: string | null;
-      interval: 'month' | 'year' | 'lifetime';
-      checkoutUrl: string;
-      coupon: { code: string; eligible: boolean; discountPercent: number; reason?: string };
-    }>;
-    error?: string;
-    status?: number;
-  }>;
-  getNativelyUsage: (force?: boolean) => Promise<{
-    ok: boolean;
-    plan?: string;
-    quota?: {
-      transcription: { used: number; limit: number; remaining: number };
-      ai: { used: number; limit: number; remaining: number };
-      search: { used: number; limit: number; remaining: number };
-      resets_at: string;
-    };
-    member_since?: string;
-    error?: string;
-    status?: number;
-  }>;
   getStoredCredentials: () => Promise<{
     hasGeminiKey: boolean;
     hasGroqKey: boolean;
@@ -1509,7 +1476,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getDisabledProviders: () => ipcRenderer.invoke('get-disabled-providers'),
   setDisabledProviders: (providers: string[]) => ipcRenderer.invoke('set-disabled-providers', providers),
   setCloudEnabledModels: (provider: string, models: string[]) => ipcRenderer.invoke('set-cloud-enabled-models', provider, models),
-  setNativelyApiKey: (apiKey: string) => ipcRenderer.invoke('set-natively-api-key', apiKey),
 
   // ── In-app review / testimonial prompt ─────────────────────────────────
   reviewGetPromptState: () => ipcRenderer.invoke('review:get-prompt-state'),
@@ -1527,8 +1493,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     can_use_publicly: boolean;
     display_name_publicly: boolean;
   }) => ipcRenderer.invoke('review:update-testimonial', payload),
-  getNativelyPricing: () => ipcRenderer.invoke('get-natively-pricing'),
-  getNativelyUsage: (force?: boolean) => ipcRenderer.invoke('get-natively-usage', force ? { force: true } : undefined),
   getStoredCredentials: () => ipcRenderer.invoke('get-stored-credentials'),
   // R-10 resolution flow: ambiguous credential stores (names + last-4 only).
   getAmbiguousCredentialStores: () => ipcRenderer.invoke('credentials:get-ambiguous-stores'),

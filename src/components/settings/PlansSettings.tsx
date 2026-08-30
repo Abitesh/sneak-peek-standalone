@@ -1,5 +1,4 @@
 import React from 'react';
-import { NativelyApiSettings } from './NativelyApiSettings';
 
 export interface PlansSettingsProps {
   initialIsPremium?: boolean | null;
@@ -7,23 +6,18 @@ export interface PlansSettingsProps {
 }
 
 /**
- * Compatibility route for the old "Plans & Billing" tab.
- *
- * The paid-plan, license-purchase, subscription, trial, and refund UI has been
- * removed. The route is retained only so an older settings navigation entry
- * cannot produce a blank page; it now contains the Natively API key settings.
+ * The hosted Natively backend has been removed from this build.
+ * The tab remains only as a placeholder for the legacy settings route, and the
+ * app now routes users through the active multi-provider configuration instead.
  */
-export const PlansSettings: React.FC<PlansSettingsProps> = ({
-  initialHasNativelyKey = false,
-}) => (
+export const PlansSettings: React.FC<PlansSettingsProps> = () => (
   <div className="space-y-6 animated fadeIn">
     <header>
-      <h2 className="text-[17px] font-semibold text-text-primary tracking-[-0.015em]">Natively API</h2>
+      <h2 className="text-[17px] font-semibold text-text-primary tracking-[-0.015em]">Plans &amp; Billing</h2>
       <p className="text-[12px] text-text-secondary leading-relaxed mt-1.5">
-        Connect your Natively API key to use Natively services.
+        This build no longer uses the hosted Natively API backend. Configure your supported providers in AI Providers instead.
       </p>
     </header>
-    <NativelyApiSettings initialIsSaved={initialHasNativelyKey} />
   </div>
 );
 

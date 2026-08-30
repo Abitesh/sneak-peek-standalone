@@ -4,10 +4,17 @@
  */
 
 import axios from 'axios';
+import { normalizeProviderError, type NormalizedProviderError } from './ProviderErrorNormalizer';
 
 export interface ProviderModel {
     id: string;
     label: string;
+}
+
+export interface FetchModelsResult {
+    success: boolean;
+    models?: ProviderModel[];
+    error?: NormalizedProviderError;
 }
 
 type Provider = 'gemini' | 'groq' | 'openai' | 'claude' | 'deepseek' | 'nvidia_nim';
@@ -15,26 +22,33 @@ type Provider = 'gemini' | 'groq' | 'openai' | 'claude' | 'deepseek' | 'nvidia_n
 /**
  * Fetch available models from a provider's API.
  * Returns a filtered, sorted array of { id, label } objects.
+ * On error, returns normalized error information.
  */
 export async function fetchProviderModels(
     provider: Provider,
     apiKey: string
 ): Promise<ProviderModel[]> {
-    switch (provider) {
-        case 'openai':
-            return fetchOpenAIModels(apiKey);
-        case 'groq':
-            return fetchGroqModels(apiKey);
-        case 'claude':
-            return fetchAnthropicModels(apiKey);
-        case 'gemini':
-            return fetchGeminiModels(apiKey);
-        case 'deepseek':
-            return fetchDeepSeekModels(apiKey);
-        case 'nvidia_nim':
-            return fetchNvidiaNimModels(apiKey);
-        default:
-            throw new Error(`Unknown provider: ${provider}`);
+    try {
+        switch (provider) {
+            case 'openai':
+                return await fetchOpenAIModels(apiKey);
+            case 'groq':
+                return await fetchGroqModels(apiKey);
+            case 'claude':
+                return await fetchAnthropicModels(apiKey);
+            case 'gemini':
+                return await fetchGeminiModels(apiKey);
+            case 'deepseek':
+                return await fetchDeepSeekModels(apiKey);
+            case 'nvidia_nim':
+                return await fetchNvidiaNimModels(apiKey);
+            default:
+                throw new Error(`Unknown provider: ${provider}`);
+        }
+    } catch (error: any) {
+        // Log the raw error for debugging
+        console.error(`[modelFetcher] Error fetching ${provider} models:`, error?.message);
+        throw error;
     }
 }
 

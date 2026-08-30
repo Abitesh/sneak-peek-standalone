@@ -129,7 +129,6 @@ const SettingsPopup = () => {
                     openai: !!creds.hasOpenaiKey,
                     claude: !!creds.hasClaudeKey,
                     deepseek: !!creds.hasDeepseekKey,
-                    natively: !!creds.hasNativelyKey
                 });
             }
         } catch (e) {
@@ -420,8 +419,8 @@ const SettingsPopup = () => {
                 </div>
 
 
-                {/* Groq (Fast Text) Toggle — enabled with Groq key OR Natively API key */}
-                <div className={`flex items-center justify-between px-2.5 py-1.5 rounded-md transition-colors duration-200 group ${!(hasStoredKey.groq || hasStoredKey.natively) ? 'opacity-50 grayscale cursor-not-allowed' : `${itemHoverClass} ${glassRowClass} cursor-default`}`} title={!(hasStoredKey.groq || hasStoredKey.natively) ? "Requires Groq or Natively API key" : ""}>
+                {/* Groq (Fast Text) Toggle — enabled with a Groq key. */}
+                <div className={`flex items-center justify-between px-2.5 py-1.5 rounded-md transition-colors duration-200 group ${!hasStoredKey.groq ? 'opacity-50 grayscale cursor-not-allowed' : `${itemHoverClass} ${glassRowClass} cursor-default`}`} title={!hasStoredKey.groq ? "Requires Groq key" : ""}>
                     <div className="flex items-center gap-2.5">
                         <Zap
                             className={`w-4 h-4 transition-colors ${useGroqFastText ? 'text-accent-primary' : inactiveIconColorClass}`}
@@ -432,9 +431,9 @@ const SettingsPopup = () => {
                     <PopupToggle
                         checked={useGroqFastText}
                         label="Fast Response"
-                        disabled={!(hasStoredKey.groq || hasStoredKey.natively)}
+                        disabled={!hasStoredKey.groq}
                         onChange={() => {
-                            if (!(hasStoredKey.groq || hasStoredKey.natively)) return;
+                            if (!hasStoredKey.groq) return;
                             setUseGroqFastText(!useGroqFastText);
                         }}
                         onClassName="bg-accent-primary shadow-[0_2px_10px_var(--accent-shadow-20)]"

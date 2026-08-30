@@ -2236,7 +2236,6 @@ export const AIProvidersSettings: React.FC<AIProvidersSettingsProps> = ({
                         deepseek: creds.hasDeepseekKey || false,
                         nvidia_nim: creds.hasNvidiaNimKey || false,
                         litellm: creds.hasLitellmBaseURL || false,
-                        natively: creds.hasNativelyKey || false
                     });
                     setActiveSttProvider((creds as any).sttProvider || 'none');
                     // Prefill stored LiteLLM config so re-saving doesn't silently reset it.
@@ -2379,10 +2378,6 @@ export const AIProvidersSettings: React.FC<AIProvidersSettingsProps> = ({
 
     const buildAvailableModelOptions = (): { id: string; name: string }[] => {
         const opts: { id: string; name: string }[] = [];
-
-        if (hasStoredKey.natively && isProviderEnabled('natively')) {
-            opts.push({ id: 'natively', name: 'Natively API' });
-        }
 
         for (const [prov, cfg] of Object.entries(STANDARD_CLOUD_MODELS)) {
             if (!hasStoredKey[prov as keyof typeof hasStoredKey]) continue;
@@ -2648,7 +2643,7 @@ export const AIProvidersSettings: React.FC<AIProvidersSettingsProps> = ({
         }
     };
 
-    // Effect to enforce fast mode disabled if neither Groq key nor Natively API is configured.
+    // Effect to enforce fast mode disabled if no Groq key is configured.
     // Guard with credentialsLoaded so this never fires during the initial async load phase
     // (when hasStoredKey is still empty and canUseFastMode is incorrectly false).
     useEffect(() => {
@@ -3120,6 +3115,18 @@ export const AIProvidersSettings: React.FC<AIProvidersSettingsProps> = ({
         }
     };
 
+    const handleReloadCloudModels = async () => {
+        try {
+            // @ts-ignore
+            const res = await window.electronAPI?.getCloudFetchedModels?.();
+            if (res?.models) {
+                setCloudFetchedModels(res.models);
+            }
+        } catch (e) {
+            console.error('Failed to reload cloud fetched models:', e);
+        }
+    };
+
     // --- Custom Provider Handlers ---
 
     const handleEditProvider = (provider: CustomProvider) => {
@@ -3355,7 +3362,7 @@ export const AIProvidersSettings: React.FC<AIProvidersSettingsProps> = ({
 
 <div
                     className={`aip-card p-5 flex items-center justify-between gap-4 ${!canUseFastMode ? 'opacity-50 grayscale' : ''}`}
-                    title={!canUseFastMode ? t("Requires Groq, Natively API, or Codex CLI to be configured") : ""}
+                    title={!canUseFastMode ? t("Requires Groq or Codex CLI to be configured") : ""}
                 >
                     <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
@@ -3365,7 +3372,7 @@ export const AIProvidersSettings: React.FC<AIProvidersSettingsProps> = ({
                         </div>
                         <p className="text-[10px] aip-muted mt-0.5">{t('Uses the fastest available provider instead of your selected model.')}</p>
                         {!canUseFastMode && (
-                            <p className="text-xs aip-warn-fg mt-0.5 font-medium">{t('Requires Groq, Natively API, or Codex CLI to be configured.')}</p>
+                            <p className="text-xs aip-warn-fg mt-0.5 font-medium">{t('Requires Groq or Codex CLI to be configured.')}</p>
                         )}
                     </div>
                     {/* aria-disabled, not disabled: the onClick guard below is the
@@ -3378,7 +3385,7 @@ export const AIProvidersSettings: React.FC<AIProvidersSettingsProps> = ({
                         label={t('Fast Response Mode')}
                         onChange={async () => {
                             if (!canUseFastMode) {
-                                alert(t("Please configure Groq, Natively API, or Codex CLI first to enable Fast Response Mode."));
+                                alert(t("Please configure Groq or Codex CLI first to enable Fast Response Mode."));
                                 return;
                             }
                             const newState = !fastResponseMode;
@@ -3496,6 +3503,7 @@ export const AIProvidersSettings: React.FC<AIProvidersSettingsProps> = ({
                                 savingStatus={!!savingStatus[id]}
                                 savedStatus={!!savedStatus[id]}
                                 onPreferredModelChange={(model) => setPreferredModels(prev => ({ ...prev, [id]: model }))}
+                                onModelsRefreshed={handleReloadCloudModels}
                             />
                         );
                     })}
