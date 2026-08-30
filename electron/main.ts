@@ -2390,6 +2390,18 @@ export class AppState {
   // file that landed in 'failed'/'lexical_only' during the embedder warm-up
   // window (the boot-time scheduler only sees files that existed at start).
   public scheduleModeReferenceIndexRetry(): void {
+    // Personal Knowledge ("My Files") extraction-repair is independent of the
+    // embedding pipeline below — it retries files whose text extraction
+    // produced unreadable binary chunks, not embedding readiness. Run it here
+    // anyway: every embedder-readiness signal (boot, Ollama pull, key save)
+    // already converges on this one method, so a previously-failed file gets
+    // the same retry cadence instead of waiting for the user's next search.
+    try {
+      const { getPersonalKnowledgeManager } = require('./personalKnowledge');
+      void getPersonalKnowledgeManager().repairUnreadableIndexes()
+        .catch(() => { /* best-effort; searchRelevantAsync retries lazily too */ });
+    } catch { /* personal knowledge unavailable — mode retry below still runs */ }
+
     if (this.modeReferenceRetryPromise) return;
     const pipeline = this.ragManager?.getEmbeddingPipeline();
     if (!pipeline) return;

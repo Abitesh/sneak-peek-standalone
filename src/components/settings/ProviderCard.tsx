@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useT } from '../../i18n';
 import { Trash2, AlertCircle, ExternalLink, Loader2, Check, KeyRound } from 'lucide-react';
+import type { ProviderHealth } from '../../../electron/llm/providerRegistry';
 // Primitives live in AIProvidersSettings.tsx, not in their own module:
 // SettingsPeriwinklePortalScopeGuard.test.mjs asserts that the *.tsx files on disk in
 // src/components/settings/ EXACTLY equal its GUARDED_FILES list, so adding a file
@@ -31,6 +32,8 @@ interface ProviderCardProps {
     onSetDefaultModel?: (modelId: string) => void;
     /** True once a catalog has been fetched for this provider; gates auto-discovery. */
     hasCatalog?: boolean;
+    /** Real verification state from test-llm-connection — key presence ≠ verified. */
+    health?: ProviderHealth;
     providerName: string;
     apiKey: string;
     preferredModel?: string;
@@ -61,6 +64,7 @@ export const ProviderCard: React.FC<ProviderCardProps> = ({
     modelSaveError,
     onSetDefaultModel,
     hasCatalog,
+    health,
     providerName,
     apiKey,
     preferredModel,
@@ -162,8 +166,17 @@ export const ProviderCard: React.FC<ProviderCardProps> = ({
     // "Off" is the exception and the reason the badge still exists: nothing else
     // states it in words, it persists rather than resolving on its own, and it is the
     // explanation for why the models control vanished from the row below.
-    const statusBadge: { tone: AipTone; label: string; busy?: boolean } | null =
-        (hasStoredKey && isDisabled) ? { tone: 'neutral', label: t('Off') } : null;
+    //
+    // health reflects the last REAL test-llm-connection probe (auth + chat),
+    // persisted across reloads — a stored key alone is never shown as
+    // "Verified". A probe failure is "Disconnected"/"Degraded" with its own
+    // reason, never folded into the "Off" (user-disabled) state above.
+    const statusBadge: { tone: AipTone; label: string; busy?: boolean; title?: string } | null =
+        (hasStoredKey && isDisabled) ? { tone: 'neutral', label: t('Off') }
+        : (hasStoredKey && health?.status === 'verified') ? { tone: 'ok', label: t('Verified') }
+        : (hasStoredKey && health?.status === 'disconnected') ? { tone: 'danger', label: t('Disconnected'), title: health?.lastError?.message }
+        : (hasStoredKey && health?.status === 'degraded') ? { tone: 'warn', label: t('Degraded'), title: health?.lastError?.message }
+        : null;
 
 
     return (
@@ -182,7 +195,7 @@ export const ProviderCard: React.FC<ProviderCardProps> = ({
                     input keeps its aria-label, so nothing is lost to a screen reader. */}
                 <h4 className="aip-card-title truncate min-w-0">{providerName}</h4>
                 {statusBadge && (
-                    <AipBadge tone={statusBadge.tone} label={statusBadge.label} busy={statusBadge.busy} />
+                    <AipBadge tone={statusBadge.tone} label={statusBadge.label} busy={statusBadge.busy} title={statusBadge.title} />
                 )}
 
                 {/* Get Key stays here permanently now that Test has moved back down to
@@ -306,10 +319,12 @@ export const ProviderCard: React.FC<ProviderCardProps> = ({
                 )}
             </div>
 
-            {/* One note line, and only when something is actually wrong. */}
-            {(testError || fetchError) && (
+            {/* One note line, and only when something is actually wrong. Falls back to
+                the last PERSISTED health error so a reload still explains a
+                Disconnected/Degraded badge before the user presses Test again. */}
+            {(testError || fetchError || (!testError && health?.lastError?.message && health.status !== 'verified')) && (
                 <p className="aip-meta aip-danger-fg aip-provider-note">
-                    {testError || `${t('Model fetch error:')} ${fetchError}`}
+                    {testError || (fetchError ? `${t('Model fetch error:')} ${fetchError}` : health?.lastError?.message)}
                 </p>
             )}
         </div>

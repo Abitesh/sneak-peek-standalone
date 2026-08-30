@@ -371,7 +371,24 @@ const QUALITY_PROVIDERS = ['claude', 'openai', 'gemini_pro'];
 const LOCAL_PROVIDERS = ['ollama', 'custom'];
 
 /**
- * ⚠ STATUS (F-306, audit 2026-08-18): NOT WIRED INTO PRODUCTION.
+ * ⚠ STATUS (F-306, audit 2026-08-18; re-affirmed S2, ai-provider-pipeline-fix
+ * sprint 2): NOT WIRED INTO PRODUCTION — left that way ON PURPOSE, again.
+ *
+ * S2 needed "fallback from verified providers, never the same provider
+ * twice, max 3 attempts" for the LIVE streaming path. That cascade was built
+ * directly in `LLMHelper._streamChatInner`
+ * (`buildVerifiedFallbackCandidates` / `attemptProviderFamily`), reading
+ * `CredentialsManager.getAllProviderHealth()` — NOT by wiring this class.
+ * Reasons this class specifically was still not the right vehicle:
+ *   - `selectProvider()` picks by STATIC preference tables
+ *     (VISION_PROVIDERS/LOW_LATENCY_PROVIDERS/modePreferences), not by which
+ *     providers `test-llm-connection` actually verified — wiring it as-is
+ *     would route to a provider with a stored-but-unverified (or dead) key.
+ *   - The known CircuitBreaker bugs below are unchanged and still unvalidated
+ *     against real provider failures.
+ * `routeLLMProviders` (below, the OTHER export from this file) IS wired
+ * (LLMHelper.generateResponse's non-streaming path) and is unaffected by any
+ * of this — it already takes availability/health as caller-supplied input.
  *
  * `ProviderRouter` is constructed once (LLMHelper) and then never used:
  * selectProvider / recordSuccess / recordFailure / getProviderHealth have ZERO

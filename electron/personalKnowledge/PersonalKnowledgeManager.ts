@@ -16,6 +16,9 @@ import crypto from 'crypto';
 import Database from 'better-sqlite3';
 import { extractSafeDocumentText } from '../services/SafeDocumentTextExtractor';
 
+export type PersonalFileType = 'resume' | 'job_description' | 'general';
+const PERSONAL_FILE_TYPES: ReadonlySet<string> = new Set(['resume', 'job_description', 'general']);
+
 export interface PersonalFileRecord {
     id: string;
     fileName: string;
@@ -25,6 +28,18 @@ export interface PersonalFileRecord {
     createdAt: string;
     updatedAt: string;
     chunkCount: number;
+    fileType: PersonalFileType;
+    /**
+     * 'indexing': chunks not yet persisted (ingestFile is transactional, so this
+     * is transient/defensive rather than commonly observed).
+     * 'done': chunked and searchable via FTS5.
+     * 'lexical_only': extraction produced unreadable binary markers (raw PDF/
+     * DOCX bytes) that repairUnreadableIndexes has not yet fixed — searchable,
+     * but only over garbage text until the next repair pass succeeds. There is
+     * no vector-embedding tier for personal files by design (file header); this
+     * status reports the honest quality of the ONE (lexical) index that exists.
+     */
+    indexStatus: 'indexing' | 'done' | 'lexical_only';
 }
 
 export interface PersonalFileSearchResult {
@@ -42,6 +57,14 @@ const MAX_EXTRACTED_CHARS = 1_500_000;
 const CHUNK_TARGET_CHARS = 1800;
 const CHUNK_OVERLAP_CHARS = 250;
 const MAX_RESULTS = 8;
+// Resume / job-description tagging (Problems 33-34): a user-tagged file is
+// almost always relevant to interview/behavioral/technical questions, so it
+// gets a flat retrieval boost rather than gating on a hand-maintained keyword
+// list — tagging IS the relevance signal.
+const TAGGED_FILE_BOOST = 1.25;
+// Shared with repairUnreadableIndexes()/garbledFileIds() so the "this chunk is
+// unreadable binary" definition can't drift between the two call sites.
+const GARBLED_CHUNK_SQL = `pc.text LIKE '%PDF-1.%' OR pc.text LIKE '%PK\\003\\004%'`;
 
 const SUPPORTED_EXTENSIONS = new Set([
     '.txt', '.md', '.markdown', '.csv', '.json', '.xml', '.html', '.htm', '.tsv', '.log', '.toml',
@@ -178,7 +201,8 @@ export class PersonalKnowledgeManager {
                 size_bytes INTEGER NOT NULL DEFAULT 0,
                 content_hash TEXT NOT NULL,
                 created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                file_type TEXT NOT NULL DEFAULT 'general'
             );
 
             CREATE UNIQUE INDEX IF NOT EXISTS idx_personal_files_hash
@@ -214,9 +238,20 @@ export class PersonalKnowledgeManager {
                 DELETE FROM personal_file_chunks_fts WHERE chunk_id = OLD.id;
             END;
         `);
+        this.ensureFileTypeColumn();
     }
 
-    async ingestFile(filePath: string): Promise<PersonalFileRecord> {
+    // Databases created before file-type tagging existed lack this column;
+    // `CREATE TABLE IF NOT EXISTS` above is a no-op against them, and SQLite
+    // has no `ADD COLUMN IF NOT EXISTS`, so check PRAGMA table_info first.
+    private ensureFileTypeColumn(): void {
+        const columns = this.db.prepare(`PRAGMA table_info(personal_files)`).all() as Array<{ name: string }>;
+        if (!columns.some((c) => c.name === 'file_type')) {
+            this.db.exec(`ALTER TABLE personal_files ADD COLUMN file_type TEXT NOT NULL DEFAULT 'general'`);
+        }
+    }
+
+    async ingestFile(filePath: string, fileType: PersonalFileType = 'general'): Promise<PersonalFileRecord> {
         const resolved = path.resolve(filePath);
         const stat = await fs.promises.lstat(resolved);
 
@@ -255,10 +290,11 @@ export class PersonalKnowledgeManager {
         const storedPath = path.join(this.storageRoot, `${id}${ext}`);
         await fs.promises.copyFile(resolved, storedPath);
 
+        const safeFileType: PersonalFileType = PERSONAL_FILE_TYPES.has(fileType) ? fileType : 'general';
         const insertFile = this.db.prepare(`
             INSERT INTO personal_files
-                (id, file_name, file_path, mime_type, size_bytes, content_hash, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (id, file_name, file_path, mime_type, size_bytes, content_hash, created_at, updated_at, file_type)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
         const insertChunk = this.db.prepare(`
             INSERT INTO personal_file_chunks
@@ -276,6 +312,7 @@ export class PersonalKnowledgeManager {
                 contentHash,
                 now,
                 now,
+                safeFileType,
             );
             chunks.forEach((chunk, index) => {
                 insertChunk.run(
@@ -351,7 +388,8 @@ export class PersonalKnowledgeManager {
             ORDER BY pf.updated_at DESC
         `).all() as any[];
 
-        return rows.map(this.mapFile);
+        const garbled = this.garbledFileIds();
+        return rows.map((row) => this.mapFile(row, garbled));
     }
 
     getFile(id: string): PersonalFileRecord | null {
@@ -365,7 +403,39 @@ export class PersonalKnowledgeManager {
             GROUP BY pf.id
         `).get(id) as any;
 
-        return row ? this.mapFile(row) : null;
+        return row ? this.mapFile(row, this.garbledFileIds()) : null;
+    }
+
+    setFileType(id: string, fileType: string): PersonalFileRecord {
+        if (!PERSONAL_FILE_TYPES.has(fileType)) {
+            throw new Error(`Invalid file type "${fileType}". Expected resume, job_description, or general.`);
+        }
+        const result = this.db.prepare(
+            `UPDATE personal_files SET file_type = ?, updated_at = ? WHERE id = ?`
+        ).run(fileType, new Date().toISOString(), id);
+        if (result.changes === 0) throw new Error('File not found.');
+        return this.getFile(id)!;
+    }
+
+    // Ids whose chunks still carry unrepaired binary markers (see
+    // repairUnreadableIndexes). Recomputed per call rather than cached — file
+    // counts here are small (a user's own documents), and staleness would show
+    // a repaired file as still degraded.
+    private garbledFileIds(): Set<string> {
+        const rows = this.db.prepare(`
+            SELECT DISTINCT pf.id
+            FROM personal_files pf
+            WHERE EXISTS (
+                SELECT 1 FROM personal_file_chunks pc
+                WHERE pc.file_id = pf.id AND (${GARBLED_CHUNK_SQL})
+            )
+        `).all() as Array<{ id: string }>;
+        return new Set(rows.map((r) => r.id));
+    }
+
+    private fileTypeMap(): Map<string, PersonalFileType> {
+        const rows = this.db.prepare(`SELECT id, file_type FROM personal_files`).all() as Array<{ id: string; file_type: string }>;
+        return new Map(rows.map((r) => [r.id, (PERSONAL_FILE_TYPES.has(r.file_type) ? r.file_type : 'general') as PersonalFileType]));
     }
 
     deleteFile(id: string): boolean {
@@ -385,6 +455,9 @@ export class PersonalKnowledgeManager {
         const safeLimit = Math.max(1, Math.min(MAX_RESULTS, limit));
         const ftsQuery = makeFtsQuery(q);
         const candidates: PersonalFileSearchResult[] = [];
+        const fileTypes = this.fileTypeMap();
+        const boostFor = (fileId: string): number =>
+            fileTypes.get(fileId) === 'resume' || fileTypes.get(fileId) === 'job_description' ? TAGGED_FILE_BOOST : 1;
 
         if (ftsQuery) {
             try {
@@ -410,8 +483,8 @@ export class PersonalKnowledgeManager {
                         fileName: row.file_name,
                         chunkId: row.chunk_id,
                         text: row.text,
-                        score: 1 / (1 + Math.max(0, Number(row.bm25_score) || 0)) +
-                            lexicalScore(q, row.text) * 0.35,
+                        score: (1 / (1 + Math.max(0, Number(row.bm25_score) || 0)) +
+                            lexicalScore(q, row.text) * 0.35) * boostFor(row.file_id),
                         startChar: row.start_char,
                         endChar: row.end_char,
                     });
@@ -439,7 +512,7 @@ export class PersonalKnowledgeManager {
                     fileName: row.file_name,
                     chunkId: row.id,
                     text: row.text,
-                    score,
+                    score: score * boostFor(row.file_id),
                     startChar: row.start_char,
                     endChar: row.end_char,
                 });
@@ -518,14 +591,17 @@ export class PersonalKnowledgeManager {
         return this.searchRelevant(query, limit);
     }
 
-    private async repairUnreadableIndexes(): Promise<{ repaired: number; errors: number }> {
+    // Public: also invoked from AppState.scheduleModeReferenceIndexRetry (main.ts)
+    // so a file that failed extraction gets retried on the same embedder/key-
+    // ready lifecycle events as mode reference files, not only on next search.
+    async repairUnreadableIndexes(): Promise<{ repaired: number; errors: number }> {
         const result = { repaired: 0, errors: 0 };
         const rows = this.db.prepare(`
             SELECT pf.id, pf.file_path, pf.file_name
             FROM personal_files pf
             WHERE EXISTS (
                 SELECT 1 FROM personal_file_chunks pc
-                WHERE pc.file_id = pf.id AND (pc.text LIKE '%PDF-1.%' OR pc.text LIKE '%PK\\003\\004%')
+                WHERE pc.file_id = pf.id AND (${GARBLED_CHUNK_SQL})
             )
         `).all() as Array<{ id: string; file_path: string; file_name: string }>;
         for (const row of rows) {
@@ -597,7 +673,7 @@ export class PersonalKnowledgeManager {
         ].join('\n');
     }
 
-    private mapFile = (row: any): PersonalFileRecord => ({
+    private mapFile = (row: any, garbled?: Set<string>): PersonalFileRecord => ({
         id: row.id,
         fileName: row.file_name,
         filePath: row.file_path,
@@ -606,6 +682,10 @@ export class PersonalKnowledgeManager {
         createdAt: row.created_at,
         updatedAt: row.updated_at,
         chunkCount: Number(row.chunk_count) || 0,
+        fileType: (PERSONAL_FILE_TYPES.has(row.file_type) ? row.file_type : 'general') as PersonalFileType,
+        indexStatus: Number(row.chunk_count) > 0
+            ? (garbled?.has(row.id) ? 'lexical_only' : 'done')
+            : 'indexing',
     });
 
     private guessMimeType(ext: string): string {

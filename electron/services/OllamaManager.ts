@@ -20,6 +20,31 @@ export interface OllamaEnsureOptions {
 const DEFAULT_OLLAMA_URL = 'http://127.0.0.1:11434';
 const OPTIONAL_MISSING_BACKOFF_MS = 60_000;
 
+/**
+ * Ollama's own daemon reads `OLLAMA_HOST` (see https://docs.ollama.com) to
+ * decide what to bind/serve on — a user who has set it (to point at a remote
+ * host, a non-default port, or a container) expects every OTHER Ollama-aware
+ * tool on the same machine to agree, not just the `ollama` CLI itself. Prior
+ * to this the app only understood its own `OLLAMA_URL` var, so `OLLAMA_HOST`
+ * alone (the documented, cross-platform-supported one) was silently ignored
+ * on both macOS and Windows.
+ *
+ * `OLLAMA_HOST` may be a bare `host:port` (e.g. "0.0.0.0:11434") with no
+ * scheme — Ollama itself accepts that shorthand — so it is normalized here
+ * the same way the daemon does: default to `http://` when no scheme is
+ * present.
+ *
+ * Precedence: OLLAMA_HOST (Ollama's own var) > OLLAMA_URL (this app's
+ * legacy var, kept for anyone who already set it) > hardcoded default.
+ */
+export function resolveDefaultOllamaUrl(env: NodeJS.ProcessEnv = process.env): string {
+  const host = (env.OLLAMA_HOST || '').trim();
+  if (host) return /^[a-z]+:\/\//i.test(host) ? host : `http://${host}`;
+  const legacy = (env.OLLAMA_URL || '').trim();
+  if (legacy) return legacy;
+  return DEFAULT_OLLAMA_URL;
+}
+
 export class OllamaManager {
   private static instance: OllamaManager;
   private ollamaProcess: ChildProcess | null = null;
@@ -69,7 +94,7 @@ export class OllamaManager {
    * Side-effect-free probe. This never spawns `ollama serve`; use ensureRunning()
    * only after the user selects Ollama, enables auto-start, or clicks Start.
    */
-  public async probe(url: string = DEFAULT_OLLAMA_URL): Promise<ProviderStatus> {
+  public async probe(url: string = resolveDefaultOllamaUrl()): Promise<ProviderStatus> {
     const running = await this.checkIsRunning(url);
     if (running) {
       this.isAppManaged = this.ollamaProcess != null;
@@ -135,7 +160,7 @@ export class OllamaManager {
   }
 
   private async runEnsure(options: OllamaEnsureOptions): Promise<ProviderStatus> {
-    const url = options.url || DEFAULT_OLLAMA_URL;
+    const url = options.url || resolveDefaultOllamaUrl();
     console.log('[OllamaManager] Checking Ollama availability...', { reason: options.reason, selectedModel: options.selectedModel || null });
 
     const isRunning = await this.checkIsRunning(url);
@@ -208,7 +233,7 @@ export class OllamaManager {
   /**
    * Ping the local Ollama server to see if it responds.
    */
-  private async checkIsRunning(url: string = DEFAULT_OLLAMA_URL): Promise<boolean> {
+  private async checkIsRunning(url: string = resolveDefaultOllamaUrl()): Promise<boolean> {
     try {
       const base = url.replace('localhost', '127.0.0.1').replace(/\/+$/, '');
       const controller = new AbortController();

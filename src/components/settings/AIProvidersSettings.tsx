@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useT } from '../../i18n';
 import { Plus, Trash2, Edit2, AlertCircle, Save, ChevronDown, Check, RefreshCw, ExternalLink, Loader2, LogOut, Cloud, Server, Eye, Info, MessageSquare, Image, FileText, User, Boxes, ClipboardList, Laptop } from 'lucide-react';
 import { CODEX_CLI_MODEL, CODEX_CLI_MODEL_PRESETS, codexCliSelectorId, isModelAllowed, isOptInModelProvider, litellmModelLabel, STANDARD_CLOUD_MODELS, prettifyModelId } from '../../utils/modelUtils';
+import { filterChatCapable, type ProviderHealth } from '../../../electron/llm/providerRegistry';
 import { validateCurl } from '../../lib/curl-validator';
 import { ProviderCard } from './ProviderCard';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
@@ -2035,6 +2036,10 @@ export const AIProvidersSettings: React.FC<AIProvidersSettingsProps> = ({
     const [hasStoredKey, setHasStoredKey] = useState<Record<string, boolean>>({});
     const [testStatus, setTestStatus] = useState<Record<string, 'idle' | 'testing' | 'success' | 'error'>>({});
     const [testError, setTestError] = useState<Record<string, string>>({});
+    // Real verification state per provider — key presence ≠ verified. Populated
+    // by test-llm-connection (auth + chat probe) and persisted, so a reload
+    // still shows the last known status instead of resetting to "just has a key".
+    const [providerHealth, setProviderHealth] = useState<Record<string, ProviderHealth>>({});
 
     // --- Custom Providers ---
     const [customProviders, setCustomProviders] = useState<CustomProvider[]>([]);
@@ -2057,6 +2062,10 @@ export const AIProvidersSettings: React.FC<AIProvidersSettingsProps> = ({
     const [localFallback, setLocalFallback] = useState<{ text: boolean; vision: boolean }>({ text: false, vision: false });
     const [ollamaStatus, setOllamaStatus] = useState<'checking' | 'detected' | 'not-found' | 'fixing'>('checking');
     const [ollamaRestarted, setOllamaRestarted] = useState(false);
+    // Set by handleFixOllama when Auto-Fix can say something more specific than
+    // the generic "Ollama not detected" copy (not installed vs. selection
+    // required vs. a daemon that started but never became ready).
+    const [ollamaFixMessage, setOllamaFixMessage] = useState('');
     const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm | null>(null);
     const [confirmBusy, setConfirmBusy] = useState(false);
     const [activeTab, setActiveTab] = useState<ProviderTabId>('cloud');
@@ -2260,6 +2269,9 @@ export const AIProvidersSettings: React.FC<AIProvidersSettingsProps> = ({
                     window.electronAPI?.getCloudFetchedModels?.()
                         .then((res: { models?: Record<string, AipModelEntry[]> }) => { if (res?.models) setCloudFetchedModels(res.models); })
                         .catch(() => {});
+                    window.electronAPI?.getProviderHealth?.()
+                        .then((health: Record<string, ProviderHealth>) => { if (health) setProviderHealth(health); })
+                        .catch(() => {});
                     setPreferredModels(pm);
                 }
 
@@ -2376,6 +2388,26 @@ export const AIProvidersSettings: React.FC<AIProvidersSettingsProps> = ({
         return out;
     }, [cloudFetchedModels, cloudEnabledModels, litellmModels]);
 
+    /**
+     * A provider's model source for the DEFAULT-MODEL picker (not the settings
+     * card's own model-management list, which stays on `effectiveModels` so the
+     * user can still manage allow-listing for a not-yet-probed provider).
+     *
+     * Once a probe exists: verified → its live/catalog-verified models; known
+     * broken (disconnected) → nothing, so a bad key can't leave stale preset
+     * models selectable. Before any probe (or a probe that returned no
+     * chat-capable models) → the old preset ∪ catalog behavior, i.e. unverified.
+     */
+    const pickerModelsForProvider = (prov: string): AipModelEntry[] => {
+        const health = providerHealth[prov];
+        if (health?.status === 'disconnected') return [];
+        if (health?.status === 'verified') {
+            const chatCapable = filterChatCapable(health.models);
+            if (chatCapable.length) return chatCapable.map(b => ({ id: b.id, label: b.label }));
+        }
+        return effectiveModels(prov);
+    };
+
     const buildAvailableModelOptions = (): { id: string; name: string }[] => {
         const opts: { id: string; name: string }[] = [];
 
@@ -2387,7 +2419,7 @@ export const AIProvidersSettings: React.FC<AIProvidersSettingsProps> = ({
             // id, which made allow-listing a fetched model a placebo: the user could
             // tick it and it would never appear.
             const seenForProv = new Set<string>();
-            effectiveModels(prov).forEach(({ id, label }) => {
+            pickerModelsForProvider(prov).forEach(({ id, label }) => {
                 if (!isModelEnabled(prov, id) || seenForProv.has(id)) return;
                 seenForProv.add(id);
                 opts.push({ id, name: label });
@@ -2436,7 +2468,7 @@ export const AIProvidersSettings: React.FC<AIProvidersSettingsProps> = ({
         const next = opts[0].id;
         setDefaultModel(next);
         window.electronAPI?.setDefaultModel?.(next).catch(console.error);
-    }, [credentialsLoaded, defaultModel, hasStoredKey, preferredModels, isCodexReady, codexCliConfig.model, customProviders, ollamaModels, litellmModels, disabledProviders, cloudEnabledModels]);
+    }, [credentialsLoaded, defaultModel, hasStoredKey, preferredModels, isCodexReady, codexCliConfig.model, customProviders, ollamaModels, litellmModels, disabledProviders, cloudEnabledModels, providerHealth]);
 
     // Load LiteLLM model IDs only when the proxy is configured. The active-model
     // selector should not expose stale `litellm/...` choices after the proxy is
@@ -2787,6 +2819,13 @@ export const AIProvidersSettings: React.FC<AIProvidersSettingsProps> = ({
         }
     };
 
+    // Set of installed-model names the health probe has already run a chat
+    // request against this session — a Set, not a boolean, so a genuinely NEW
+    // model list (a pull finished) re-probes, but the 3s poll re-detecting the
+    // SAME models does not re-fire a chat request (and its cold-load tax) on
+    // every tick.
+    const ollamaHealthProbedRef = useRef<string>('');
+
     const checkOllamaInner = async () => {
 
         // Refreshed OUTSIDE the models try/catch on purpose. "Ollama has models
@@ -2801,42 +2840,89 @@ export const AIProvidersSettings: React.FC<AIProvidersSettingsProps> = ({
             setLocalFallback({ text: Boolean(st?.text), vision: Boolean(st?.vision) });
         } catch { setLocalFallback({ text: false, vision: false }); }
 
+        // Reachability FIRST (Problems 5, 21): a daemon that answers /api/tags
+        // but has zero models pulled is "Running, no models" — NOT "not found".
+        // The old check asked getAvailableOllamaModels() alone and treated an
+        // empty list identically to a dead daemon, so a perfectly healthy
+        // install with nothing pulled yet rendered as "Ollama not detected".
         try {
+            const reachable = await window.electronAPI?.isOllamaReachable?.();
+            if (!reachable) {
+                setOllamaModels([]);
+                setOllamaStatus('not-found');
+                return;
+            }
             // @ts-ignore
             const models = await window.electronAPI?.getAvailableOllamaModels?.();
-            if (models && models.length > 0) {
-                setOllamaModels(models);
-                setOllamaStatus('detected');
-            } else {
-                // Silent failure on background checks
-                // Only set not-found if we haven't detected it yet
-                if (ollamaStatus !== 'detected') {
-                    setOllamaStatus('not-found');
+            const list = Array.isArray(models) ? models : [];
+            setOllamaModels(list);
+            setOllamaStatus('detected');
+            setOllamaFixMessage('');
+
+            // Register Ollama in providerHealth (Problem 5) so Settings/model
+            // picker gating and any future fallback consumer see a REAL probed
+            // verdict, not just "a model list exists". Only re-probes (pays the
+            // chat cold-load tax) when the installed model set actually changed.
+            if (list.length > 0) {
+                const key = [...list].sort().join(',');
+                if (ollamaHealthProbedRef.current !== key) {
+                    ollamaHealthProbedRef.current = key;
+                    window.electronAPI?.testOllamaConnection?.()
+                        .then((result) => { if (result?.health) setProviderHealth(prev => ({ ...prev, ollama: result.health as ProviderHealth })); })
+                        .catch(() => {});
                 }
             }
         } catch (e) {
             // console.warn(`Ollama check failed:`, e);
-            if (ollamaStatus !== 'detected') {
-                setOllamaStatus('not-found');
-            }
+            setOllamaModels([]);
+            setOllamaStatus('not-found');
         }
     };
 
     const handleFixOllama = async () => {
         setOllamaStatus('fixing');
+        setOllamaFixMessage('');
         try {
-            // @ts-ignore
-            const result = await window.electronAPI?.invoke?.('force-restart-ollama');
-            if (result && result.success) {
+            // Already reachable (e.g. the daemon came up between polls) — just
+            // re-check rather than restarting a healthy process.
+            const reachable = await window.electronAPI?.isOllamaReachable?.();
+            if (reachable) {
                 setOllamaRestarted(true);
-                // Wait for server to be ready
-                setTimeout(() => checkOllama(false), 2000);
-            } else {
-                setOllamaStatus('not-found');
+                setTimeout(() => checkOllama(false), 500);
+                return;
             }
+
+            // ensure-ollama-running returns the full ProviderStatus (install vs.
+            // start-failure vs. not-ready), unlike force-restart-ollama's bare
+            // boolean — that detail is what makes the result message actionable
+            // instead of a repeat of "Ollama not detected".
+            // @ts-ignore
+            const result = await window.electronAPI?.invoke?.('ensure-ollama-running');
+            if (result?.reason === 'ollama-not-selected') {
+                // Deliberate gate (2026-07-07): Ollama is never auto-started for a
+                // user who hasn't selected it as their active model, even from an
+                // explicit Auto-Fix click. Tell the user the one thing that unblocks it.
+                setOllamaStatus('not-found');
+                setOllamaFixMessage(t('Select Ollama as your Active Model, then Auto-Fix can start it for you.'));
+                return;
+            }
+            if (!result?.success) {
+                const errorCode = result?.status?.details?.errorCode;
+                setOllamaStatus('not-found');
+                setOllamaFixMessage(
+                    errorCode === 'ENOENT'
+                        ? t('Ollama is not installed. Install it from ollama.com, then try again.')
+                        : (result?.status?.message || t('Could not start Ollama. Try running `ollama serve` manually.'))
+                );
+                return;
+            }
+            setOllamaRestarted(true);
+            // Wait for server to be ready, then re-fetch /api/tags.
+            setTimeout(() => checkOllama(false), 2000);
         } catch (e) {
             console.error("Fix failed", e);
             setOllamaStatus('not-found');
+            setOllamaFixMessage(t('Auto-fix failed. Try running `ollama serve` manually.'));
         }
     };
 
@@ -2989,6 +3075,10 @@ export const AIProvidersSettings: React.FC<AIProvidersSettingsProps> = ({
                 setHasStoredKey(prev => ({ ...prev, [provider]: true }));
                 setter('');
                 setTimeout(() => setSavedStatus(prev => ({ ...prev, [provider]: false })), 2000);
+                // Verify the key actually works right away, instead of leaving the
+                // card showing "Saved" for a key that turns out to be invalid until
+                // the user thinks to press Test Connection themselves.
+                handleTestConnection(provider, key).catch(() => {});
             }
         } catch (e) {
             console.error(`Failed to save ${provider} key:`, e);
@@ -3019,6 +3109,9 @@ export const AIProvidersSettings: React.FC<AIProvidersSettingsProps> = ({
                     .then((models) => setLitellmModels(Array.isArray(models) ? models.filter(Boolean) : []))
                     .catch(() => setLitellmModels([]));
                 setTimeout(() => setSavedStatus(prev => ({ ...prev, litellm: false })), 2000);
+                // Verify the proxy actually works right away — same "don't wait for the
+                // user to press Test" behavior as handleSaveKey for the cloud providers.
+                handleTestLitellmConnection().catch(() => {});
             }
         } catch (e) {
             console.error('Failed to save LiteLLM config:', e);
@@ -3102,6 +3195,7 @@ export const AIProvidersSettings: React.FC<AIProvidersSettingsProps> = ({
         try {
             // @ts-ignore
             const result = await window.electronAPI.testLlmConnection(provider, key);
+            if (result.health) setProviderHealth(prev => ({ ...prev, [provider]: result.health as ProviderHealth }));
             if (result.success) {
                 setTestStatus(prev => ({ ...prev, [provider]: 'success' }));
                 setTimeout(() => setTestStatus(prev => ({ ...prev, [provider]: 'idle' })), 3000);
@@ -3112,6 +3206,35 @@ export const AIProvidersSettings: React.FC<AIProvidersSettingsProps> = ({
         } catch (e: any) {
             setTestStatus(prev => ({ ...prev, [provider]: 'error' }));
             setTestError(prev => ({ ...prev, [provider]: e.message || t('Connection failed') }));
+        }
+    };
+
+    // LiteLLM's three-field shape (baseURL + optional key) can't reuse
+    // handleTestConnection's single-key contract, but shares its
+    // testStatus/testError/providerHealth state under the 'litellm' key so the
+    // card renders the same Verified/Disconnected/Degraded vocabulary as every
+    // cloud provider (Problem 20).
+    const handleTestLitellmConnection = async () => {
+        const url = litellmBaseURL.trim();
+        if (!url && !hasStoredKey.litellm) return;
+        setTestStatus(prev => ({ ...prev, litellm: 'testing' }));
+        setTestError(prev => ({ ...prev, litellm: '' }));
+        try {
+            const result = await window.electronAPI?.testLitellmConnection?.({
+                baseURL: url || undefined,
+                apiKey: litellmApiKey.trim() || undefined,
+            });
+            if (result?.health) setProviderHealth(prev => ({ ...prev, litellm: result.health as ProviderHealth }));
+            if (result?.success) {
+                setTestStatus(prev => ({ ...prev, litellm: 'success' }));
+                setTimeout(() => setTestStatus(prev => ({ ...prev, litellm: 'idle' })), 3000);
+            } else {
+                setTestStatus(prev => ({ ...prev, litellm: 'error' }));
+                setTestError(prev => ({ ...prev, litellm: result?.error || t('Connection failed') }));
+            }
+        } catch (e: any) {
+            setTestStatus(prev => ({ ...prev, litellm: 'error' }));
+            setTestError(prev => ({ ...prev, litellm: e.message || t('Connection failed') }));
         }
     };
 
@@ -3494,6 +3617,7 @@ export const AIProvidersSettings: React.FC<AIProvidersSettingsProps> = ({
                                 onResetModels={() => handleResetModels(id)}
                                 onSetDefaultModel={(modelId) => handleSetDefaultModel(id, modelId)}
                                 hasCatalog={(cloudFetchedModels[id]?.length ?? 0) > 0}
+                                health={providerHealth[id]}
                                 modelSaveError={!!modelSaveError[id]}
                                 onSaveKey={async () => { await handleSaveKey(id, keyValue, setKeyValue); }}
                                 onRemoveKey={() => handleRemoveKey(id, setKeyValue)}
@@ -3740,7 +3864,20 @@ export const AIProvidersSettings: React.FC<AIProvidersSettingsProps> = ({
                                         <AipModelList> below now — same as every cloud card.
                                         Keeping a second Refresh up here would give the card
                                         two controls for one action. */}
-                                    <AipBadge tone="ok" label={t('Configured')} />
+                                    {/* Real verification state from test-litellm-connection —
+                                        a stored config alone is never shown as "Verified"
+                                        (Problem 20, mirrors ProviderCard's statusBadge). Falls
+                                        back to the generic "Configured" badge before any probe
+                                        has run this session/restart. */}
+                                    {providerHealth.litellm?.status === 'verified' ? (
+                                        <AipBadge tone="ok" label={t('Verified')} />
+                                    ) : providerHealth.litellm?.status === 'disconnected' ? (
+                                        <AipBadge tone="danger" label={t('Disconnected')} title={providerHealth.litellm?.lastError?.message} />
+                                    ) : providerHealth.litellm?.status === 'degraded' ? (
+                                        <AipBadge tone="warn" label={t('Degraded')} title={providerHealth.litellm?.lastError?.message} />
+                                    ) : (
+                                        <AipBadge tone="ok" label={t('Configured')} />
+                                    )}
                                     <AipSwitch
                                         checked={!disabledProviders.includes('litellm')}
                                         onChange={() => handleToggleProvider('litellm', disabledProviders.includes('litellm'))}
@@ -3818,6 +3955,21 @@ export const AIProvidersSettings: React.FC<AIProvidersSettingsProps> = ({
                                     {t('Remove')}
                                 </button>
                             )}
+                            {hasStoredKey.litellm && (
+                                <button
+                                    type="button"
+                                    onClick={handleTestLitellmConnection}
+                                    disabled={testStatus.litellm === 'testing'}
+                                    className="aip-btn"
+                                    data-tone={testStatus.litellm === 'success' ? 'ok' : testStatus.litellm === 'error' ? 'danger' : undefined}
+                                    title={testError.litellm || t('Test Connection')}
+                                >
+                                    {testStatus.litellm === 'testing' ? <><Loader2 size={12} strokeWidth={1.75} className="aip-spinner" /> {t('Testing...')}</> :
+                                        testStatus.litellm === 'success' ? <><Check size={12} strokeWidth={2} className="aip-check" /> {t('Passed')}</> :
+                                            testStatus.litellm === 'error' ? <><AlertCircle size={12} strokeWidth={1.75} /> {t('Error')}</> :
+                                                <>{t('Test Connection')}</>}
+                                </button>
+                            )}
 
                             {/* The proxy can expose dozens of models; without this the Active
                                 Model dropdown gets all of them. Reuses the cloud providers'
@@ -3854,6 +4006,15 @@ export const AIProvidersSettings: React.FC<AIProvidersSettingsProps> = ({
                                 />
                             )}
                         </div>
+
+                        {/* One note line, only when something is actually wrong — same rule
+                            as ProviderCard. Falls back to the last PERSISTED health error so
+                            a reload still explains a Disconnected/Degraded badge. */}
+                        {(testError.litellm || (!testError.litellm && providerHealth.litellm?.lastError?.message && providerHealth.litellm.status !== 'verified')) && (
+                            <p className="aip-meta aip-danger-fg aip-provider-note">
+                                {testError.litellm || providerHealth.litellm?.lastError?.message}
+                            </p>
+                        )}
                     </div>
                 </div>
             </div>
@@ -3934,6 +4095,13 @@ export const AIProvidersSettings: React.FC<AIProvidersSettingsProps> = ({
                                     {t('Auto-Fix Connection')}
                                 </button>
                             </div>
+                            {/* Specific, actionable follow-up from the last Auto-Fix attempt
+                                (not installed vs. selection required vs. daemon start
+                                failure) — replaces the generic "not detected" copy above
+                                once we actually know more (Problem 23). */}
+                            {ollamaFixMessage && (
+                                <p className="aip-meta aip-danger-fg">{ollamaFixMessage}</p>
+                            )}
                         </div>
                     )}
 
@@ -3955,7 +4123,8 @@ export const AIProvidersSettings: React.FC<AIProvidersSettingsProps> = ({
                         </div>
                     )}
                     {ollamaStatus === 'detected' && ollamaModels.length === 0 && (
-                        <div className="text-xs aip-muted">
+                        <div className="flex items-center gap-2 text-xs aip-muted">
+                            <AipBadge tone="warn" label={t('No models')} />
                             {t('Ollama is running but no models found. Run `ollama pull llama3` to get started.')}
                         </div>
                     )}

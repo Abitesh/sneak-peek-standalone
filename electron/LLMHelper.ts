@@ -20,7 +20,8 @@ import {
   TINY_ASSIST_PROMPT, TINY_BRAINSTORM_PROMPT, TINY_CLARIFY_PROMPT, TINY_CODE_HINT_PROMPT,
   TINY_PROMPTS_SET
 } from "./llm/tinyPrompts"
-import { getModelCapabilities, selectPromptTier, estimateTokens, truncateTranscriptToFit, getOpenAiMaxOutput, getOpenAiReasoningEffort, type OpenAiReasoningEffort, type PromptTier, type ModelCapabilities } from "./llm/modelCapabilities"
+import { getModelCapabilities, selectPromptTier, estimateTokens, truncateTranscriptToFit, getOpenAiMaxOutput, getOpenAiReasoningEffort, resolveMaxOutputTokens, type OpenAiReasoningEffort, type PromptTier, type ModelCapabilities } from "./llm/modelCapabilities"
+import { resolveProviderCeiling } from "./llm/promptBudget"
 import { GeminiPromptCache } from "./llm/GeminiPromptCache"
 import {
   runStreamingVisionFallback,
@@ -45,6 +46,7 @@ import {
   customProviderIsLocal,
 } from "./llm/visionCapability"
 import { assertProviderDataScopes, getDeniedDataScopes, routeWithScopeFallback, ProviderRouter, DOCUMENT_GROUNDING_SCOPE_DENIED_MESSAGE, isProviderFamilyDisabled, ProviderDisabledError, type ProviderDataScope, type ProviderDataScopePolicy } from "./llm/ProviderRouter"
+import { filterChatCapable, type ProviderFamily, type ProviderHealth, type VerifiedModelBinding } from "./llm/providerRegistry"
 // Outbound-scope vocabulary shared with Context Intelligence V3. ONE mapping of
 // SourceType → privacy toggle: a second copy here is how the two layers would
 // drift into disagreeing about what a `<evidence source_type="RESUME">` block is.
@@ -462,7 +464,10 @@ export class LLMHelper {
   private litellmModelBudgetsFetch: Promise<void> | null = null
   private useOllama: boolean = false
   private ollamaModel: string = ""
-  private ollamaUrl: string = "http://127.0.0.1:11434"
+  // Default respects OLLAMA_HOST (Ollama's own env var) before OLLAMA_URL —
+  // see OllamaManager.resolveDefaultOllamaUrl(). Overridden per-instance by
+  // the constructor's `ollamaUrl` param when the caller passes one.
+  private ollamaUrl: string = require('./services/OllamaManager').resolveDefaultOllamaUrl()
   // How long Ollama keeps the model resident in RAM after a request (the
   // `keep_alive` field on /api/chat). Default "30m" so a live session doesn't pay
   // the multi-second cold-load tax on every turn after a short pause (Ollama's own
@@ -983,7 +988,7 @@ export class LLMHelper {
     if (nvidiaNimApiKey) this.setNvidiaNimApiKey(nvidiaNimApiKey)
 
     if (useOllama) {
-      this.ollamaUrl = ollamaUrl || "http://127.0.0.1:11434"
+      this.ollamaUrl = ollamaUrl || require('./services/OllamaManager').resolveDefaultOllamaUrl()
       this.ollamaModel = ollamaModel || ""
       console.log(`[LLMHelper] Using Ollama with model: ${this.ollamaModel || '(auto-detect)'}`)
 
@@ -1536,6 +1541,27 @@ export class LLMHelper {
   // via setGroqApiKey().
   private _groqLocalDisabled: boolean = false;
 
+  /**
+   * Model-fidelity metadata for the most recent `_streamChatInner` call
+   * (Problem 27). `requested*` is the user's actual selection at call time;
+   * `actual*` is set once a provider genuinely dispatches. The two differ
+   * only when the selected provider failed pre-commit and the request fell
+   * back to a verified alternative — the renderer can use `fallbackOccurred`
+   * to show "answered via <actualProvider>" only when that really happened,
+   * instead of always naming the requested model.
+   */
+  private lastStreamRouting: {
+    requestedModel: string;
+    requestedProvider: ProviderFamily;
+    actualModel: string | null;
+    actualProvider: ProviderFamily | null;
+    fallbackOccurred: boolean;
+  } | null = null;
+
+  public getLastStreamRouting(): Readonly<typeof this.lastStreamRouting> {
+    return this.lastStreamRouting;
+  }
+
   public setModel(modelId: string, customProviders: (CustomProvider | CurlProvider)[] = []) {
     // Map UI short codes to internal Model IDs
     let targetModelId = modelId;
@@ -1738,14 +1764,23 @@ export class LLMHelper {
   }
 
   // Trim a context blob to fit within the active model's prompt budget.
-  // Cloud tier always returns text unchanged. Local tiers drop oldest lines first.
+  // Cloud tier always returns text unchanged UNLESS the active provider has a
+  // real effective ceiling below its advertised context window (Groq: its
+  // modelCapabilities tier is 'cloud' with a 128k maxContextTokens, but the
+  // practical per-request input ceiling is far lower — the old
+  // `caps.maxContextTokens >= 100_000` check no-op'd for Groq exactly like it
+  // does for a genuinely 100k+-window model, which is how "hi" + an unrelated
+  // 10k-token context blob reached Groq unfiltered). Local tiers drop oldest
+  // lines first, same as before.
   public fitContextForCurrentModel(text: string, reservedOutputTokens?: number): string {
     if (!text) return text;
     const modelId = this.useOllama ? this.ollamaModel : this.currentModelId;
     const caps = getModelCapabilities(modelId, this.useOllama);
-    if (caps.maxContextTokens >= 100_000) return text;
+    const providerCeiling = this.useOllama ? undefined : resolveProviderCeiling(this.isGroqModel(modelId) ? 'groq' : undefined);
+    const effectiveMax = providerCeiling ? Math.min(caps.maxContextTokens, providerCeiling) : caps.maxContextTokens;
+    if (effectiveMax >= 100_000) return text;
     const reserved = reservedOutputTokens ?? 2000;
-    const cap = Math.floor(caps.maxContextTokens * 0.8);
+    const cap = Math.floor(effectiveMax * 0.8);
     const totalFor = (s: string) => caps.promptBudgetTokens + reserved + estimateTokens(s);
     if (totalFor(text) <= cap) return text;
     const lines = text.split('\n');
@@ -5508,6 +5543,195 @@ let isMultimodal = !!(imagePaths?.length);
     }
   }
 
+  // ==========================================================================
+  // ROUTING (Sprint S2 — Problems 4, 6, 7, 10, 25-28)
+  //
+  // A single place that answers "what provider family did the user actually
+  // pick" and "if that fails, what verified alternatives exist" — replacing
+  // the previous pattern of each cascade rung re-deriving both answers
+  // ad hoc (see the fast-text-override and hardcoded Natively/Gemini/Groq
+  // cascade this replaced in _streamChatInner, git history pre-S2).
+  // ==========================================================================
+
+  /** User-facing provider names for `noProviderAvailableMessage()` — Problem 10 ("single actionable error with provider name"), matching the capitalization every pre-existing `recordProviderFailure` call site already used ('Gemini', 'Groq', ...). */
+  private static readonly PROVIDER_DISPLAY_NAME: Record<ProviderFamily, string> = {
+    gemini: 'Gemini', groq: 'Groq', openai: 'OpenAI', claude: 'Claude', deepseek: 'DeepSeek',
+    nvidia_nim: 'NVIDIA NIM', litellm: 'LiteLLM', ollama: 'Ollama', 'codex-cli': 'Codex CLI', custom: 'Custom',
+  };
+
+  /** The provider family the user's current selection maps to — never inferred from a fallback that already ran. */
+  private resolveActiveProviderFamily(): ProviderFamily {
+    if (this.useOllama) return 'ollama';
+    if (this.customProvider || this.activeCurlProvider) return 'custom';
+    if (this.isCodexCliModel(this.currentModelId)) return 'codex-cli';
+    if (this.isOpenAiModel(this.currentModelId)) return 'openai';
+    if (this.isClaudeModel(this.currentModelId)) return 'claude';
+    if (this.isDeepseekModel(this.currentModelId)) return 'deepseek';
+    if (this.isNvidiaNimModel(this.currentModelId)) return 'nvidia_nim';
+    if (this.isLiteLLMModel(this.currentModelId)) return 'litellm';
+    if (this.isGroqModel(this.currentModelId)) return 'groq';
+    // Gemini models, plus the legacy 'natively' id and any unrecognized
+    // custom string — all of these fall through to the Gemini cascade below.
+    return 'gemini';
+  }
+
+  /** id LLMHelper is currently configured to use for the given selection. */
+  private requestedModelIdFor(family: ProviderFamily): string {
+    return family === 'ollama' ? `ollama-${this.ollamaModel}` : this.currentModelId;
+  }
+
+  /**
+   * Records the provider/model that ACTUALLY served the current turn
+   * (Problem 27 — requestedModel vs actualModel fidelity). Called once, at
+   * the first successful dispatch; `fallbackOccurred` is derived by comparing
+   * against the `requestedProvider` recorded at the top of `_streamChatInner`.
+   */
+   private recordActualStream(provider: ProviderFamily, modelId: string): void {
+    if (!this.lastStreamRouting) return;
+    this.lastStreamRouting.actualProvider = provider;
+    this.lastStreamRouting.actualModel = modelId;
+    this.lastStreamRouting.fallbackOccurred = provider !== this.lastStreamRouting.requestedProvider;
+  }
+
+  /** Max DISTINCT providers a single request may try (selected + fallbacks) before giving up on the cloud cascade — Problem 10. */
+  private static readonly MAX_FALLBACK_PROVIDERS = 3;
+
+  /**
+   * Verified, chat-capable fallback candidates for the cloud cascade, built
+   * from `CredentialsManager.providerHealth` (S1) rather than a hardcoded
+   * provider list — a family that was never test-connected (or failed its
+   * probe) is not a safe guess to route real traffic to (Problem 25/28).
+   *
+   * `excludeFamilies` are never retried (the selected provider, plus any
+   * fallback already attempted this turn). LiteLLM and NVIDIA NIM are
+   * excluded from the automatic cascade: neither dispatcher accepts an
+   * explicit model-id override (they read `this.currentModelId` directly),
+   * so slotting them in here would silently send the WRONG model id unless
+   * they are the user's actual selection — out of scope for S2 (LiteLLM
+   * gateway work is S4).
+   */
+  private buildVerifiedFallbackCandidates(excludeFamilies: ReadonlySet<ProviderFamily>): Array<{ family: ProviderFamily; modelId: string }> {
+    // A local-only user must never have a verified CLOUD credential silently
+    // used as a fallback — the individual streamWithX() methods already
+    // enforce this internally, but skipping candidates here avoids burning a
+    // doomed attempt (and a misleading "provider failed" log line) per turn.
+    if (this.isLocalOnlyMode) return [];
+    let health: Record<string, ProviderHealth>;
+    try {
+      const { CredentialsManager } = require('./services/CredentialsManager') as typeof import('./services/CredentialsManager');
+      health = CredentialsManager.getInstance().getAllProviderHealth();
+    } catch {
+      return [];
+    }
+    // Mirrors the priority order the previous hardcoded cascade used
+    // (OpenAI/Claude ahead of Groq's low TPM ceiling; Gemini as the deep
+    // multi-rung ladder; DeepSeek last, text-only).
+    const order: ProviderFamily[] = ['openai', 'claude', 'gemini', 'groq', 'deepseek'];
+    const clientFor: Partial<Record<ProviderFamily, unknown>> = {
+      openai: this.openaiClient,
+      claude: this.claudeClient,
+      gemini: this.client,
+      groq: this.groqClient,
+      deepseek: this.deepseekClient,
+    };
+    const candidates: Array<{ family: ProviderFamily; modelId: string }> = [];
+    for (const family of order) {
+      if (excludeFamilies.has(family)) continue; // never retry the same provider
+      if (family === 'groq' && this._groqLocalDisabled) continue;
+      if (this.isProviderDisabled(family)) continue;
+      if (!clientFor[family]) continue; // no key configured — cannot dispatch
+      const providerHealth = health[family];
+      if (!providerHealth || providerHealth.status !== 'verified') continue; // not chat-probed by test-llm-connection
+      const bindings = filterChatCapable(providerHealth.models || []);
+      if (bindings.length === 0) continue;
+      candidates.push({ family, modelId: bindings[0].id });
+      if (candidates.length >= LLMHelper.MAX_FALLBACK_PROVIDERS - excludeFamilies.size) break;
+    }
+    return candidates;
+  }
+
+  /**
+   * Dispatches one attempt (selected OR fallback) to `family`. Each case
+   * mirrors EXACTLY the system-prompt resolution the old per-provider blocks
+   * used for that family — `systemPromptOverride || <PROVIDER>_DEFAULT` for
+   * OpenAI/Claude/DeepSeek/Groq, and the fully-resolved `finalSystemPrompt`
+   * (already language-injected, and document-grounding-shaped when
+   * applicable) for Gemini/Codex — so routing a request through this shared
+   * dispatcher, whether as the primary pick or a fallback, produces the same
+   * prompt that provider would have received before this refactor (Problem
+   * 28: fallback preserves the assembled prompt, only the transport changes).
+   */
+  private async * dispatchProviderFamily(
+    family: ProviderFamily,
+    modelId: string,
+    userContent: string,
+    systemPromptOverride: string | undefined,
+    finalSystemPrompt: string,
+    abortSignal?: AbortSignal,
+  ): AsyncGenerator<string, void, unknown> {
+    switch (family) {
+      case 'openai':
+        yield* this.streamWithOpenai(userContent, this.injectLanguageInstruction(systemPromptOverride || OPENAI_SYSTEM_PROMPT), modelId, abortSignal);
+        return;
+      case 'claude':
+        yield* this.streamWithClaude(userContent, this.injectLanguageInstruction(systemPromptOverride || CLAUDE_SYSTEM_PROMPT), modelId, abortSignal);
+        return;
+      case 'deepseek':
+        yield* this.streamWithDeepseek(userContent, this.injectLanguageInstruction(systemPromptOverride || OPENAI_SYSTEM_PROMPT), modelId, abortSignal);
+        return;
+      case 'groq':
+        yield* this.streamWithGroq(userContent, modelId, this.injectLanguageInstruction(systemPromptOverride || GROQ_SYSTEM_PROMPT), abortSignal);
+        return;
+      case 'gemini':
+        yield* this.streamGeminiTextCascade(userContent, undefined, finalSystemPrompt, abortSignal, INTERACTIVE_THINKING_BUDGET);
+        return;
+      case 'codex-cli':
+        yield* this.streamWithCodexCli(userContent, finalSystemPrompt, false, undefined, abortSignal);
+        return;
+      default:
+        throw new Error(`No fallback dispatcher wired for provider family: ${family}`);
+    }
+  }
+
+  /**
+   * One attempt at `family`, with the SAME commit-tracking every rung in this
+   * cascade needs (Problem 28: a post-commit failure ends the stream rather
+   * than appending a second answer onto a partial one) and shared failure
+   * bookkeeping. The caller decides whether to try the next candidate based
+   * on the returned outcome.
+   */
+  private async * attemptProviderFamily(
+    family: ProviderFamily,
+    modelId: string,
+    userContent: string,
+    systemPromptOverride: string | undefined,
+    finalSystemPrompt: string,
+    abortSignal: AbortSignal | undefined,
+    commit: { emitted: boolean },
+  ): AsyncGenerator<string, 'success' | 'failed-pre-commit' | 'failed-post-commit', unknown> {
+    try {
+      yield* this.trackCommit(this.dispatchProviderFamily(family, modelId, userContent, systemPromptOverride, finalSystemPrompt, abortSignal), commit);
+      this.recordActualStream(family, modelId);
+      return 'success';
+    } catch (e: any) {
+      if (abortSignal?.aborted) throw e;
+      const msg = e?.message || String(e);
+      // A 401 disables local Groq for the rest of the session even post-commit
+      // — that is provider bookkeeping, not output, so it runs unconditionally.
+      if (family === 'groq' && /401|invalid[_\s-]api[_\s-]key/i.test(msg)) {
+        this._groqLocalDisabled = true;
+        console.warn('[LLMHelper] Local Groq key rejected (401) — disabling local Groq for the rest of this session.');
+      }
+      if (commit.emitted) {
+        console.warn(`[LLMHelper] ${family} failed AFTER first token — ending stream rather than appending a second answer:`, msg.slice(0, 200));
+        return 'failed-post-commit';
+      }
+      this.recordProviderFailure(LLMHelper.PROVIDER_DISPLAY_NAME[family] || family, msg);
+      console.warn(`[LLMHelper] ${family} failed pre-commit — trying next verified provider:`, msg.slice(0, 200));
+      return 'failed-pre-commit';
+    }
+  }
+
   private async * _streamChatInner(
     message: string,
     imagePaths?: string[],
@@ -5536,6 +5760,21 @@ let isMultimodal = !!(imagePaths?.length);
     routeOptions?: StreamRouteOptions
   ): AsyncGenerator<string, void, unknown> {
     this.clearProviderFailureSummary();
+    // Per-request routing state (Problem 10/27): reset on EVERY call so a
+    // provider quirk from a PRIOR turn (e.g. `_groqLocalDisabled`, which is
+    // intentionally session-scoped, not per-request) never leaks into this
+    // turn's fidelity metadata, and so `getLastStreamRouting()` always
+    // reflects the turn that is actually in flight.
+    {
+      const requestedProvider = this.resolveActiveProviderFamily();
+      this.lastStreamRouting = {
+        requestedModel: this.requestedModelIdFor(requestedProvider),
+        requestedProvider,
+        actualModel: null,
+        actualProvider: null,
+        fallbackOccurred: false,
+      };
+    }
     // OKF Phase 1 (F7 fix): capture the caller-supplied `context` BEFORE the
     // mode-injection block below mutates it by prepending modeContextBlock.
     // For document-grounded answers this is the sanitized rolling-transcript
@@ -6778,21 +7017,38 @@ let isMultimodal = !!(imagePaths?.length);
       return;
     }
 
-    // GROQ FAST TEXT OVERRIDE (Text-Only)
-    // Two paths: local Groq key → call Groq directly; Natively API only → send fast_mode:true
-    // to the server, which serves its own fast tier (Gemini Flash-Lite → MiniMax);
-    // it has not routed fast_mode through Groq since the Llama retirements.
-    //
-    // Gate: only short-circuit to fast paths when the user's picked model is one of
-    // the providers fast-mode actually routes to. Otherwise picking Gemini/Claude/OpenAI
-    // in the UI is silently ignored because fast-mode returns before model routing runs.
     // Tracks whether ANY provider below has already yielded real text to the
     // consumer. Every catch-and-continue site in this generator must consult it
-    // before falling through — see trackCommit.
+    // before falling through — see trackCommit / attemptProviderFamily.
     const commit = { emitted: false };
 
+    // ── OLLAMA SELECTED: single dispatch, no cloud cascade (Problem 25) ────
+    // Checked BEFORE the fast-text override below on purpose: previously fast
+    // mode ran first and could hijack a local-only Ollama selection into a
+    // CLOUD Codex/Groq call whenever Codex happened to be signed in — exactly
+    // the kind of silent cloud fallback local-only users must never get.
+    if (this.useOllama) {
+      const ollamaSystemPrompt = this.resolveLocalSystemPrompt(finalSystemPrompt);
+      this.recordActualStream('ollama', `ollama-${this.ollamaModel}`);
+      yield* this.streamWithOllama(contextOsGoverningBlock ? userContent : message, contextOsGoverningBlock ? undefined : combinedContext || undefined, ollamaSystemPrompt, imagePaths, abortSignal);
+      return;
+    }
+
+    // GROQ FAST TEXT OVERRIDE (Text-Only)
+    // Speed accelerator for the Groq / 'natively' (auto) tier: local Groq key
+    // → call Groq directly; Codex CLI → route through it when available (it
+    // is generally the fastest/highest-quality option).
+    //
+    // Gate (Problem 6/7 — "wrong provider for model"): fast mode used to also
+    // fire whenever Codex CLI happened to be signed in, REGARDLESS of what
+    // the user actually selected — a Claude/OpenAI/Gemini/DeepSeek/Ollama
+    // pick was silently overridden to Codex any time fast mode was on. Now
+    // gated on the SELECTED provider actually being Groq or the 'natively'
+    // auto tier; every other explicit selection is tried as-is below.
+    // `!isCodexCliModel` still protects an explicitly-pinned
+    // `codex-cli:<model>` from being downgraded to `codexCliConfig.fastModel`
+    // (issue #315) — that selection is handled by the unified cascade below.
     const fastModeApplies = this.groqFastTextMode && !isMultimodal && (
-      this.isCodexAvailable() ||
       this.isGroqModel(this.currentModelId) ||
       this.currentModelId === 'natively'
     ) && !this.isCodexCliModel(this.currentModelId);
@@ -6801,6 +7057,7 @@ let isMultimodal = !!(imagePaths?.length);
         console.log(`[LLMHelper] ⚡️ Fast Text Mode Active (Streaming). Routing to Codex CLI...`);
         try {
           yield* this.trackCommit(this.streamWithCodexCli(userContent, finalSystemPrompt, true, undefined, abortSignal), commit);
+          this.recordActualStream('codex-cli', this.codexCliConfig.fastModel);
           return;
         } catch (e: any) {
           if (commit.emitted) {
@@ -6821,6 +7078,7 @@ let isMultimodal = !!(imagePaths?.length);
           const groqModelId = this.isGroqModel(this.currentModelId) ? this.currentModelId : GROQ_MODEL;
           // CACHE: pass system separately so Groq prefix-cache hits across turns.
           yield* this.trackCommit(this.streamWithGroq(userContent, groqModelId, finalGroqSystem, abortSignal), commit);
+          this.recordActualStream('groq', groqModelId);
           return;
         } catch (e: any) {
           // A 401 still disables local Groq for the session even post-commit —
@@ -6840,26 +7098,16 @@ let isMultimodal = !!(imagePaths?.length);
       }
     }
 
-    // 1. Ollama Streaming
-    if (this.useOllama) {
-      const ollamaSystemPrompt = this.resolveLocalSystemPrompt(finalSystemPrompt);
-      yield* this.streamWithOllama(contextOsGoverningBlock ? userContent : message, contextOsGoverningBlock ? undefined : combinedContext || undefined, ollamaSystemPrompt, imagePaths, abortSignal);
-      return;
-    }
-
-    if (this.isCodexCliModel(this.currentModelId) && this.isCodexAvailable()) {
-      yield* this.streamWithCodexCli(userContent, finalSystemPrompt, false, imagePaths, abortSignal);
-      return;
-    }
-
     // 2a. CustomProvider (switchToCustom path) — full SSE-capable streaming
     if (this.customProvider) {
+      this.recordActualStream('custom', this.customProvider.id);
       yield* this.streamWithCustom(message, context, imagePaths, finalSystemPrompt, abortSignal);
       return;
     }
 
     // 2b. Custom Provider Streaming (via cURL - Non-streaming fallback for now)
     if (this.activeCurlProvider) {
+      this.recordActualStream('custom', this.activeCurlProvider.name || 'custom-curl');
       const response = await this.executeCustomProvider(
         this.activeCurlProvider.curlCommand,
         userContent,
@@ -6872,193 +7120,81 @@ let isMultimodal = !!(imagePaths?.length);
       return;
     }
 
-    // 3. Cloud Provider Routing
-
-    // OpenAI
-    if (this.isOpenAiModel(this.currentModelId) && this.openaiClient) {
-      const openAiSystem = systemPromptOverride || OPENAI_SYSTEM_PROMPT;
-      const finalOpenAiSystem = this.injectLanguageInstruction(openAiSystem);
-      if (isMultimodal && imagePaths) {
-        yield* this.streamWithOpenaiMultimodal(userContent, imagePaths, finalOpenAiSystem, undefined, abortSignal);
-      } else {
-        yield* this.streamWithOpenai(userContent, finalOpenAiSystem, undefined, abortSignal);
-      }
-      return;
-    }
-
-    // Claude
-    if (this.isClaudeModel(this.currentModelId) && this.claudeClient) {
-      const claudeSystem = systemPromptOverride || CLAUDE_SYSTEM_PROMPT;
-      const finalClaudeSystem = this.injectLanguageInstruction(claudeSystem);
-      if (isMultimodal && imagePaths) {
-        yield* this.streamWithClaudeMultimodal(userContent, imagePaths, finalClaudeSystem, undefined, abortSignal);
-      } else {
-        yield* this.streamWithClaude(userContent, finalClaudeSystem, undefined, abortSignal);
-      }
-      return;
-    }
-
-    // DeepSeek (text-only). When images are present, fall through so the
-    // vision-first chain (Gemini/Claude/OpenAI/Natively) handles them instead.
-    if (this.isDeepseekModel(this.currentModelId) && this.deepseekClient && !(isMultimodal && imagePaths)) {
-      const deepseekSystem = systemPromptOverride || OPENAI_SYSTEM_PROMPT;
-      const finalDeepseekSystem = this.injectLanguageInstruction(deepseekSystem);
-      yield* this.streamWithDeepseek(userContent, finalDeepseekSystem, undefined, abortSignal);
-      return;
-    }
-
+    // NVIDIA NIM and LiteLLM stay selected-only (out of scope for the
+    // verified-fallback cascade below — see buildVerifiedFallbackCandidates
+    // for why: neither dispatcher accepts an explicit model-id override).
     if (this.isNvidiaNimModel(this.currentModelId) && this.nvidiaNimClient) {
       const nimSystem = this.injectLanguageInstruction(systemPromptOverride || OPENAI_SYSTEM_PROMPT);
-      yield* this.streamWithNvidiaNim(userContent, nimSystem, (isMultimodal && imagePaths) ? imagePaths : undefined, abortSignal);
+      this.recordActualStream('nvidia_nim', this.currentModelId);
+      yield* this.streamWithNvidiaNim(userContent, nimSystem, undefined, abortSignal);
       return;
     }
 
-    // LiteLLM (OpenAI-compatible proxy). The proxy decides vision support, so
-    // images are forwarded through when present.
+    // LiteLLM (OpenAI-compatible proxy).
     if (this.isLiteLLMModel(this.currentModelId) && this.litellmClient) {
       const litellmSystem = systemPromptOverride || OPENAI_SYSTEM_PROMPT;
       const finalLitellmSystem = this.injectLanguageInstruction(litellmSystem);
-      yield* this.streamWithLiteLLM(userContent, finalLitellmSystem, (isMultimodal && imagePaths) ? imagePaths : undefined, abortSignal);
+      this.recordActualStream('litellm', this.currentModelId);
+      yield* this.streamWithLiteLLM(userContent, finalLitellmSystem, undefined, abortSignal);
       return;
     }
 
-    // Groq (Text + Multimodal)
-    if (this.isGroqModel(this.currentModelId) && this.groqClient) {
-      try {
-        if (isMultimodal && imagePaths) {
-          // Route multimodal to Groq Llama 4 Scout (vision-capable)
-          const groqSystem = systemPromptOverride || OPENAI_SYSTEM_PROMPT;
-          const finalGroqSystem = this.injectLanguageInstruction(groqSystem);
-          yield* this.trackCommit(this.streamWithGroqMultimodal(userContent, imagePaths, finalGroqSystem, abortSignal), commit);
-          return;
-        }
-        // Text-only Groq
-        const groqSystem = systemPromptOverride ? baseSystemPrompt : GROQ_SYSTEM_PROMPT;
-        const finalGroqSystem = this.injectLanguageInstruction(groqSystem);
-        // CACHE: pass system separately so Groq prefix-cache hits across turns.
-        yield* this.trackCommit(this.streamWithGroq(userContent, this.currentModelId, finalGroqSystem, abortSignal), commit);
-        return;
-      } catch (e: any) {
-        // 413 / 429 / 5xx on Groq → fall through to Natively / Gemini cascade
-        // instead of letting the error propagate to the renderer's "couldn't
-        // get a response" toast. Groq's TPM ceiling (12k) is too small for
-        // long custom-mode prompts; the user's actual answer path lives in
-        // the providers below.
-        const msg = String(e?.message || '');
-        const isOverCapacity = /413|rate_limit_exceeded|tokens? per minute|TPM|429/i.test(msg);
-        const isAuthFailure = /401|invalid[_\s-]api[_\s-]key/i.test(msg);
-        if (isAuthFailure) {
-          this._groqLocalDisabled = true;
-          console.warn('[LLMHelper] Local Groq key rejected (401) — disabling local Groq for the rest of this session.');
-        }
-        if (isOverCapacity) {
-          console.warn('[LLMHelper] Groq over capacity (413/429), falling through to Natively/Gemini cascade:', msg.slice(0, 120));
-        } else {
-          // Unknown error — log and fall through anyway so the user still gets an answer
-          console.warn('[LLMHelper] Groq streaming failed, falling through:', msg.slice(0, 120));
-        }
-        // A post-commit failure must NOT fall through: the providers below
-        // would append a second, complete answer to the partial the user has
-        // already read. Provider bookkeeping (the 401 disable above) still
-        // applies; only the fall-through is suppressed.
-        if (commit.emitted) {
-          console.warn('[LLMHelper] Groq failed AFTER first token — ending stream rather than appending a second answer:', msg.slice(0, 120));
-          yield LLMHelper.TRUNCATION_SENTINEL;
-          return;
-        }
-        // Fall through to Natively at line ~5435
-      }
+    // ── SELECTED PROVIDER, TRIED FIRST (Problem 4/6/7) ──────────────────────
+    // Every family below is wrapped identically via attemptProviderFamily: a
+    // pre-commit failure records the failure and falls through to the
+    // verified-fallback cascade (Problem 25/28) with the SAME userContent/
+    // systemPromptOverride, instead of throwing a hard, unrecoverable error
+    // (previously true for an explicit OpenAI/Claude/DeepSeek pick — only
+    // Groq/Gemini had ANY fallback at all) or cascading through a hardcoded,
+    // possibly-unverified provider list (previously true for Gemini/Groq's
+    // own built-in fallback).
+    const selectedFamily = this.resolveActiveProviderFamily();
+    const selectedModelId = this.requestedModelIdFor(selectedFamily);
+    const triedFamilies = new Set<ProviderFamily>([selectedFamily]);
+    const selectedIsDispatchable =
+      (selectedFamily === 'openai' && !!this.openaiClient) ||
+      (selectedFamily === 'claude' && !!this.claudeClient) ||
+      (selectedFamily === 'deepseek' && !!this.deepseekClient) ||
+      (selectedFamily === 'groq' && !!this.groqClient) ||
+      (selectedFamily === 'gemini' && !!this.client) ||
+      (selectedFamily === 'codex-cli' && this.isCodexAvailable());
+    if (selectedIsDispatchable) {
+      const outcome = yield* this.attemptProviderFamily(selectedFamily, selectedModelId, userContent, systemPromptOverride, finalSystemPrompt, abortSignal, commit);
+      if (outcome === 'success') return;
+      if (outcome === 'failed-post-commit') { yield LLMHelper.TRUNCATION_SENTINEL; return; }
+      // failed-pre-commit → fall through to the verified fallback cascade below
     }
 
-    // 3b. Natively API — TTFT RACE (REPORT_TO_CHATGPT §21 L1 / §18)
-    // Was: serial Natively→Groq→Gemini waterfall that only fell over on a
-    // THROW. A provider that connected then stalled before the first token
-    // blocked the user for up to the 10s connect budget with no fallback.
-    // Now: a commit-point TTFT race. Each provider is opened but not forwarded
-    // until its first token races a 2.5s budget; the first to produce a token
-    // wins and we commit. A stalled/erroring primary fails over fast. Identical
-    // answer contract to every provider (same finalSystemPrompt), so the race
-    // winner does not change answer STYLE — only who serves it. Multimodal with
-    // images keeps the dedicated Groq-multimodal path (vision is handled by the
-    // separate vision fallback when a vision model is selected).
-    if (this.currentModelId === 'natively') {
-      // Bug found during Phase 2 harness investigation (2026-07-27): this gate
-      // used to check CredentialsManager.getNativelyApiKey() directly, which
-      // is false in the E2E test profile (a fresh userDataDir has no stored
-      // key). Natively is now completely disabled.
-      // Fall through to Gemini as the primary provider
+    // ── VERIFIED FALLBACK CASCADE (Problem 25/28) ───────────────────────────
+    // Only providers CredentialsManager has actually test-connected ('status:
+    // verified') are considered — never a hardcoded guess — capped at
+    // MAX_FALLBACK_PROVIDERS total attempts and never retrying `selectedFamily`.
+    for (const candidate of this.buildVerifiedFallbackCandidates(triedFamilies)) {
+      triedFamilies.add(candidate.family);
+      const outcome = yield* this.attemptProviderFamily(candidate.family, candidate.modelId, userContent, systemPromptOverride, finalSystemPrompt, abortSignal, commit);
+      if (outcome === 'success') return;
+      if (outcome === 'failed-post-commit') { yield LLMHelper.TRUNCATION_SENTINEL; return; }
     }
 
-    // 4. Gemini Routing & Fallback
-    if (this.client) {
-      // CACHE: pass system prompt via `systemInstruction` so it is structurally
-      // separated from per-request user content. Static content also leads in
-      // `userContent` is not the case — userContent is dynamic — so the system
-      // instruction channel is the cacheable surface for Gemini.
-      //
-      // SERIAL GEMINI CASCADE (full ladder flash-lite → flash → pro). The user's
-      // selected Gemini model is the STARTING rung and the cascade falls FORWARD
-      // (toward more capable) from there: pick Pro → Pro only; pick Flash →
-      // Flash→Pro; default/flash-lite (and non-Gemini selections that fell
-      // through to here) → full ladder. No tail-latency hedge. The commit-point-
-      // safe engine (textStreamFallback) guarantees a provider that has yielded
-      // its first token is never switched mid-stream. See streamGeminiTextCascade.
-      //
-      // If the cascade throws, NOTHING was yielded (it only throws pre-commit, or
-      // aborts the whole chain on a permanent shared-key failure — expired key /
-      // no credits / 401/403). In that case fall through to a DIFFERENT provider
-      // (Natively below) instead of failing the whole answer: a dead Gemini key
-      // should not take the live answer down when another provider is configured.
-      let geminiYielded = false;
-      try {
-        for await (const chunk of this.streamGeminiTextCascade(userContent, imagePaths, finalSystemPrompt, abortSignal, thinkingBudget)) {
-          geminiYielded = true;
-          // Mirror into the generator-wide commit state so the last-resort
-          // providers below observe the same fact this block already tracks.
-          if (typeof chunk === 'string' && chunk.trim().length > 0) commit.emitted = true;
-          yield chunk;
-        }
-        return;
-      } catch (e: any) {
-        this.recordProviderFailure('Gemini', e?.message || String(e));
-        // Mid-stream: cannot switch providers (would append a second full
-        // answer onto the partial one the user is already reading).
-        //
-        // Code-review 2026-08-13: this was the last post-commit site still
-        // THROWING while the other eight yield TRUNCATION_SENTINEL and return.
-        // A throw bypasses _streamChatTracked's sentinel branch entirely, so
-        // outcome.truncated stayed false, `gemini-stream-done` was never sent,
-        // and ipcHandlers ran its generation-FAILURE path — an error banner
-        // over an answer the user had already partly read. Since the Gemini
-        // cascade is the primary text path, the branch's whole `incomplete`
-        // signal was dead exactly where it mattered most. A caller abort still
-        // throws: that is a cancellation, not a truncated answer.
-        if (abortSignal?.aborted) throw e;
-        if (geminiYielded) {
-          console.warn('[LLMHelper] Gemini cascade failed AFTER first token — ending stream rather than appending a second answer:', e?.message || e);
-          yield LLMHelper.TRUNCATION_SENTINEL;
+    // ── OLLAMA AS FALLBACK (Problem 25) ─────────────────────────────────────
+    // Every cloud candidate above is exhausted (or never verified) — try the
+    // local runtime before giving up entirely. `probeOllama` already respects
+    // the disabled-providers toggle; it needs no separate local-only check
+    // because MORE local is always the correct direction under local-only.
+    if (!triedFamilies.has('ollama')) {
+      const ollamaProbe = await this.probeOllama(false);
+      if (ollamaProbe.ok && ollamaProbe.model) {
+        const ollamaSystemPrompt = this.resolveLocalSystemPrompt(finalSystemPrompt);
+        try {
+          yield* this.trackCommit(this.streamWithOllama(message, combinedContext || undefined, ollamaSystemPrompt, undefined, abortSignal, ollamaProbe.model), commit);
+          this.recordActualStream('ollama', ollamaProbe.model);
           return;
+        } catch (e: any) {
+          if (abortSignal?.aborted) throw e;
+          if (commit.emitted) { yield LLMHelper.TRUNCATION_SENTINEL; return; }
+          this.recordProviderFailure('Ollama', e?.message || String(e));
+          console.warn('[LLMHelper] Ollama fallback failed:', e?.message || e);
         }
-        console.warn('[LLMHelper] Gemini cascade failed pre-commit — falling through to next provider:', e?.message || e);
-        // fall through to the Natively last-resort below
-      }
-    }
-
-    // Groq is a configured cloud fallback even when the selected model belongs
-    // to another family. This keeps an available provider from being skipped
-    // after the Gemini cascade exhausts.
-    if (this.groqClient && !this._groqLocalDisabled) {
-      try {
-        const groqSystem = this.injectLanguageInstruction(systemPromptOverride || GROQ_SYSTEM_PROMPT);
-        yield* this.trackCommit(this.streamWithGroq(userContent, GROQ_MODEL, groqSystem, abortSignal), commit);
-        return;
-      } catch (e: any) {
-        if (commit.emitted) {
-          yield LLMHelper.TRUNCATION_SENTINEL;
-          return;
-        }
-        this.recordProviderFailure('Groq', e?.message || String(e));
-        console.warn('[LLMHelper] Groq fallback failed:', e?.message || e);
       }
     }
 
@@ -7110,8 +7246,7 @@ let isMultimodal = !!(imagePaths?.length);
     // (settings flag isLocalOnlyMode=true) MUST NOT have a saved custom cloud
     // gateway fire as a fallback. streamWithCustom has no internal
     // isLocalOnlyMode guard (unlike every other cloud provider below), so the
-    // gate lives here. Same guard is mirrored in installConfiguredCustomForRace
-    // so the Natively TTFT race also respects local-only.
+    // gate lives here. Same guard is mirrored in installConfiguredCustomForRace.
     if (configuredCustom && !this.isLocalOnlyMode && !(isMultimodal && imagePaths)) {
       const prevCustom = this.customProvider;
       this.customProvider = configuredCustom;
@@ -7123,6 +7258,7 @@ let isMultimodal = !!(imagePaths?.length);
       }
       try {
         yield* this.trackCommit(this.streamWithCustom(message, context, undefined, finalSystemPrompt, abortSignal), commit);
+        this.recordActualStream('custom', configuredCustom.id);
         return;
       } catch (e: any) {
         if (commit.emitted) {
@@ -7175,7 +7311,7 @@ let isMultimodal = !!(imagePaths?.length);
       stream: true as const,
       temperature: INTERACTIVE_TEMPERATURE,
       seed: INTERACTIVE_SEED, // Groq honors seed for near-deterministic output
-      max_tokens: 8192,
+      max_tokens: resolveMaxOutputTokens({ id: modelId, provider: 'groq' }, { fallback: 8192 }),
     };
     require('./llm/providerPayloadCapture').captureProviderPayload({
       provider: 'groq', classification: 'sdk_request_object_before_serialization', payload: request,
@@ -7225,7 +7361,7 @@ let isMultimodal = !!(imagePaths?.length);
       model: GROQ_VISION_MODEL,
       messages,
       stream: true,
-      max_tokens: 8192,
+      max_tokens: resolveMaxOutputTokens({ id: GROQ_VISION_MODEL, provider: 'groq' }, { fallback: 8192 }),
       temperature: 1,
       top_p: 1,
       stop: null
@@ -7632,7 +7768,7 @@ let isMultimodal = !!(imagePaths?.length);
     if (_gmeasure) console.log(`[Gemini.stream] +${Date.now() - _gt0}ms  cache resolve done (cacheHit=${Boolean(cacheName)}, sysPrompt=${systemInstruction?.length ?? 0}c, model=${model})`);
 
     const buildConfig = (useCacheName: string | null) => ({
-      maxOutputTokens: MAX_OUTPUT_TOKENS,
+      maxOutputTokens: resolveMaxOutputTokens({ id: model, provider: 'gemini' }, { fallback: MAX_OUTPUT_TOKENS }),
       temperature: INTERACTIVE_TEMPERATURE,
       seed: INTERACTIVE_SEED, // Gemini v1alpha honors seed in generationConfig
       // Per-request thinking config (doc-correct 3.x thinkingLevel): 'minimal'
@@ -7863,9 +7999,18 @@ let isMultimodal = !!(imagePaths?.length);
           // Escape hatch: set OLLAMA_MAX_OUTPUT_TOKENS in the environment to
           // re-enable a client-side cap (useful for power users with custom
           // Modelfiles or those running tiny models that need bounding).
-          num_predict: process.env.OLLAMA_MAX_OUTPUT_TOKENS
-            ? Number(process.env.OLLAMA_MAX_OUTPUT_TOKENS)
-            : undefined,
+          // Routed through resolveMaxOutputTokens (Problem 19: one resolver
+          // per provider) but `uncapped: true` preserves the deliberate
+          // no-cap default above when neither a registry override nor the
+          // env escape hatch is set — see the comment above num_predict.
+          num_predict: resolveMaxOutputTokens(
+            { id: ollamaModel, provider: 'ollama' },
+            {
+              isOllama: true,
+              fallback: process.env.OLLAMA_MAX_OUTPUT_TOKENS ? Number(process.env.OLLAMA_MAX_OUTPUT_TOKENS) : undefined,
+              uncapped: !process.env.OLLAMA_MAX_OUTPUT_TOKENS,
+            },
+          ),
         }
       };
       if (this.isThinkingModel(ollamaModel)) streamBody.think = false;
@@ -8168,6 +8313,11 @@ let isMultimodal = !!(imagePaths?.length);
     return this.currentModelId === 'natively';
   }
 
+  /** The configured Ollama base URL (respects OLLAMA_HOST / an explicit switchToOllama url) — for callers outside this class that need to talk to the same daemon (e.g. the Settings "Test Connection" probe). */
+  public getOllamaBaseUrl(): string {
+    return (this.ollamaUrl || require('./services/OllamaManager').resolveDefaultOllamaUrl()).replace('localhost', '127.0.0.1');
+  }
+
   public async getOllamaModels(): Promise<string[]> {
     const baseUrl = (this.ollamaUrl || "http://127.0.0.1:11434").replace('localhost', '127.0.0.1');
 
@@ -8351,24 +8501,49 @@ let isMultimodal = !!(imagePaths?.length);
 
       console.log('[LLMHelper] Attempting to force restart Ollama...');
 
-      // 1. Check for process on port 11434
+      // 1. Check for a stale/zombie process already bound to the Ollama port.
+      // `lsof`/`kill` exist on macOS and Linux but NOT on Windows — this app
+      // ships on both (see CLAUDE.md cross-platform contract), so Windows
+      // needs its own `netstat`/`taskkill` path rather than silently no-op'ing
+      // (which would leave a blocked port unexplained on every Windows user).
+      // Port is read from the configured ollamaUrl (respects OLLAMA_HOST),
+      // not hardcoded — a remapped port would otherwise kill nothing.
+      const ollamaPort = (() => {
+        try { return new URL(this.ollamaUrl).port || '11434'; } catch { return '11434'; }
+      })();
       try {
-        const { stdout } = await execAsync(`lsof -t -i:11434`);
-        // SECURITY FIX (P1-1): Validate EACH PID token from lsof before shell interpolation.
-        // lsof -t returns one PID per line when multiple processes are on the port.
-        const pids = stdout.trim().split(/\s+/).filter(p => /^\d+$/.test(p));
-        for (const pid of pids) {
-          console.log(`[LLMHelper] Found blocking PID: ${pid}. Killing...`);
-          await execAsync(`kill -9 ${pid}`);
-        }
-        if (pids.length === 0 && stdout.trim()) {
-          console.warn(`[LLMHelper] Unexpected lsof output (no valid PIDs): "${stdout.trim().substring(0, 50)}". Skipping kill.`);
+        if (process.platform === 'win32') {
+          const { stdout } = await execAsync(`netstat -ano | findstr :${ollamaPort}`);
+          // One PID per matching line, in the last column of `netstat -ano` output.
+          const pids = new Set<string>();
+          for (const line of stdout.split(/\r?\n/)) {
+            const cols = line.trim().split(/\s+/);
+            const pid = cols[cols.length - 1];
+            if (/^\d+$/.test(pid) && pid !== '0') pids.add(pid);
+          }
+          for (const pid of pids) {
+            console.log(`[LLMHelper] Found blocking PID: ${pid}. Killing...`);
+            await execAsync(`taskkill /F /PID ${pid}`);
+          }
+        } else {
+          const { stdout } = await execAsync(`lsof -t -i:${ollamaPort}`);
+          // SECURITY FIX (P1-1): Validate EACH PID token from lsof before shell interpolation.
+          // lsof -t returns one PID per line when multiple processes are on the port.
+          const pids = stdout.trim().split(/\s+/).filter(p => /^\d+$/.test(p));
+          for (const pid of pids) {
+            console.log(`[LLMHelper] Found blocking PID: ${pid}. Killing...`);
+            await execAsync(`kill -9 ${pid}`);
+          }
+          if (pids.length === 0 && stdout.trim()) {
+            console.warn(`[LLMHelper] Unexpected lsof output (no valid PIDs): "${stdout.trim().substring(0, 50)}". Skipping kill.`);
+          }
         }
       } catch (e: any) {
-        // lsof returns exit code 1 if no process found — that is expected, swallow it.
-        // Only surface genuinely unexpected errors.
+        // lsof/findstr both return a non-zero exit code when no process is found
+        // on the port — that is the expected, common case. Only surface
+        // genuinely unexpected errors.
         if (!e.message?.includes('exit code 1') && e.code !== 1) {
-          console.warn('[LLMHelper] lsof error (non-fatal):', e.message);
+          console.warn('[LLMHelper] port-check error (non-fatal):', e.message);
         }
       }
 

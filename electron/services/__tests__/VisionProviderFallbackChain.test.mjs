@@ -351,9 +351,11 @@ test('telemetry callback fires for attempt, success, fallback, failed, skipped',
   await optimizer.cleanupAll();
 });
 
-test('OCR modules are not imported by the vision fallback chain source', async () => {
+test('OCR modules are not imported by the vision provider-selection chain', async () => {
   // ESM has no require.cache; verify at the source-import level instead — the
-  // chain file must not statically import any OCR module.
+  // chain/registry files (provider selection + invocation) must not statically
+  // import any OCR module. This invariant is unchanged by Sprint S7 (Problem
+  // 40): OCR never becomes a vision PROVIDER or influences provider ordering.
   const chainSource = await fs.readFile(path.join(screenDir, 'VisionProviderFallbackChain.js'), 'utf8');
   assert.ok(!/OcrProvider/.test(chainSource), 'VisionProviderFallbackChain.js must not reference OcrProvider');
   assert.ok(!/OcrProviderManager/.test(chainSource), 'VisionProviderFallbackChain.js must not reference OcrProviderManager');
@@ -362,8 +364,28 @@ test('OCR modules are not imported by the vision fallback chain source', async (
   const registrySource = await fs.readFile(path.join(screenDir, 'VisionProviderRegistry.js'), 'utf8');
   assert.ok(!/OcrProvider/.test(registrySource), 'VisionProviderRegistry.js must not reference OcrProvider');
   assert.ok(!/tesseract/i.test(registrySource), 'VisionProviderRegistry.js must not reference tesseract');
+});
 
-  const susSource = await fs.readFile(path.join(screenDir, 'ScreenUnderstandingService.js'), 'utf8');
-  assert.ok(!/OcrProvider/.test(susSource), 'ScreenUnderstandingService.js must not reference OcrProvider');
-  assert.ok(!/tesseract/i.test(susSource), 'ScreenUnderstandingService.js must not reference tesseract');
+test('ScreenUnderstandingService reaches OCR only through the isolated best-effort ScreenOcrBridge (Sprint S7, Problem 40), never the raw provider APIs directly', async () => {
+  // Sprint S7 deliberately re-introduces OCR as a SUPPLEMENT to vision (dual
+  // path for accuracy — a vision model's transcription can misread a table or
+  // code block; Tesseract gives back the literal characters as a second,
+  // independent source). This does not reopen the OCR-first/OCR-only pivot
+  // this file otherwise guards against: OCR still never selects or ranks a
+  // vision PROVIDER (see the chain/registry assertions above), it only
+  // supplies extra context text, best-effort and in parallel, via one
+  // narrow, swappable seam. Checked against the .ts SOURCE (not the bundled
+  // .js) because esbuild inlines transitive imports, which would make a
+  // bundle-level string search for "OcrProviderManager" true either way.
+  const susTsSource = await fs.readFile(
+    path.join(root, 'electron/services/screen/ScreenUnderstandingService.ts'), 'utf8',
+  );
+  assert.ok(!/from ['"]\.\/OcrProvider['"]/.test(susTsSource), 'must not import the raw OcrProvider module directly');
+  assert.ok(!/from ['"]\.\/OcrProviderManager['"]/.test(susTsSource), 'must not import OcrProviderManager directly — go through ScreenOcrBridge');
+  assert.ok(/from ['"]\.\/ScreenOcrBridge['"]/.test(susTsSource), 'the OCR dual path must go through the isolated ScreenOcrBridge seam');
+
+  const bridgeTsSource = await fs.readFile(
+    path.join(root, 'electron/services/screen/ScreenOcrBridge.ts'), 'utf8',
+  );
+  assert.ok(/from ['"]\.\/OcrProviderManager['"]/.test(bridgeTsSource), 'ScreenOcrBridge is the one seam allowed to talk to OcrProviderManager');
 });

@@ -196,6 +196,44 @@ export function selectPromptTier(modelId: string, isOllama: boolean): PromptTier
   return getModelCapabilities(modelId, isOllama).tier === 'local-small' ? 'tiny' : 'full';
 }
 
+/**
+ * Minimal duck-typed view of a provider-registry VerifiedModelBinding (see
+ * providerRegistry.ts) — not imported directly, since providerRegistry.ts
+ * already imports getModelCapabilities from this file and a reverse import
+ * would be circular.
+ */
+export interface MaxOutputTokensBinding {
+  id: string;
+  provider?: string;
+  maxOutputTokens?: number;
+}
+
+export interface ResolveMaxOutputTokensOptions {
+  isOllama?: boolean;
+  /** Caller's current hardcoded/legacy default — wins over the getModelCapabilities fallback so wiring this resolver in never regresses an existing call site's behavior. */
+  fallback?: number;
+  /** True when the caller intentionally wants no cap sent to the provider at all (e.g. Ollama's num_predict, left uncapped by design — see streamWithOllama). Only takes effect when there is no binding override and no fallback. */
+  uncapped?: boolean;
+}
+
+/**
+ * Unified per-model max OUTPUT (completion) token resolver (Problem 19).
+ * Priority: an explicit registry/UI-configured `binding.maxOutputTokens`
+ * always wins; otherwise the caller's own fallback (its previous hardcoded
+ * value, kept for compatibility); otherwise `uncapped` (undefined — no cap
+ * sent); otherwise this module's own tiered default.
+ */
+export function resolveMaxOutputTokens(
+  binding: MaxOutputTokensBinding,
+  opts: ResolveMaxOutputTokensOptions = {},
+): number | undefined {
+  if (binding.maxOutputTokens && binding.maxOutputTokens > 0) return Math.floor(binding.maxOutputTokens);
+  if (opts.fallback && opts.fallback > 0) return opts.fallback;
+  if (opts.uncapped) return undefined;
+  const isOllama = opts.isOllama ?? binding.provider === 'ollama';
+  return getModelCapabilities(binding.id, isOllama).outputBudgetTokens;
+}
+
 export function estimateTokens(text: string): number {
   if (!text) return 0;
   return Math.ceil(text.length / 4);

@@ -1747,10 +1747,10 @@ export const HelpSettings: React.FC<{ onNavigate?: (tab: string) => void }> = ({
                     <div className="space-y-4">
                         <div className="p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-xl mb-4">
                             <h4 className="text-[13px] font-semibold text-indigo-400 flex items-center gap-2 mb-1">
-                                <Ghost size={14} /> Process Disguise & Undetectability
+                                <Ghost size={14} /> Process Disguise & Best-Effort Stealth
                             </h4>
                             <p className="text-[11px] text-text-secondary leading-relaxed mb-0">
-                                Natively is heavily geared towards power users seeking minimalistic operation. The process completely disguises itself and remains undetectable/invisible to standard screen-recording applications and desktop sharing utilities.
+                                Natively is heavily geared towards power users seeking minimalistic operation. The process disguises itself and, on a best-effort basis, is excluded from most standard screen-recording applications and desktop sharing utilities. This is not a guarantee: it does not defeat dedicated proctoring software, OS-level capture APIs can still see the overlay, and a phone camera pointed at your screen always can. Using the microphone or screen capture still triggers your OS&apos;s own indicators (e.g. the macOS menu-bar mic/screen dot, or Windows&apos; microphone/camera privacy icons) — Natively cannot hide those.
                             </p>
                         </div>
 

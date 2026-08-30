@@ -1113,6 +1113,15 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
   const isRecordingRef = useRef(false); // Ref to track recording state (avoids stale closure)
   const [manualTranscript, setManualTranscript] = useState('');
   const manualTranscriptRef = useRef<string>('');
+  // Listen → Analyze audio state machine (Idle → Listening → Speaking detected
+  // → Transcribing → Processing). Deliberately independent from
+  // `showAnswerPanel` so the indicator stays visible for the whole session
+  // even during the brief window where messages/isProcessing/isManualRecording
+  // are all momentarily false (right after Analyze stops recording, before the
+  // AI request starts).
+  const [audioSessionState, setAudioSessionState] = useState<
+    'idle' | 'listening' | 'speaking' | 'transcribing' | 'processing'
+  >('idle');
   const [showTranscript, setShowTranscript] = useState(() => {
     const stored = localStorage.getItem('natively_interviewer_transcript');
     return stored !== 'false';
@@ -4829,6 +4838,10 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
         // When Answer button is active, capture USER transcripts for voice input
         // Use ref to avoid stale closure issue
         if (isRecordingRef.current && transcript.speaker === 'user') {
+          // First sound from the user's mic after Listen — surface "Speaking
+          // detected" so the state machine reflects real audio, not just the
+          // button press.
+          setAudioSessionState((prev) => (prev === 'listening' ? 'speaking' : prev));
           if (transcript.final) {
             // Accumulate final transcripts, collapsing STT overlap/re-transcription
             // races (RC5, docs/context-rebuild/03_LIVE_REPRO_FINDINGS.md item 4)
@@ -6179,36 +6192,90 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
     manualTranscriptRef.current = '';
   };
 
-  const handleAnswerNow = async () => {
-    if (isManualRecording) {
-      if (!tryBeginOverlayAction('answer_now')) return;
-      try {
-        // Stop recording, finalize the active STT session, then wait a beat for
-        // final transcript chunks to land before consuming the transcript.
-        isRecordingRef.current = false;
-        setIsManualRecording(false);
-        setManualTranscript('');
+  // The shared `isProcessing` flag is flipped false by several different
+  // stream-completion paths (see the various `setIsProcessing(false)` call
+  // sites), not just this one. Rather than duplicate that completion logic,
+  // watch it here: once a 'processing' audio session sees isProcessing go
+  // false, the answer has landed in chat and the session is done.
+  useEffect(() => {
+    if (!isProcessing && audioSessionState === 'processing') {
+      setAudioSessionState('idle');
+    }
+  }, [isProcessing, audioSessionState]);
 
-        window.electronAPI
-          ?.finalizeMicSTT?.()
-          .catch((err) => console.error('[NativelyInterface] Failed to send finalizeMicSTT:', err));
+  // ── Listen ── Start mic/STT capture for a manual push-to-talk turn.
+  //
+  // NativelyInterface only mounts as the overlay's *meeting* UI (see
+  // App.tsx's `isOverlayWindow` branch) — the window swap to this component
+  // happens inside main's startMeeting(), which is what actually constructs
+  // MicrophoneCapture + the user STT provider and starts them
+  // (setupSystemAudioPipeline / startCaptureChannels in electron/main.ts).
+  // So by the time this button is clickable, the real mic/STT pipeline is
+  // already running continuously for the life of the meeting; "Listen" gates
+  // which transcript chunks the UI accumulates (see `isRecordingRef` check in
+  // the onNativeAudioTranscript listener), it does not need to open the mic
+  // itself. The defensive `getMeetingActive`/`startMeeting` call below covers
+  // the one edge case where that invariant doesn't hold (e.g. a dev harness
+  // rendering this component without a real meeting) by reusing the exact
+  // same cross-platform mic/STT start path the Launcher uses — never a new,
+  // untested capture path.
+  const handleStartListening = () => {
+    setVoiceInput('');
+    voiceInputRef.current = '';
+    setManualTranscript('');
+    manualTranscriptRef.current = '';
+    isRecordingRef.current = true; // Update ref immediately
+    setIsManualRecording(true);
+    setAudioSessionState('listening');
+    // Force the overlay open so the live transcript is immediately visible.
+    setIsExpanded(true);
 
-        await new Promise((resolve) => setTimeout(resolve, 220));
+    void window.electronAPI
+      .getMeetingActive()
+      .then((active) => (active ? undefined : window.electronAPI.startMeeting()))
+      .catch((err) =>
+        console.error('[NativelyInterface] Failed to verify meeting/mic state on Listen:', err),
+      );
+  };
 
-        const currentAttachments = attachedContext;
-        setAttachedContext([]);
+  // ── Analyze ── Auto-stop the Listen capture, finalize the STT turn, and
+  // send the transcribed question to the AI. Split out of the old
+  // handleAnswerNow toggle so TopControlBar can expose Listen/Analyze as two
+  // distinct actions (Problem 47) while the keyboard shortcut / phone-bridge
+  // "answer" action and the legacy quick-action chip keep their existing
+  // toggle behavior via `handleAnswerNow` below.
+  const handleAnalyzeNow = async () => {
+    if (!isManualRecording) return;
+    if (!tryBeginOverlayAction('answer_now')) return;
+    try {
+      // Stop recording, finalize the active STT session, then wait a beat for
+      // final transcript chunks to land before consuming the transcript.
+      isRecordingRef.current = false;
+      setIsManualRecording(false);
+      setManualTranscript('');
+      setAudioSessionState('transcribing');
 
-        const question = mergeTranscriptChunks(
-          voiceInputRef.current,
-          manualTranscriptRef.current,
-        ).trim();
-        setVoiceInput('');
-        voiceInputRef.current = '';
-        setManualTranscript('');
-        manualTranscriptRef.current = '';
+      window.electronAPI
+        ?.finalizeMicSTT?.()
+        .catch((err) => console.error('[NativelyInterface] Failed to send finalizeMicSTT:', err));
 
-        if (!question && currentAttachments.length === 0) {
-          if (sttUserStatus === 'failed' && sttUserError) {
+      await new Promise((resolve) => setTimeout(resolve, 220));
+
+      const currentAttachments = attachedContext;
+      setAttachedContext([]);
+
+      const question = mergeTranscriptChunks(
+        voiceInputRef.current,
+        manualTranscriptRef.current,
+      ).trim();
+      setVoiceInput('');
+      voiceInputRef.current = '';
+      setManualTranscript('');
+      manualTranscriptRef.current = '';
+
+      if (!question && currentAttachments.length === 0) {
+        setAudioSessionState('idle');
+        if (sttUserStatus === 'failed' && sttUserError) {
             const errCat = categorizeSttError(sttUserError);
             setMessages((prev) => [
               ...prev,
@@ -6282,6 +6349,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
         ]);
 
         setIsProcessing(true);
+        setAudioSessionState('processing');
 
         try {
           let prompt = '';
@@ -6324,11 +6392,17 @@ Provide only the answer, nothing else.`;
           chatStreamIdRef.current = null;
           chatStreamSourceRef.current = 'desktop';
           requestStartTimeRef.current = Date.now();
+          // Sprint S6 (Problems 29-30): deliberately only 3 args here, same
+          // shape as handleManualSubmit's streamGeminiChat call below — no
+          // options object opting this turn out of the system prompt. That
+          // flag used to mark this call "caller owns the whole prompt", which
+          // skipped Context Intelligence V3 (and with it My Files / résumé /
+          // JD retrieval, mode evidence, conversation continuity) entirely.
+          // Removing it lets voice answers ground the same way typed ones do.
           await window.electronAPI.streamGeminiChat(
             question,
             currentAttachments.length > 0 ? currentAttachments.map((s) => s.path) : undefined,
             prompt,
-            { skipSystemPrompt: true },
           );
         } catch (err) {
           // R-17: a throw from invoke() never reaches the main process, so no
@@ -6338,6 +6412,7 @@ Provide only the answer, nothing else.`;
           chatStreamIdRef.current = null;
           chatStreamSourceRef.current = null;
           setIsProcessing(false);
+          setAudioSessionState('idle');
           setMessages((prev) => {
             const last = prev[prev.length - 1];
             if (last && last.isStreaming && last.text === '') {
@@ -6357,9 +6432,19 @@ Provide only the answer, nothing else.`;
             ];
           });
         }
-      } finally {
-        endOverlayAction('answer_now');
-      }
+    } finally {
+      endOverlayAction('answer_now');
+    }
+  };
+
+  // Legacy combined toggle — first press starts Listen, second press
+  // triggers Analyze. Kept for the keyboard shortcut ("answer"), the
+  // phone-bridge remote-control action, and the quick-action chip, all of
+  // which predate the TopControlBar's dedicated Listen/Analyze buttons and
+  // expect a single alternating action.
+  const handleAnswerNow = async () => {
+    if (isManualRecording) {
+      await handleAnalyzeNow();
     } else {
       handleStartListening();
     }
@@ -7959,6 +8044,23 @@ Provide only the answer, nothing else.`;
   );
   const showAnswerPanel =
     messages.length > 0 || isManualRecording || isProcessing || answerPanelPinned;
+  // Labels + tone for the Listen → Analyze audio state machine indicator
+  // (Problems 43-44). `text-*` sets `currentColor` so the card's nested
+  // border/bg `-current` utilities pick up the right tone automatically.
+  const audioStateLabel: Record<typeof audioSessionState, string> = {
+    idle: '',
+    listening: t('Listening'),
+    speaking: t('Speaking detected'),
+    transcribing: t('Transcribing'),
+    processing: t('Processing'),
+  };
+  const audioStateToneClass: Record<typeof audioSessionState, string> = {
+    idle: '',
+    listening: 'border-emerald-500/25 bg-emerald-500/10 text-emerald-300',
+    speaking: 'border-emerald-500/35 bg-emerald-500/15 text-emerald-200',
+    transcribing: 'border-amber-500/25 bg-amber-500/10 text-amber-300',
+    processing: 'border-sky-500/25 bg-sky-500/10 text-sky-300',
+  };
   // Only surface the STT pill for genuine problems (config error, failed, or a
   // dropped-then-reconnecting channel). The neutral 'awaiting-audio' state
   // ("Listening for audio…") is intentionally suppressed — it added a pill on
@@ -8057,6 +8159,32 @@ Provide only the answer, nothing else.`;
 
   return (
     <>
+    <TopControlBar
+      isListening={isManualRecording}
+      isProcessing={isProcessing}
+      currentModel={currentModel}
+      currentModelDisplayName={currentModelDisplayName}
+      activeModeLabel={activeModeLabel}
+      inputValue={inputValue}
+      onListen={() => void handleAnswerNow()}
+      onAnswer={() => void handleWhatToSay()}
+      onAsk={() => {
+        if (inputValue.trim()) {
+          void handleManualSubmit();
+        } else {
+          textInputRef.current?.focus();
+        }
+      }}
+      onScreen={() => void generalHandlersRef.current.takeScreenshot()}
+      onModel={(anchor) => {
+        const rect = anchor.getBoundingClientRect();
+        void window.electronAPI.toggleModelSelector({
+          x: window.screenX + rect.left,
+          y: window.screenY + rect.bottom + 8,
+          activate: false,
+        });
+      }}
+    />
     {/* The resize toggle and the TopPill render in their OWN aux
         BrowserWindows (OverlayAuxWindows.tsx), positioned by the main
         process around this window. This window is exactly the shell card.
@@ -8569,6 +8697,41 @@ Provide only the answer, nothing else.`;
                 />
               ) : null}
 
+              {/* Listen → Analyze audio state machine + live transcript.
+                  Deliberately rendered OUTSIDE the `showAnswerPanel` gate: that
+                  gate can go false for a beat right when Analyze stops
+                  recording (isManualRecording flips false a tick before
+                  isProcessing flips true), which used to unmount this block —
+                  and with it the live transcript — mid-session. Gating on
+                  `audioSessionState` instead keeps it visible continuously
+                  through Listening → Speaking detected → Transcribing →
+                  Processing. */}
+              {audioSessionState !== 'idle' && (
+                <div className="relative z-20 px-4 pt-2 no-drag">
+                  <div
+                    className={`flex flex-col items-end gap-2 rounded-[16px] border px-3 py-2 backdrop-blur-sm ${audioStateToneClass[audioSessionState]}`}
+                  >
+                    <div className="flex w-full items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.18em]">
+                        <div className="h-2 w-2 rounded-full bg-current animate-pulse" />
+                        <span>{audioStateLabel[audioSessionState]}</span>
+                      </div>
+                      {(audioSessionState === 'listening' || audioSessionState === 'speaking') && (
+                        <span className="text-[10px] opacity-70">{t('Live transcription')}</span>
+                      )}
+                    </div>
+                    {(manualTranscript || voiceInput) &&
+                      (audioSessionState === 'listening' || audioSessionState === 'speaking') && (
+                        <div className="w-full max-w-[90%] self-end rounded-[14px] rounded-tr-[4px] border border-current/20 bg-current/5 px-3 py-2 text-left text-[12.5px]">
+                          {voiceInput}
+                          {voiceInput && manualTranscript ? ' ' : ''}
+                          {manualTranscript}
+                        </div>
+                      )}
+                  </div>
+                </div>
+              )}
+
               {/* Chat History - Only show if there are messages OR active states */}
               {showAnswerPanel && (
                 <motion.div
@@ -8577,27 +8740,6 @@ Provide only the answer, nothing else.`;
                   layout={false}
                   style={{ scrollbarWidth: 'none', maxHeight: scrollMaxH }}
                 >
-                  {/* Active recording state stays pinned above the message list so it
-                      remains visible while the conversation scrolls underneath it. */}
-                  {isManualRecording && (
-                    <div className="sticky top-0 z-20 mb-2 flex flex-col items-end gap-2 rounded-[16px] border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 backdrop-blur-sm">
-                      <div className="flex w-full items-center justify-between gap-2">
-                        <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.18em] text-emerald-300/80">
-                          <div className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-                          <span>{t('Listening')}</span>
-                        </div>
-                        <span className="text-[10px] text-emerald-300/70">{t('Live transcription')}</span>
-                      </div>
-                      {(manualTranscript || voiceInput) && (
-                        <div className="w-full max-w-[90%] self-end rounded-[14px] rounded-tr-[4px] border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-left text-[12.5px] text-emerald-200">
-                          {voiceInput}
-                          {voiceInput && manualTranscript ? ' ' : ''}
-                          {manualTranscript}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
                   {/* Every row spans the full inner width of the scroll
                                         container, which itself rides the shell's animated
                                         width. Bubble max-widths are percentages so the text

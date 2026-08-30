@@ -10,6 +10,42 @@ export interface DynamicActionEvidenceRef {
   chunkId?: string
 }
 
+// Mirrors electron/llm/providerRegistry.ts — structural copy, not an import,
+// per the main↔renderer type boundary documented above.
+export interface VerifiedModelBinding {
+  id: string
+  provider: 'gemini' | 'groq' | 'openai' | 'claude' | 'deepseek' | 'nvidia_nim' | 'litellm' | 'ollama' | 'codex-cli' | 'custom'
+  label: string
+  capabilities: { chat: boolean; vision: boolean; streaming: boolean }
+  contextWindow?: number
+  maxOutputTokens?: number
+  source: 'live-probe' | 'ollama-tags' | 'litellm-info' | 'preset'
+  verifiedAt: number
+  lastError?: string
+}
+
+// Mirrors electron/personalKnowledge/PersonalKnowledgeManager.ts PersonalFileRecord.
+export type PersonalFileType = 'resume' | 'job_description' | 'general'
+export interface PersonalFileRecordShape {
+  id: string
+  fileName: string
+  mimeType: string
+  sizeBytes: number
+  createdAt: string
+  updatedAt: string
+  chunkCount: number
+  fileType: PersonalFileType
+  indexStatus: 'indexing' | 'done' | 'lexical_only'
+}
+
+export interface ProviderHealth {
+  status: 'disconnected' | 'verified' | 'degraded'
+  authOk: boolean
+  lastProbeAt: number
+  lastError?: { code: string; message: string }
+  models: VerifiedModelBinding[]
+}
+
 export interface DynamicActionPayload {
   id: string
   sessionId: string
@@ -40,18 +76,23 @@ export interface ElectronAPI {
   personalFilesPickAndIngest?: () => Promise<{
     success?: boolean
     cancelled?: boolean
-    file?: { id: string; fileName: string; mimeType: string; sizeBytes: number; createdAt: string; updatedAt: string; chunkCount: number }
+    file?: PersonalFileRecordShape
     error?: string
   }>
   personalFilesList?: () => Promise<{
     success: boolean
-    files?: Array<{ id: string; fileName: string; mimeType: string; sizeBytes: number; createdAt: string; updatedAt: string; chunkCount: number }>
+    files?: PersonalFileRecordShape[]
     error?: string
   }>
   personalFilesDelete?: (fileId: string) => Promise<{ success: boolean; error?: string }>
   personalFilesSearch?: (query: string) => Promise<{
     success: boolean
     results?: Array<{ fileId: string; fileName: string; chunkId: string; text: string; score: number; startChar: number; endChar: number }>
+    error?: string
+  }>
+  personalFilesSetFileType?: (fileId: string, fileType: PersonalFileType) => Promise<{
+    success: boolean
+    file?: PersonalFileRecordShape
     error?: string
   }>
   // Overlay aux windows (pill / resize toggle) coordination
@@ -176,7 +217,9 @@ export interface ElectronAPI {
   runLocalFallbackPreflight: () => Promise<any>
   switchToOllama: (model?: string, url?: string) => Promise<{ success: boolean; error?: string }>
   switchToGemini: (apiKey?: string, modelId?: string) => Promise<{ success: boolean; error?: string }>
-  testLlmConnection: (provider: 'gemini' | 'groq' | 'openai' | 'claude' | 'deepseek' | 'nvidia_nim', apiKey?: string) => Promise<{ success: boolean; error?: string }>
+  testLlmConnection: (provider: 'gemini' | 'groq' | 'openai' | 'claude' | 'deepseek' | 'nvidia_nim', apiKey?: string) => Promise<{ success: boolean; error?: string; models?: { id: string; label: string }[]; health?: ProviderHealth }>
+  /** Persisted provider health, keyed by provider family — see providerRegistry.ts. */
+  getProviderHealth: () => Promise<Record<string, ProviderHealth>>
   selectServiceAccount: () => Promise<{ success: boolean; path?: string; cancelled?: boolean; error?: string }>
 
   // API Key Management
@@ -189,6 +232,8 @@ export interface ElectronAPI {
   setLitellmConfig: (config: { apiKey: string; baseURL: string; maxTokens?: number }) => Promise<{ success: boolean; error?: string }>
   getAvailableLiteLLMModels: () => Promise<string[]>
   refreshLiteLLMModels: () => Promise<string[]>
+  /** Problem 20 — real verification for the LiteLLM proxy: reachability + auth + chat probe. */
+  testLitellmConnection: (config?: { baseURL?: string; apiKey?: string }) => Promise<{ success: boolean; error?: string; models?: { id: string; label: string }[]; health?: ProviderHealth }>
   getCloudFetchedModels: () => Promise<{ models: Record<string, { id: string; label: string }[]>; fetchedAt: Record<string, number> }>
   fetchProviderModels: (provider: 'gemini' | 'groq' | 'openai' | 'claude' | 'deepseek' | 'nvidia_nim', apiKey?: string) => Promise<{ success: boolean; models?: Array<{ id: string; label: string }>; error?: string }>
   getDisabledProviders: () => Promise<string[]>
@@ -460,6 +505,8 @@ export interface ElectronAPI {
   modelSelectorCloseIfOpen: () => Promise<void>;
   forceRestartOllama: () => Promise<void>;
   isOllamaReachable: () => Promise<boolean>;
+  /** Problems 5, 21-25 — real Ollama verification: reachability + /api/tags + a minimal chat probe. */
+  testOllamaConnection: () => Promise<{ success: boolean; error?: string; models?: { id: string; label: string }[]; health?: ProviderHealth }>;
 
   // Settings Window
   toggleSettingsWindow: (coords?: { x: number; y: number }) => Promise<void>;
