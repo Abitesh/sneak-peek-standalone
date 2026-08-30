@@ -304,7 +304,7 @@ describe('no post-commit site in _streamChatInner ends the turn by throwing', ()
     .filter(({ line }) => /^\s*if \([^)]*(?:commit\.emitted|geminiYielded)\b[^)]*\)/.test(line));
 
   test('the post-commit guards are found (this test is not vacuous)', () => {
-    assert.ok(postCommitGuards.length >= 7, `expected the known post-commit sites, found ${postCommitGuards.length}`);
+    assert.ok(postCommitGuards.length >= 6, `expected the known post-commit sites, found ${postCommitGuards.length}`);
   });
 
   // streamChatWithGemini's rotation loop is the ONE documented exception:
@@ -321,18 +321,46 @@ describe('no post-commit site in _streamChatInner ends the turn by throwing', ()
   })();
   const inRagPath = (n) => n >= RAG_PATH_RANGE.startLine && n <= RAG_PATH_RANGE.endLine;
 
-  test('each one yields the sentinel and none of them throws', () => {
+  // Sprint S2 (ai-provider-pipeline-fix) introduced a SECOND documented
+  // exception: `attemptProviderFamily` is shared by the selected-provider
+  // attempt AND every fallback-cascade iteration, so it cannot yield the
+  // sentinel itself (its two callers are two DIFFERENT points in
+  // `_streamChatInner`, only one of which is live per call). It instead
+  // returns the typed status `'failed-post-commit'`, and each of its callers
+  // translates that into `yield LLMHelper.TRUNCATION_SENTINEL; return;`
+  // immediately — still "no post-commit site ends the turn by throwing", just
+  // one level of indirection removed from the guard itself. Keyed on the
+  // method's byte range for the same reason as the RAG-path exclusion above.
+  const attemptProviderFamilyRange = (() => {
+    const start = llmSrc.indexOf('private async * attemptProviderFamily(');
+    const end = llmSrc.indexOf('private async * _streamChatInner(', start); // next method after it
+    assert.ok(start > 0 && end > start, 'could not bound attemptProviderFamily');
+    return { startLine: llmSrc.slice(0, start).split('\n').length, endLine: llmSrc.slice(0, end).split('\n').length };
+  })();
+  const inAttemptProviderFamily = (n) => n >= attemptProviderFamilyRange.startLine && n <= attemptProviderFamilyRange.endLine;
+
+  test('each one yields the sentinel (or, for the shared helper, returns the typed status its callers turn into one) and none of them throws', () => {
     assert.ok(
       postCommitGuards.some(({ n }) => inRagPath(n)),
       'the RAG-path exception was not found inside streamChatWithGemini — the exclusion is not matching what it claims',
     );
+    assert.ok(
+      postCommitGuards.some(({ n }) => inAttemptProviderFamily(n)),
+      'the attemptProviderFamily exception was not found — the exclusion is not matching what it claims',
+    );
     for (const { n } of postCommitGuards) {
       const block = lines.slice(n - 1, n + 5).join('\n');
-      if (!inRagPath(n)) {
+      if (!inRagPath(n) && !inAttemptProviderFamily(n)) {
         assert.match(
           block,
           /yield LLMHelper\.TRUNCATION_SENTINEL;/,
           `post-commit site at L${n} does not signal truncation`,
+        );
+      } else if (inAttemptProviderFamily(n)) {
+        assert.match(
+          block,
+          /return 'failed-post-commit';/,
+          `attemptProviderFamily's post-commit guard at L${n} no longer returns the typed status its callers rely on`,
         );
       }
       assert.doesNotMatch(
@@ -343,13 +371,36 @@ describe('no post-commit site in _streamChatInner ends the turn by throwing', ()
     }
   });
 
+  test('both attemptProviderFamily callers turn the typed status into a sentinel + return', () => {
+    const callSites = [...llmSrc.matchAll(/yield\* this\.attemptProviderFamily\([^)]*\);\s*\n\s*if \(outcome === 'success'\) return;\s*\n\s*if \(outcome === 'failed-post-commit'\) \{ yield LLMHelper\.TRUNCATION_SENTINEL; return; \}/g)];
+    assert.ok(
+      callSites.length >= 2,
+      `expected the selected-provider attempt and the fallback-cascade loop to both convert 'failed-post-commit' into a sentinel + return, found ${callSites.length}`,
+    );
+  });
+
   test('a caller ABORT still throws — cancellation is not truncation', () => {
-    // The Gemini branch must distinguish the two: an aborted turn is the user
-    // cancelling, which should not be reported as a truncated answer.
-    const idx = llmSrc.indexOf('if (abortSignal?.aborted) throw e;');
-    assert.ok(idx > 0, 'the abort case must remain a throw');
-    const after = llmSrc.slice(idx, idx + 500);
-    assert.match(after, /if \(geminiYielded\) \{/, 'the truncation branch must follow the abort branch');
+    // Sprint S2 (ai-provider-pipeline-fix) folded the Gemini-specific inline
+    // cascade (which used to carry its OWN `geminiYielded` flag and its own
+    // abort check) into the generic `attemptProviderFamily`, which every
+    // family — including Gemini, via `streamGeminiTextCascade` — now goes
+    // through. `geminiYielded` no longer exists; the SAME distinction (abort
+    // is a cancellation, not a truncation) now lives once, generically, in
+    // `attemptProviderFamily`, and applies to Gemini exactly as it did before.
+    assert.doesNotMatch(
+      llmSrc,
+      /geminiYielded/,
+      'geminiYielded should stay gone — Gemini must route through the generic attemptProviderFamily, not a reintroduced special case',
+    );
+    assert.match(
+      llmSrc,
+      /case 'gemini':\s*\n\s*yield\* this\.streamGeminiTextCascade\(/,
+      'Gemini must be dispatched through dispatchProviderFamily (and therefore attemptProviderFamily), not a bespoke path',
+    );
+    const start = llmSrc.indexOf('private async * attemptProviderFamily(');
+    const abortIdx = llmSrc.indexOf('if (abortSignal?.aborted) throw e;', start);
+    const commitIdx = llmSrc.indexOf('if (commit.emitted) {', start);
+    assert.ok(abortIdx > start && commitIdx > abortIdx, 'attemptProviderFamily must check abort BEFORE commit.emitted, so a cancellation is never reported as a truncation');
   });
 });
 

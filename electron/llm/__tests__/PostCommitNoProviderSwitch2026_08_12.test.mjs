@@ -138,36 +138,63 @@ describe('every text-path fall-through site consults the commit flag', () => {
   test('no bare `yield* this.streamWith...` remains inside a catch-and-continue block', () => {
     // Every delegation that is followed by a catch which does NOT return must
     // be wrapped. Assert on the guarded sites' count instead of trying to parse
-    // control flow. Eight sites found by sweeping every `yield*` for an
-    // enclosing catch that neither returns nor rethrows: fast-mode
-    // Codex/Groq/Natively, selected-Groq (multimodal + text share one catch),
-    // the streaming rotation loop, the TTFT race (the primary text path), and
-    // the Natively and Custom last-resorts.
+    // control flow.
+    //
+    // Sprint S2 (ai-provider-pipeline-fix) consolidated the selected-provider
+    // attempt and the whole verified-fallback cascade into ONE shared method,
+    // `attemptProviderFamily`, which itself delegates to `trackCommit` — so
+    // those two call sites (selected + cascade loop) now share a single
+    // `yield* this.trackCommit(` occurrence instead of each having their own.
+    // Remaining direct sites: fast-mode Codex, fast-mode Groq, Ollama
+    // last-resort fallback, Custom last-resort — plus the one inside
+    // `attemptProviderFamily` itself. A regression that reintroduces a bare
+    // `yield* this.streamWith...` (bypassing trackCommit entirely) would drop
+    // this count.
     const wrapped = (src.match(/yield\* this\.trackCommit\(/g) || []).length;
     assert.ok(
-      wrapped >= 8,
-      `expected all 8 text-path fall-through sites wrapped in trackCommit, found ${wrapped}`,
+      wrapped >= 5,
+      `expected all 5 text-path fall-through sites wrapped in trackCommit, found ${wrapped}`,
+    );
+    // The two call sites the old per-family blocks collapsed into must still
+    // route through the guarded helper (not a bare, unguarded delegation).
+    const attemptCalls = (src.match(/yield\* this\.attemptProviderFamily\(/g) || []).length;
+    assert.ok(
+      attemptCalls >= 2,
+      `expected the selected-provider attempt AND the fallback-cascade loop to call attemptProviderFamily, found ${attemptCalls}`,
     );
   });
 
   test('each guarded catch returns instead of falling through', () => {
     const guards = (src.match(/if \(commit\.emitted\) \{/g) || []).length;
     assert.ok(
-      guards >= 7,
+      guards >= 6,
       `expected a commit guard in each fall-through catch block, found ${guards}`,
     );
-    // And the guard must END the stream, not merely log. Scan a bounded window
-    // rather than to the next `}` — the warn lines interpolate `${provider.name}`
-    // and `${err.message}`, whose closing braces would truncate a naive scan.
+    // And the guard must END the stream (or end attemptProviderFamily's own
+    // generator via a typed return, which its two callers turn into a stream
+    // end — see the next assertion), not merely log. Scan a bounded window
+    // rather than to the next `}` — the warn lines interpolate
+    // `${provider.name}` and `${err.message}`, whose closing braces would
+    // truncate a naive scan.
     const guardBlocks = src.split(/if \(commit\.emitted\) \{/).slice(1);
     for (const [i, block] of guardBlocks.entries()) {
       const body = block.slice(0, 900);
       assert.match(
         body,
-        /return;/,
+        /return(;| '[a-z-]+';)/,
         `commit guard #${i + 1} logs but does not return — the stream would still fall through`,
       );
     }
+    // attemptProviderFamily's two callers must themselves end the stream when
+    // it reports a post-commit failure — otherwise a guard that merely returns
+    // a status string from the helper would silently fall through to the next
+    // fallback candidate at the CALL SITE, reintroducing the exact duplication
+    // bug this file exists to catch.
+    const callerGuards = (src.match(/if \(outcome === 'failed-post-commit'\) \{ yield LLMHelper\.TRUNCATION_SENTINEL; return; \}/g) || []).length;
+    assert.ok(
+      callerGuards >= 2,
+      `expected both attemptProviderFamily call sites to end the stream on a post-commit failure, found ${callerGuards}`,
+    );
   });
 
   test('the STREAMING rotation loop is guarded', () => {

@@ -7,6 +7,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { FileText, Paperclip, Trash2, RefreshCw, Database } from 'lucide-react';
 
+type PersonalFileType = 'resume' | 'job_description' | 'general';
+type PersonalFileIndexStatus = 'indexing' | 'done' | 'lexical_only';
+
 type PersonalFile = {
     id: string;
     fileName: string;
@@ -15,6 +18,20 @@ type PersonalFile = {
     createdAt: string;
     updatedAt: string;
     chunkCount: number;
+    fileType: PersonalFileType;
+    indexStatus: PersonalFileIndexStatus;
+};
+
+const FILE_TYPE_LABELS: Record<PersonalFileType, string> = {
+    resume: 'Resume',
+    job_description: 'Job description',
+    general: 'General',
+};
+
+const STATUS_BADGES: Record<PersonalFileIndexStatus, { label: string; color: string }> = {
+    indexing: { label: 'INDEXING', color: '#eab308' },
+    done: { label: 'READY', color: '#22c55e' },
+    lexical_only: { label: 'NEEDS REPAIR', color: '#f97316' },
 };
 
 const normalizeSizeBytes = (value: number | string | undefined | null): number => {
@@ -44,6 +61,8 @@ export function MyFilesPanel() {
                     ...file,
                     sizeBytes: normalizeSizeBytes(file?.sizeBytes ?? file?.size_bytes),
                     chunkCount: Number.isFinite(Number(file?.chunkCount ?? file?.chunk_count)) ? Number(file?.chunkCount ?? file?.chunk_count) : 0,
+                    fileType: (file?.fileType ?? file?.file_type ?? 'general') as PersonalFileType,
+                    indexStatus: (file?.indexStatus ?? file?.index_status ?? 'done') as PersonalFileIndexStatus,
                 })));
             } else setError(result?.error ?? 'Could not load My Files.');
         } catch (e: any) {
@@ -72,6 +91,21 @@ export function MyFilesPanel() {
             setError(e?.message ?? 'File indexing failed.');
         } finally {
             setBusy(false);
+        }
+    };
+
+    const changeFileType = async (file: PersonalFile, fileType: PersonalFileType) => {
+        const previous = files;
+        setFiles((prev) => prev.map((f) => (f.id === file.id ? { ...f, fileType } : f)));
+        try {
+            const result = await window.electronAPI?.personalFilesSetFileType?.(file.id, fileType);
+            if (!result?.success) {
+                setFiles(previous);
+                setError(result?.error ?? 'Could not update file type.');
+            }
+        } catch (e: any) {
+            setFiles(previous);
+            setError(e?.message ?? 'Could not update file type.');
         }
     };
 
@@ -149,11 +183,13 @@ export function MyFilesPanel() {
             )}
 
             <div style={{ marginTop: 16, display: 'grid', gap: 7 }}>
-                {files.map(file => (
+                {files.map(file => {
+                    const badge = STATUS_BADGES[file.indexStatus] ?? STATUS_BADGES.done;
+                    return (
                     <div
                         key={file.id}
                         style={{
-                            display: 'grid', gridTemplateColumns: '20px 1fr auto 24px',
+                            display: 'grid', gridTemplateColumns: '20px 1fr auto auto 24px',
                             alignItems: 'center', gap: 8,
                             padding: '9px 10px', borderRadius: 9,
                             border: '1px solid rgba(255,255,255,0.08)',
@@ -169,7 +205,21 @@ export function MyFilesPanel() {
                                 {formatBytes(file.sizeBytes)} · {file.chunkCount} indexed chunks
                             </div>
                         </div>
-                        <span style={{ fontSize: 9, color: '#22c55e', fontWeight: 700 }}>READY</span>
+                        <select
+                            value={file.fileType}
+                            onChange={(e) => void changeFileType(file, e.target.value as PersonalFileType)}
+                            title="Tag this file so relevant answers (résumé/JD questions) can prioritize it"
+                            style={{
+                                fontSize: 10, padding: '3px 6px', borderRadius: 6,
+                                background: 'rgba(255,255,255,0.05)', color: 'inherit',
+                                border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer',
+                            }}
+                        >
+                            {(Object.keys(FILE_TYPE_LABELS) as PersonalFileType[]).map((type) => (
+                                <option key={type} value={type}>{FILE_TYPE_LABELS[type]}</option>
+                            ))}
+                        </select>
+                        <span style={{ fontSize: 9, color: badge.color, fontWeight: 700, whiteSpace: 'nowrap' }}>{badge.label}</span>
                         <button
                             type="button"
                             onClick={() => void removeFile(file)}
@@ -179,7 +229,8 @@ export function MyFilesPanel() {
                             <Trash2 size={13} />
                         </button>
                     </div>
-                ))}
+                    );
+                })}
 
                 {!loading && files.length === 0 && (
                     <div style={{ padding: '28px 16px', textAlign: 'center', opacity: 0.45, fontSize: 12 }}>

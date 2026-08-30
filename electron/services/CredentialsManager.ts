@@ -8,6 +8,7 @@ import fs from 'fs';
 import path from 'path';
 import * as crypto from 'crypto';
 import { deriveFallbackKey, encryptCredentialBlob, decryptCredentialBlob } from './credentialFallbackCrypto';
+import type { ProviderHealth } from '../llm/providerRegistry';
 
 const CREDENTIALS_PATH = path.join(app.getPath('userData'), 'credentials.enc');
 // App-managed AES fallback, used ONLY when the OS keyring (safeStorage) is
@@ -155,6 +156,16 @@ export interface StoredCredentials {
     cloudFetchedModels?: Record<string, { id: string; label: string }[]>;
     /** When each provider's catalog was last fetched (epoch ms), for staleness. */
     cloudFetchedAt?: Record<string, number>;
+    /**
+     * Real verification state per provider family, populated by the
+     * `test-llm-connection` probe (electron/llm/providerRegistry.ts). Distinct
+     * from key presence: a stored key with providerHealth.status !==
+     * 'verified' means auth or the chat probe never actually succeeded — it
+     * must render as that, never as "provider disabled" (see ipcHandlers.ts).
+     *
+     * Absent (older credential files) defaults to {} — see getProviderHealth.
+     */
+    providerHealth?: Record<string, ProviderHealth>;
     // Free trial state
     trialToken?: string;   // server-issued signed token (natively_trial_…)
     trialExpiresAt?: string;   // ISO timestamp — local copy for startup check
@@ -852,6 +863,35 @@ export class CredentialsManager {
         const persisted = this.saveCredentials();
         console.log(`[CredentialsManager] Cached ${models.length} model(s) for ${provider}`);
         return persisted;
+    }
+
+    /** Undefined means "never probed" — distinct from a probed-and-failed health entry. */
+    public getProviderHealth(provider: string): ProviderHealth | undefined {
+        return this.credentials.providerHealth?.[provider];
+    }
+
+    public getAllProviderHealth(): Record<string, ProviderHealth> {
+        return this.credentials.providerHealth || {};
+    }
+
+    public setProviderHealth(provider: string, health: ProviderHealth): boolean {
+        if (this.refuseWriteWhileDegraded('set provider health')) return false;
+        if (!this.credentials.providerHealth) this.credentials.providerHealth = {};
+        this.credentials.providerHealth[provider] = health;
+        const persisted = this.saveCredentials();
+        console.log(`[CredentialsManager] Provider health for ${provider}: ${health.status} (${health.models.length} model(s))`);
+        return persisted;
+    }
+
+    /** Omit `provider` to clear every provider's health (e.g. full credential reset). */
+    public clearProviderHealth(provider?: string): void {
+        if (this.refuseWriteWhileDegraded('clear provider health')) return;
+        if (!provider) {
+            this.credentials.providerHealth = {};
+        } else if (this.credentials.providerHealth) {
+            delete this.credentials.providerHealth[provider];
+        }
+        this.saveCredentials();
     }
 
     public getLitellmModels(): string[] {
