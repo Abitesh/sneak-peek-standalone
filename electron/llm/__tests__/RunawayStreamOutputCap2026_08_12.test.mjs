@@ -324,23 +324,10 @@ describe('the cap actually bounds a runaway end-to-end', () => {
 });
 
 describe('the unbounded request is recorded as still open', () => {
-  test('streamWithNatively still sends no max_tokens', () => {
-    // This asserts the CURRENT gap so it stays visible. natively-api's /v1/chat
-    // destructures { messages, system, language, images, fast_mode, stream,
-    // purpose } and would ignore the field today, so sending it alone would be
-    // inert — the complete fix needs a server change.
-    //
-    // If this test starts FAILING, the bound was added: delete this block and
-    // note whether the server honours it.
+  test('streamWithNatively removed (Natively backend disabled)', () => {
+    // streamWithNatively was removed as part of Natively backend deprecation.
+    // The gap it documented (unbounded max_tokens) is no longer relevant.
     const start = src.indexOf('private async * streamWithNatively(');
-    assert.ok(start > 0, 'could not locate streamWithNatively');
-    const bodyStart = src.indexOf('const body: Record<string, unknown> = {', start);
-    const bodyEnd = src.indexOf('if (imagePaths?.length)', bodyStart);
-    const requestBody = src.slice(bodyStart, bodyEnd);
-    assert.doesNotMatch(
-      requestBody,
-      /max_tokens/,
-      'a max_tokens bound was added — verify natively-api reads it, then delete this test',
-    );
+    assert.equal(start, -1, 'streamWithNatively must be removed (Natively backend is disabled)');
   });
 });

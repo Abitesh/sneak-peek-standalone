@@ -122,6 +122,18 @@ describe('routeLLMProviders honours disabledProviders', () => {
   });
 });
 
+describe('final provider exhaustion errors explain real failures', () => {
+  test('LLMHelper aggregates real provider failure reasons instead of emitting a disabled-only message', () => {
+    const helper = Object.create(LLMHelper.prototype);
+    helper.lastProviderFailureSummary = 'Gemini: API key not valid';
+    setDisabled(['codex-cli']);
+    const message = LLMHelper.prototype.noProviderAvailableMessage.call(helper);
+    assert.match(message, /Gemini: API key not valid/);
+    assert.doesNotMatch(message, /codex-cli is switched off/,
+      'a real provider failure must take precedence over an unrelated disabled provider');
+  });
+});
+
 // ── what the cascade actually attempts ──────────────────────────────────────
 
 function runInner(message, { disabled = [], model = 'gpt-test' } = {}) {

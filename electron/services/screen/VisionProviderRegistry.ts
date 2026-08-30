@@ -29,10 +29,13 @@ export interface VisionProviderBuildInputs {
 
 /**
  * Produce the ordered list of vision providers for the given mode. Order is:
- *   vision_first / vision_only: Natively → OpenAI → Gemini Flash-Lite →
- *                                Gemini Flash → Claude → Gemini Pro → Groq Scout
- *                                → Ollama → Codex → Custom
+ *   vision_first / vision_only: OpenAI → Gemini Flash-Lite → Gemini Flash →
+ *                                Claude → Gemini Pro → Groq Scout → Ollama
+ *                                → Codex → Custom
  *   private_vision: Ollama → Codex → local Custom only
+ *
+ * The hosted Natively backend is intentionally disabled in this build and must
+ * never be reintroduced as a live vision provider via this registry.
  */
 export function buildVisionProviders(inputs: VisionProviderBuildInputs): VisionProviderConfig[] {
   const credentials = CredentialsManager.getInstance();
@@ -41,7 +44,6 @@ export function buildVisionProviders(inputs: VisionProviderBuildInputs): VisionP
   const cloudAllowed = inputs.mode !== 'private_vision';
 
   if (cloudAllowed) {
-    providers.push(natively(credentials, inputs));
     providers.push(openai(credentials, inputs));
     // Gemini cascade leads with flash-lite (cheapest/fastest), then flash.
     providers.push(geminiFlashLite(credentials, inputs));
@@ -61,19 +63,11 @@ export function buildVisionProviders(inputs: VisionProviderBuildInputs): VisionP
 
 // ─── Provider builders ────────────────────────────────────────────────────
 
-function natively(creds: CredentialsManager, _inputs: VisionProviderBuildInputs): VisionProviderConfig {
-  const apiKey = creds.getNativelyApiKey();
-  return {
-    id: 'natively',
-    displayName: 'Natively API',
-    modelId: 'natively',
-    isLocal: false,
-    isConfigured: !!apiKey,
-    supportsVision: !!apiKey,
-    scopeAllowsScreenshots: true,
-    hint: 'natively',
-    invoke: async (p) => callLLMHelperVision('natively', p),
-  };
+// The hosted Natively backend is intentionally disabled in this build. Leave a
+// disabled stub in the registry only as a historical marker, never as a live
+// provider route.
+function natively(_creds: CredentialsManager, _inputs: VisionProviderBuildInputs): null {
+  return null;
 }
 
 function openai(creds: CredentialsManager, _inputs: VisionProviderBuildInputs): VisionProviderConfig {

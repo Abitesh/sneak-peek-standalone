@@ -58,4 +58,9 @@ describe('buildVisionProviders Gemini cascade order', () => {
     assert.match(registrySrc, /id:\s*'gemini_flash_lite'/);
     assert.match(registrySrc, /modelId:\s*'gemini-3\.1-flash-lite'/);
   });
+
+  test('natively is not registered as a live vision provider', () => {
+    assert.doesNotMatch(body, /providers\.push\(natively\(/);
+    assert.doesNotMatch(registrySrc, /id:\s*'natively'/);
+  });
 });

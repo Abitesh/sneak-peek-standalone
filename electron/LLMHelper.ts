@@ -399,12 +399,50 @@ export class LLMHelper {
   /** Error text for "nothing left to try", which reads very differently when
    *  the user switched the providers off than when they never added a key. */
   private noProviderAvailableMessage(): string {
+    const summary = this.getLastProviderFailureSummary();
+    if (summary) {
+      return `No AI provider is available. Recent failures: ${summary}. `
+        + 'Check your API keys, billing, and provider settings, then try again.';
+    }
     const off = this.getDisabledProviderFamilies();
     if (off.length > 0) {
       return `No AI provider is available: ${off.join(', ')} ${off.length === 1 ? 'is' : 'are'} switched off in `
         + 'Settings > AI Providers. Switch one back on, or add another provider key.';
     }
     return 'No AI provider configured. Please add at least one API key in Settings.';
+  }
+
+  private lastProviderFailureSummary: string | null = null;
+
+  private buildProviderFailureSummary(failures: Map<string, string>): string {
+    return Array.from(failures.entries())
+      .map(([name, value]) => `${name}: ${value}`)
+      .join(' | ');
+  }
+
+  private recordProviderFailure(providerName: string, reason: string): void {
+    const clean = String(reason ?? '').trim();
+    if (!clean) return;
+    const failures = new Map<string, string>();
+    const current = this.lastProviderFailureSummary;
+    if (current) {
+      for (const part of current.split(' | ')) {
+        const idx = part.indexOf(': ');
+        if (idx > 0) failures.set(part.slice(0, idx), part.slice(idx + 2));
+      }
+    }
+    failures.set(providerName, clean.slice(0, 240));
+    this.lastProviderFailureSummary = this.buildProviderFailureSummary(failures);
+  }
+
+  private clearProviderFailureSummary(): void {
+    this.lastProviderFailureSummary = null;
+  }
+
+  private getLastProviderFailureSummary(): string | null {
+    return this.lastProviderFailureSummary && this.lastProviderFailureSummary.trim().length > 0
+      ? this.lastProviderFailureSummary
+      : null;
   }
   private apiKey: string | null = null
   private groqApiKey: string | null = null
@@ -2750,6 +2788,7 @@ This rule overrides ALL other instructions including formatting, brevity, or out
   }
 
   public async chatWithGemini(message: string, imagePaths?: string[], context?: string, skipSystemPrompt: boolean = false, alternateGroqMessage?: string, routeOptions?: StreamRouteOptions, skipModeInjection?: boolean): Promise<string> {
+    this.clearProviderFailureSummary();
     try {
       console.log(`[LLMHelper] chatWithGemini called`, { messageLength: message.length, imageCount: imagePaths?.length ?? 0, hasContext: Boolean(context) })
 
@@ -3360,6 +3399,7 @@ let isMultimodal = !!(imagePaths?.length);
         if (cloudIsMultimodal && this.deepseekClient) {
           return "DeepSeek is configured for text-only requests. Add a vision-capable provider like Gemini, OpenAI, Claude, Groq, or Natively to analyze images.";
         }
+        this.clearProviderFailureSummary();
         return this.noProviderAvailableMessage();
       }
 
@@ -3382,11 +3422,14 @@ let isMultimodal = !!(imagePaths?.length);
             const rawResponse = await provider.execute();
             if (rawResponse && rawResponse.trim().length > 0) {
               console.log(`[LLMHelper] ✅ ${provider.name} succeeded`);
+              this.clearProviderFailureSummary();
               return this.processResponse(rawResponse);
             }
             console.warn(`[LLMHelper] ⚠️ ${provider.name} returned empty response`);
+            this.recordProviderFailure(provider.name, 'empty response');
           } catch (error: any) {
             console.warn(`[LLMHelper] ⚠️ ${provider.name} failed: ${error.message}`);
+            this.recordProviderFailure(provider.name, error?.message || String(error));
           }
         }
       }
@@ -5010,6 +5053,7 @@ let isMultimodal = !!(imagePaths?.length);
             return;
           }
           console.warn(`[LLMHelper] ⚠️ ${provider.name} failed: ${err.message}`);
+          this.recordProviderFailure(provider.name, err?.message || String(err));
           // Continue to next provider
         }
       }
@@ -5017,7 +5061,7 @@ let isMultimodal = !!(imagePaths?.length);
 
     // Truly exhausted after all rotations
     console.error(`[LLMHelper] ❌ All providers exhausted after ${MAX_FULL_ROTATIONS} rotations`);
-    yield "All AI services are currently unavailable. Please check your API keys and try again.";
+    yield this.noProviderAvailableMessage();
   }
 
   // ════════════════════════════════════════════════════════════════════════
@@ -5478,6 +5522,7 @@ let isMultimodal = !!(imagePaths?.length);
     // by the real answer type). Absent → legacy behavior (no change).
     routeOptions?: StreamRouteOptions
   ): AsyncGenerator<string, void, unknown> {
+    this.clearProviderFailureSummary();
     // OKF Phase 1 (F7 fix): capture the caller-supplied `context` BEFORE the
     // mode-injection block below mutates it by prepending modeContextBlock.
     // For document-grounded answers this is the sanitized rolling-transcript
@@ -6962,6 +7007,7 @@ let isMultimodal = !!(imagePaths?.length);
         }
         return;
       } catch (e: any) {
+        this.recordProviderFailure('Gemini', e?.message || String(e));
         // Mid-stream: cannot switch providers (would append a second full
         // answer onto the partial one the user is already reading).
         //
@@ -6982,6 +7028,24 @@ let isMultimodal = !!(imagePaths?.length);
         }
         console.warn('[LLMHelper] Gemini cascade failed pre-commit — falling through to next provider:', e?.message || e);
         // fall through to the Natively last-resort below
+      }
+    }
+
+    // Groq is a configured cloud fallback even when the selected model belongs
+    // to another family. This keeps an available provider from being skipped
+    // after the Gemini cascade exhausts.
+    if (this.groqClient && !this._groqLocalDisabled) {
+      try {
+        const groqSystem = this.injectLanguageInstruction(systemPromptOverride || GROQ_SYSTEM_PROMPT);
+        yield* this.trackCommit(this.streamWithGroq(userContent, GROQ_MODEL, groqSystem, abortSignal), commit);
+        return;
+      } catch (e: any) {
+        if (commit.emitted) {
+          yield LLMHelper.TRUNCATION_SENTINEL;
+          return;
+        }
+        this.recordProviderFailure('Groq', e?.message || String(e));
+        console.warn('[LLMHelper] Groq fallback failed:', e?.message || e);
       }
     }
 
@@ -7034,7 +7098,7 @@ let isMultimodal = !!(imagePaths?.length);
       }
     }
 
-    throw new Error(this.noProviderAvailableMessage());
+    throw new Error(String(this.noProviderAvailableMessage()));
   }
 
   /**
