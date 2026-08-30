@@ -1193,9 +1193,9 @@ export class LLMHelper {
   }
 
   private hasNatively(): boolean {
-    // Natively API is intentionally disabled in the runtime. This keeps the app
-    // from reintroducing a hosted backend dependency while leaving the legacy
-    // entry points in place for compatibility with older settings/tests.
+    // Natively is completely disabled. This method exists only to prevent
+    // compilation errors in legacy code paths that check hasNatively().
+    // These paths should be removed entirely in a follow-up cleanup.
     return false;
   }
 
@@ -3732,13 +3732,6 @@ let isMultimodal = !!(imagePaths?.length);
   }
 
   /**
-   * Legacy Natively API route retained as a fail-closed stub.
-   */
-  private async generateWithNatively(userMessage: string, systemPrompt?: string, imagePaths?: string[], opts?: { purpose?: 'extraction'; timeoutMs?: number }): Promise<string> {
-    throw new Error('Natively API is disabled in this build.');
-  }
-
-  /**
    * Non-streaming OpenAI generation with proper system/user separation.
    * PREFIX CACHING: see streamWithOpenai for the caching contract.
    */
@@ -4848,10 +4841,7 @@ let isMultimodal = !!(imagePaths?.length);
     const textGroq = this.modelVersionManager.getTextTieredModels(TextModelFamily.GROQ).tier1;
 
     if (isMultimodal) {
-      // MULTIMODAL PROVIDER ORDER: [Natively] -> Codex CLI -> OpenAI -> Gemini Flash-Lite -> Gemini Flash -> Claude -> Gemini Pro -> Groq Scout 4
-      if (this.hasNatively()) {
-        providers.push({ name: 'Natively API', execute: () => this.streamWithNatively(userContent, openaiSystemPrompt, imagePaths, abortSignal) });
-      }
+      // MULTIMODAL PROVIDER ORDER: Codex CLI -> OpenAI -> Gemini Flash-Lite -> Gemini Flash -> Claude -> Gemini Pro -> Groq Scout 4
       if (this.isCodexAvailable()) {
         providers.push({ name: `Codex CLI (${this.codexCliConfig.model})`, execute: () => this.streamWithCodexCli(userContent, openaiSystemPrompt, false, imagePaths, abortSignal) });
       }
@@ -4875,14 +4865,11 @@ let isMultimodal = !!(imagePaths?.length);
         providers.push({ name: `Groq (${GROQ_VISION_MODEL})`, execute: () => this.streamWithGroqMultimodal(userContent, imagePaths!, openaiSystemPrompt, abortSignal) });
       }
     } else {
-      // TEXT-ONLY PROVIDER ORDER: [Natively] -> Codex CLI -> OpenAI -> Claude -> Gemini Flash-Lite -> Gemini Flash -> Gemini Pro -> Groq
+      // TEXT-ONLY PROVIDER ORDER: Codex CLI -> OpenAI -> Claude -> Gemini Flash-Lite -> Gemini Flash -> Gemini Pro -> Groq
       // Groq is demoted to LAST because the free Groq tier has a low TPM
       // rate-limit that 413s on context-heavy prompts (e.g. a full meeting
       // summary + transcript shovelled into the fallback Gemini call).
       // Gemini cascade handles the same prompts at much higher quotas.
-      if (this.hasNatively()) {
-        providers.push({ name: 'Natively API', execute: () => this.streamWithNatively(userContent, openaiSystemPrompt, undefined, abortSignal) });
-      }
       if (this.isCodexAvailable()) {
         providers.push({ name: `Codex CLI (${this.codexCliConfig.model})`, execute: () => this.streamWithCodexCli(userContent, openaiSystemPrompt, false, undefined, abortSignal) });
       }
@@ -5120,10 +5107,6 @@ let isMultimodal = !!(imagePaths?.length);
       if (this.groqClient) {
         cloud.push({ id: 'groq', name: `Groq (${GROQ_VISION_MODEL})`, isLocal: false, priority: prio++, ttftTimeoutMs: FLASH_TTFT_MS,
           open: (sig) => this.streamWithGroqMultimodal(userContent, imagePaths, systemPrompt, sig) });
-      }
-      if (this.hasNatively()) {
-        cloud.push({ id: 'natively', name: 'Natively API', isLocal: false, priority: prio++, ttftTimeoutMs: FLASH_TTFT_MS,
-          open: (sig) => this.streamWithNatively(userContent, systemPrompt, imagePaths, sig) });
       }
       // isCodexAvailable() — NOT `codexCliConfig.enabled` — is the gate every
       // other Codex call site uses. It additionally covers the disabled-provider
@@ -6796,26 +6779,6 @@ let isMultimodal = !!(imagePaths?.length);
           }
           console.warn("[LLMHelper] Groq Fast Text streaming failed, falling back:", e.message);
         }
-        // Local Groq failed — fall through to Natively if available
-      }
-      if (this.hasNatively()) {
-        // streamWithNatively → generateWithNatively → sends fast_mode:true → server Groq pool
-        console.log(`[LLMHelper] ⚡️ Groq Fast Text Mode Active (Streaming). Routing to Natively server Groq pool...`);
-        try {
-          yield* this.trackCommit(this.streamWithNatively(userContent, finalSystemPrompt, undefined, abortSignal), commit);
-          return;
-        } catch (e: any) {
-          // This is the site the 2026-08-12 live capture hit: the server aborted
-          // at 61s AFTER streaming 8047 tokens, and the old unconditional
-          // fall-through appended a whole second answer to what the user had
-          // already read.
-          if (commit.emitted) {
-            console.warn("[LLMHelper] Natively fast-mode failed AFTER first token — ending stream rather than appending a second answer:", e.message);
-            yield LLMHelper.TRUNCATION_SENTINEL;
-            return;
-          }
-          console.warn("[LLMHelper] Natively fast-mode failed, falling back:", e.message);
-        }
       }
     }
 
@@ -6964,133 +6927,8 @@ let isMultimodal = !!(imagePaths?.length);
       // Bug found during Phase 2 harness investigation (2026-07-27): this gate
       // used to check CredentialsManager.getNativelyApiKey() directly, which
       // is false in the E2E test profile (a fresh userDataDir has no stored
-      // key). `hasNatively()` already encodes the exact same "real key OR
-      // NATIVELY_E2E local-test bypass" logic used by streamWithNatively
-      // itself (which this whole block ultimately opens) and by the
-      // last-resort fallback rung below (~line 5738) — this call site was the
-      // one place still duplicating the check without the E2E branch, so an
-      // E2E-driven request could never reach the Natively gateway at all and
-      // silently fell through to direct Gemini, unable to test the gateway's
-      // own cascade/fallback/quota logic. See docs/answer-pipeline-rebuild/
-      // 02_STATUS.md for the full trace (zero backend [Chat/Stream] log
-      // lines despite 76 successful harness reps was the smoking gun).
-      if (this.hasNatively()) {
-        const textProviders: TextStreamProvider[] = [];
-        let prio = 0;
-        // Primary: Natively (fast connect budget — TTFT race handles slow prefill).
-        // Per-provider TTFT override: the gateway's server-side chain falls back to
-        // MiniMax (a STRONG frontier fallback) when the Gemini chain is down, and
-        // MiniMax's first token lands at 3.3-7.7s. The shared text default of 2.5s
-        // (DEFAULT_TEXT_FALLBACK_CONFIG) would abort that gateway stream before
-        // MiniMax ever emits a token, defeating the fallback and failing over to the
-        // client-side Groq/Gemini providers that are typically ALSO down in that
-        // scenario. 8s (= LIVE_TOTAL_HARD_TIMEOUT_MS, the outer live ceiling) lets a
-        // slow-MiniMax gateway commit while still failing over fast on a genuinely
-        // dead gateway. Mirrors the vision path, which already sets FLASH_TTFT_MS here.
-        textProviders.push({
-          id: 'natively', name: 'Natively API', isLocal: false, priority: prio++,
-          ttftTimeoutMs: NATIVELY_TEXT_TTFT_MS,
-          open: (sig) => this.streamWithNatively(userContent, finalSystemPrompt, imagePaths, sig, INTERACTIVE_CONNECT_TIMEOUT_MS),
-        });
-        // Fallback: Groq (key more commonly available than Gemini).
-        if (this.groqClient) {
-          if (isMultimodal && imagePaths) {
-            const finalGroqSystem = this.injectLanguageInstruction(systemPromptOverride || OPENAI_SYSTEM_PROMPT);
-            textProviders.push({
-              id: 'groq', name: 'Groq (multimodal)', isLocal: false, priority: prio++,
-              open: (sig) => this.streamWithGroqMultimodal(userContent, imagePaths, finalGroqSystem, sig),
-            });
-          } else {
-            const finalGroqSystem = this.injectLanguageInstruction(systemPromptOverride ? baseSystemPrompt : GROQ_SYSTEM_PROMPT);
-            textProviders.push({
-              id: 'groq', name: 'Groq', isLocal: false, priority: prio++,
-              // intentional: emergency fallback uses stable GROQ_MODEL baseline, not currentModelId.
-              open: (sig) => this.streamWithGroq(userContent, GROQ_MODEL, finalGroqSystem, sig),
-            });
-          }
-        }
-        // Fallback: Gemini Flash (cheap, fast) then Pro.
-        if (this.client) {
-          textProviders.push({
-            id: 'gemini_flash', name: `Gemini Flash`, isLocal: false, priority: prio++,
-            open: (sig) => this.streamWithGeminiModel(userContent, GEMINI_FLASH_MODEL, imagePaths, finalSystemPrompt, sig, thinkingBudget),
-          });
-        }
-        // Fallback: configured-but-not-active Custom provider (e.g. OpenRouter).
-        // For a Natively-selected user, the configured custom list is the only
-        // path that reaches a paid third-party gateway once Natively + Gemini are
-        // dead. Image-bearing requests skip this rung (custom providers typically
-        // can't carry images unless explicitly multimodal-flagged) — the vision
-        // chain at streamVisionWithFallback handles image scenarios.
-        //
-        // streamWithCustom reads `this.customProvider` from the instance, so we
-        // install the picked one for the duration of the race and restore in
-        // the outer finally below. The race is bounded — install/restore is a
-        // synchronous span, no concurrent streams see the temporary install.
-        const raceCustomRestore = this.installConfiguredCustomForRace(textProviders, message, context, finalSystemPrompt, isMultimodal, imagePaths);
-
-        if (textProviders.length > 0) {
-          const ordered = orderTextByHealth(textProviders, this.textHealth, Date.now());
-          const raceStart = Date.now();
-          let committedProvider: string | null = null;
-          telemetryService.track({ name: 'provider_race_started', properties: { candidates: ordered.map(p => p.id), path: 'text' } });
-          // Wrap each provider's open() so we can record which one wins (first
-          // token committed). The engine itself records TTFT EWMA into textHealth.
-          const instrumented = ordered.map((p) => ({
-            ...p,
-            open: (sig: AbortSignal, attempt: number) => {
-              const inner = p.open(sig, attempt);
-              return (async function* () {
-                for await (const tok of inner) {
-                  // Attribute the win to the first NON-EMPTY token, mirroring the
-                  // engine's own commit predicate (it rejects whitespace-only /
-                  // non-string first tokens as 'empty-stream' and falls past). A
-                  // looser "first token" check would mis-fire provider_race_won
-                  // for a provider the engine then discards, and latch
-                  // committedProvider to that loser so the real winner never
-                  // emits. (debugger Finding 2.)
-                  if (!committedProvider && typeof tok === 'string' && tok.trim().length > 0) {
-                    committedProvider = p.id;
-                    telemetryService.track({
-                      name: 'provider_race_won',
-                      provider: p.id,
-                      durationMs: Date.now() - raceStart,
-                      properties: { path: 'text', ttftMs: Date.now() - raceStart },
-                    });
-                  }
-                  yield tok;
-                }
-              })();
-            },
-          }));
-          try {
-            yield* this.trackCommit(runStreamingTextFallback(instrumented, this.textHealth, DEFAULT_TEXT_FALLBACK_CONFIG, {}, abortSignal), commit);
-            return;
-          } catch (raceErr: any) {
-            // runStreamingTextFallback is commit-point-safe INTERNALLY (it never
-            // switches rungs after a rung's first token). That guarantee stops
-            // duplication inside the engine — it does not stop it here: if the
-            // committed rung dies mid-stream the engine throws, and the old
-            // unconditional fall-through handed the turn to the Gemini block,
-            // which would append a second complete answer to what the user had
-            // already read. This is the primary text path, so it is the site
-            // where that would happen most often.
-            if (commit.emitted) {
-              console.warn('[LLMHelper] Text TTFT race failed AFTER first token — ending stream rather than appending a second answer:', raceErr?.message);
-              yield LLMHelper.TRUNCATION_SENTINEL;
-              return;
-            }
-            console.warn('[LLMHelper] Text TTFT race exhausted, falling through to Gemini:', raceErr?.message);
-            telemetryService.track({ name: 'provider_error', durationMs: Date.now() - raceStart, properties: { path: 'text', stage: 'race_exhausted' } });
-            // Fall through to the Gemini block below as the final safety net.
-          } finally {
-            // Restore this.customProvider in case installConfiguredCustomForRace
-            // swapped it for the duration of the race.
-            if (raceCustomRestore) raceCustomRestore();
-          }
-        }
-      }
-      // No key or all fallbacks failed — fall through to Gemini
+      // key). Natively is now completely disabled.
+      // Fall through to Gemini as the primary provider
     }
 
     // 4. Gemini Routing & Fallback
@@ -7147,25 +6985,7 @@ let isMultimodal = !!(imagePaths?.length);
       }
     }
 
-    // 5. Last-resort: Natively API. Reached when no Gemini client is configured,
-    // OR the Gemini cascade above failed pre-commit (e.g. an expired/no-credit
-    // key took out all three rungs). A dead primary provider should fall through
-    // to a different one rather than failing the answer.
-    if (this.hasNatively()) {
-      try {
-        yield* this.trackCommit(this.streamWithNatively(userContent, finalSystemPrompt, imagePaths, abortSignal), commit);
-        return;
-      } catch (e: any) {
-        if (commit.emitted) {
-          console.warn('[LLMHelper] Natively last-resort failed AFTER first token — ending stream rather than appending a second answer:', e.message);
-          yield LLMHelper.TRUNCATION_SENTINEL;
-          return;
-        }
-        console.warn('[LLMHelper] Natively last-resort fallback failed:', e.message);
-      }
-    }
-
-    // 6. Last-resort: configured-but-not-selected Custom provider (e.g. OpenRouter
+    // 5. Last-resort: configured-but-not-selected Custom provider (e.g. OpenRouter
     // via cURL). This is the path that the user's bug report hits: they have an
     // OpenRouter key configured but selected Gemini as their primary model.
     // `this.customProvider` is null in that scenario (setModel wipes it on a
@@ -7215,14 +7035,6 @@ let isMultimodal = !!(imagePaths?.length);
     }
 
     throw new Error(this.noProviderAvailableMessage());
-  }
-
-  /**
-   * Fake-stream for Natively API (non-streaming endpoint).
-   * This runtime intentionally never dials the hosted backend.
-   */
-  private async * streamWithNatively(userContent: string, systemPrompt?: string, imagePaths?: string[], abortSignal?: AbortSignal, connectTimeoutMs: number = INTERACTIVE_CONNECT_TIMEOUT_MS): AsyncGenerator<string, void, unknown> {
-    throw new Error('Natively API is disabled in this build.');
   }
 
   /**
@@ -8904,33 +8716,7 @@ let isMultimodal = !!(imagePaths?.length);
       }
     }
 
-    // ATTEMPT 1: Natively API (if configured — first in chain)
-    // Inner fetch timeout: caller's timeoutMs, default 8s (AbortSignal.timeout in
-    // generateWithNatively). Outer safety net: timeoutMs + 5s (default 10s when the
-    // caller passes no opts, so uninvolved callers are unaffected) — the extra slack
-    // covers JSON parsing and any overhead after the fetch resolves, mirroring the
-    // headroom generateWithNatively's own OVERALL_DEADLINE_MS gives the body read.
-    if (this.hasNatively()) {
-      try {
-        console.log(`[LLMHelper] Attempting Natively API for summary...`);
-        const text = await this.withTimeout(
-          this.generateWithNatively(`Context:\n${context}`, systemPrompt, undefined, {
-            ...(opts?.purpose ? { purpose: opts.purpose } : {}),
-            ...(opts?.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}),
-          }),
-          opts?.timeoutMs ? opts.timeoutMs + 5000 : 10000,
-          'Natively Summary'
-        );
-        if (text.trim().length > 0) {
-          console.log(`[LLMHelper] ✅ Natively API summary generated successfully.`);
-          return this.processResponse(text);
-        }
-      } catch (e: any) {
-        console.warn(`[LLMHelper] ⚠️ Natively API summary failed: ${e.message}. Falling back...`);
-      }
-    }
-
-    // ATTEMPT 2: Codex CLI (if user has it enabled and signed in — text-only path)
+    // ATTEMPT 1: Codex CLI (if user has it enabled and signed in — text-only path)
     if (this.isCodexAvailable()) {
       console.log(`[LLMHelper] Attempting Codex CLI for summary...`);
       try {
