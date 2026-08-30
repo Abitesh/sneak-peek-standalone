@@ -18,6 +18,15 @@ export interface PersonalFileSearchLike {
     startChar?: number;
     endChar?: number;
   }>;
+  searchRelevantAsync?(query: string, limit?: number): Promise<Array<{
+    fileId: string;
+    fileName?: string;
+    chunkId: string;
+    text: string;
+    score?: number;
+    startChar?: number;
+    endChar?: number;
+  }>>;
   search(query: string, limit?: number): Array<{
     fileId: string;
     fileName?: string;
@@ -45,14 +54,27 @@ export function createPersonalFileRetrievalPort(
   }
 
   return createLegacyRetrievalPort({
-    retrieve: async (query): Promise<LegacyChunk[]> => (manager.searchRelevant?.(query, options.topK ?? 20) ?? manager.search(query, options.topK ?? 20)).map((item) => ({
-      sourceId: item.fileId,
-      fileName: item.fileName,
-      text: item.text,
-      chunkIndex: 0,
-      score: item.score,
-      metadata: { chunkId: item.chunkId, startChar: item.startChar, endChar: item.endChar },
-    })),
+    retrieve: async (query): Promise<LegacyChunk[]> => {
+      const items = await (manager.searchRelevantAsync?.(query, options.topK ?? 20)
+        ?? Promise.resolve(manager.searchRelevant?.(query, options.topK ?? 20) ?? manager.search(query, options.topK ?? 20)));
+      if (process.env.NATIVELY_CONTEXT_TRACE === '1') {
+        console.log('[PersonalKnowledgeRetrieval]', {
+          query,
+          matches: items.length,
+          sources: [...new Set(items.map((item) => item.fileName).filter(Boolean))],
+          chunks: items.map((item) => item.chunkId),
+          structural: /\b(?:first|1st|last|next|previous|question\s+\d+)\b/i.test(query),
+        });
+      }
+      return items.map((item) => ({
+        sourceId: item.fileId,
+        fileName: item.fileName,
+        text: item.text,
+        chunkIndex: 0,
+        score: item.score,
+        metadata: { chunkId: item.chunkId, startChar: item.startChar, endChar: item.endChar },
+      }));
+    },
     registry: { sourceTypes, activeVersions, sourceScopes },
     assumeCurrentWhenVersionUnknown: true,
     assumeInScopeWhenUnknown: true,

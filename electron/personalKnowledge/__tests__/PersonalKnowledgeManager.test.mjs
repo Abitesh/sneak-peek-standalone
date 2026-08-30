@@ -94,6 +94,30 @@ test('Person 1 reopens from the same database with stored originals and searchab
   }
 });
 
+test('Person 1 resolves semantic and numbered document questions', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'person1-structure-'));
+  const db = new Database(path.join(dir, 'test.db'));
+  const sourcePath = path.join(dir, 'oops.md');
+  fs.writeFileSync(sourcePath, '1. What is Object-Oriented Programming?\nAnswer: OOP organizes software around objects.\n2. What is encapsulation?\nAnswer: Encapsulation bundles data and behavior.\n5. What is polymorphism?\nAnswer: Polymorphism allows one interface with many implementations.');
+
+  try {
+    const { PersonalKnowledgeManager } = await import('../../../dist-electron/electron/personalKnowledge/PersonalKnowledgeManager.js');
+    PersonalKnowledgeManager.instance = null;
+    const manager = PersonalKnowledgeManager.getInstance(db);
+    await manager.ingestFile(sourcePath);
+    const semantic = await manager.searchRelevantAsync('Can you explain OOP in simple interview language?');
+    const numbered = await manager.searchRelevantAsync('What is question 5 in my OOPS interview file?');
+    const firstFive = await manager.searchRelevantAsync('Give me the first 5 questions');
+
+    assert.match(semantic[0].text, /Object-Oriented Programming|OOP/);
+    assert.match(numbered[0].text, /5\. What is polymorphism/);
+    assert.equal(firstFive.length > 0, true);
+  } finally {
+    db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('SQLite FTS5 is available in the project runtime', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'person1-fts-'));
   const db = new Database(path.join(dir, 'test.db'));

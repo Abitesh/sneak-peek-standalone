@@ -146,6 +146,7 @@ export class PersonalKnowledgeManager {
     private static instance: PersonalKnowledgeManager | null = null;
     private db: Database.Database;
     private readonly storageRoot: string;
+    private readonly repairedFileIds = new Set<string>();
 
     private constructor(db: Database.Database) {
         this.db = db;
@@ -487,9 +488,12 @@ export class PersonalKnowledgeManager {
                     WHERE pc.file_id = ? ORDER BY pc.chunk_index ASC
                 `).all(file.id) as any[];
                 const ordered = wantLast ? chunks.reverse() : chunks;
+                const requestedNumber = ordinal ? Number(ordinal[1]) : (wantLast ? null : 1);
+                const numbered = requestedNumber === null ? [] : ordered.filter((chunk) =>
+                    new RegExp(`(?:^|\\n|\\s)${requestedNumber}[.)]\\s`, 'm').test(chunk.text));
                 const questionChunks = ordered.filter((chunk) => /\?/.test(chunk.text) || /\b(?:question|q\.?\s*\d+)\b/i.test(chunk.text));
-                const source = questionChunks.length ? questionChunks : ordered;
-                const start = ordinal ? Math.max(0, Number(ordinal[1]) - 1) : 0;
+                const source = numbered.length ? numbered : (questionChunks.length ? questionChunks : ordered);
+                const start = ordinal && !numbered.length ? Math.max(0, Number(ordinal[1]) - 1) : 0;
                 for (const row of source.slice(start, start + Math.max(1, count))) {
                     chosen.push({ fileId: row.file_id, fileName: row.file_name, chunkId: row.id, text: row.text, score: 1, startChar: row.start_char, endChar: row.end_char });
                 }
@@ -507,6 +511,58 @@ export class PersonalKnowledgeManager {
             }
         }
         return [...merged.values()].sort((a, b) => b.score - a.score).slice(0, Math.max(1, Math.min(MAX_RESULTS, limit)));
+    }
+
+    async searchRelevantAsync(query: string, limit = MAX_RESULTS): Promise<PersonalFileSearchResult[]> {
+        await this.repairUnreadableIndexes();
+        return this.searchRelevant(query, limit);
+    }
+
+    private async repairUnreadableIndexes(): Promise<{ repaired: number; errors: number }> {
+        const result = { repaired: 0, errors: 0 };
+        const rows = this.db.prepare(`
+            SELECT pf.id, pf.file_path, pf.file_name
+            FROM personal_files pf
+            WHERE EXISTS (
+                SELECT 1 FROM personal_file_chunks pc
+                WHERE pc.file_id = pf.id AND (pc.text LIKE '%PDF-1.%' OR pc.text LIKE '%PK\\003\\004%')
+            )
+        `).all() as Array<{ id: string; file_path: string; file_name: string }>;
+        for (const row of rows) {
+            if (this.repairedFileIds.has(row.id)) continue;
+            this.repairedFileIds.add(row.id);
+            try {
+                const extracted = await extractSafeDocumentText(row.file_path);
+                const text = normalizeWhitespace(extracted.content);
+                if (!text) continue;
+                const chunks = chunkText(text);
+                const insert = this.db.prepare(`
+                    INSERT INTO personal_file_chunks (id, file_id, chunk_index, text, start_char, end_char)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                `);
+                this.db.transaction(() => {
+                    this.db.prepare('DELETE FROM personal_file_chunks WHERE file_id = ?').run(row.id);
+                    chunks.forEach((chunk, index) => insert.run(
+                        makeId('pchunk', `${row.id}:${index}:${chunk.text}`), row.id, index,
+                        chunk.text, chunk.startChar, chunk.endChar,
+                    ));
+                })();
+                console.log('[PersonalKnowledgeManager] repaired unreadable derived index', {
+                    fileId: row.id,
+                    fileName: row.file_name,
+                    chunkCount: chunks.length,
+                });
+                result.repaired++;
+            } catch (error) {
+                console.error('[PersonalKnowledgeManager] derived index repair failed', {
+                    fileId: row.id,
+                    fileName: row.file_name,
+                    error: error instanceof Error ? error.message : String(error),
+                });
+                result.errors++;
+            }
+        }
+        return result;
     }
 
     private searchScoped(query: string, fileIds: string[], limit: number): PersonalFileSearchResult[] {
