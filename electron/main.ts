@@ -1991,6 +1991,8 @@ export class AppState {
           actionId === 'chat:clarify' ||
           actionId === 'chat:followUp' ||
           actionId === 'chat:answer' ||
+          actionId === 'chat:startListen' ||
+          actionId === 'chat:stopListen' ||
           actionId === 'chat:codeHint' ||
           actionId === 'chat:brainstorm' ||
           actionId === 'chat:dynamicAction4' ||
@@ -2004,6 +2006,8 @@ export class AppState {
             'chat:clarify': 'clarify',
             'chat:followUp': 'followUp',
             'chat:answer': 'answer',
+            'chat:startListen': 'startListen',
+            'chat:stopListen': 'stopListen',
             'chat:codeHint': 'codeHint',
             'chat:brainstorm': 'brainstorm',
             'chat:dynamicAction4': 'dynamicAction4',

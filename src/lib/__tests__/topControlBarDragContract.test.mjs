@@ -7,22 +7,29 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const sourcePath = path.resolve(__dirname, '../../components/TopControlBar.tsx');
 const source = readFileSync(sourcePath, 'utf8');
+const nativelyInterfaceSource = readFileSync(
+  path.resolve(__dirname, '../../components/NativelyInterface.tsx'),
+  'utf8',
+);
 
-test('TopControlBar has a dedicated drag handle that is the only pointer-drag source', () => {
-  assert.match(source, /data-top-control-drag-handle/,
-    'BUG: drag must occur from a dedicated handle element, not from the whole toolbar or the action buttons.');
-  assert.match(source, /onPointerDown=\{startDrag\}/,
-    'BUG: the drag handle must own the pointerdown for drag initiation.');
-  assert.match(source, /addEventListener\('pointermove', handlePointerMove\)|addEventListener\("pointermove", handlePointerMove\)/,
-    'BUG: drag must continue even when the pointer moves outside the handle while the user is dragging the toolbar.');
-  assert.match(source, /pointer-events-auto|touch-none/,
-    'BUG: the drag handle needs explicit pointer interaction rules so it can receive real pointer events without fighting the overlay shell.');
+test('TopControlBar is an in-flow toolbar inside the chat shell (not fixed outside it)', () => {
+  assert.match(source, /data-top-control-bar="true"/,
+    'BUG: toolbar must keep a stable selector for layout/contract checks.');
+  assert.doesNotMatch(source, /\bfixed\b/,
+    'BUG: fixed positioning puts the bar in transparent click-through margins outside the shell.');
+  assert.match(source, /overflow-x-auto/,
+    'BUG: the bar must scroll horizontally inside the shell when controls exceed shell width.');
+  assert.match(source, /pointer-events-auto/,
+    'BUG: toolbar buttons must receive pointer events inside the interactive shell.');
+  assert.doesNotMatch(source, /data-top-control-drag-handle|startDrag|natively_top_control_bar_position/,
+    'BUG: free-drag positioning is what left the bar outside the clickable chat window.');
 });
 
-test('TopControlBar is rendered as a fixed additive overlay sibling, not a separate BrowserWindow or separate root', () => {
-  const nativelyInterfaceSource = readFileSync(path.resolve(__dirname, '../../components/NativelyInterface.tsx'), 'utf8');
-  assert.match(nativelyInterfaceSource, /<TopControlBar\s*\n\s*isListening/,
-    'BUG: the toolbar must remain mounted inside the existing NativelyInterface renderer tree as a sibling additive overlay.');
+test('TopControlBar mounts inside the shell card, not as an outside sibling overlay', () => {
+  assert.match(nativelyInterfaceSource, /data-shell-card[\s\S]*?<TopControlBar/,
+    'BUG: the toolbar must render as a child of the chat shell card so it stays inside the window hit region.');
+  assert.doesNotMatch(nativelyInterfaceSource, /<>\s*<TopControlBar/,
+    'BUG: rendering TopControlBar as a fragment sibling outside the shell puts it outside the chat window.');
   assert.doesNotMatch(nativelyInterfaceSource, /new BrowserWindow\s*\(.*TopControlBar|TopControlBar.*new BrowserWindow/s,
     'BUG: the toolbar must not be created via a separate Electron BrowserWindow or second renderer root.');
 });

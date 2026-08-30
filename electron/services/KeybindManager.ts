@@ -39,6 +39,11 @@ export const DEFAULT_KEYBINDS: KeybindConfig[] = [
     { id: 'chat:dynamicAction4', label: 'Recap / Brainstorm', accelerator: 'CommandOrControl+3', isGlobal: true, defaultAccelerator: 'CommandOrControl+3' },
     { id: 'chat:followUp', label: 'Follow Up', accelerator: 'CommandOrControl+4', isGlobal: true, defaultAccelerator: 'CommandOrControl+4' },
     { id: 'chat:answer', label: 'Answer / Record', accelerator: 'CommandOrControl+5', isGlobal: true, defaultAccelerator: 'CommandOrControl+5' },
+    // Dedicated listen start/stop (Cmd/Ctrl+L / Cmd/Ctrl+S). Enter while listening
+    // submits the transcript from the renderer — not a global keybind, so it
+    // never steals plain Enter from other apps.
+    { id: 'chat:startListen', label: 'Start Listening', accelerator: 'CommandOrControl+L', isGlobal: true, defaultAccelerator: 'CommandOrControl+L' },
+    { id: 'chat:stopListen', label: 'Stop Listening', accelerator: 'CommandOrControl+S', isGlobal: true, defaultAccelerator: 'CommandOrControl+S' },
     { id: 'chat:codeHint', label: 'Get Code Hint', accelerator: 'CommandOrControl+6', isGlobal: true, defaultAccelerator: 'CommandOrControl+6' },
     { id: 'chat:brainstorm', label: 'Brainstorm Approaches', accelerator: 'CommandOrControl+7', isGlobal: true, defaultAccelerator: 'CommandOrControl+7' },
     // Scroll shortcuts are global so they work in stealth mode without the user

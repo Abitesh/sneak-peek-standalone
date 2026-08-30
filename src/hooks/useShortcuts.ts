@@ -10,6 +10,8 @@ export interface ShortcutConfig {
     followUp: string[];
     dynamicAction4: string[];
     answer: string[];
+    startListen: string[];
+    stopListen: string[];
     codeHint: string[];
     brainstorm: string[];
     shorten: string[];
@@ -45,6 +47,8 @@ function buildDefaultShortcuts(): ShortcutConfig {
         dynamicAction4: [mod, '3'],
         followUp: [mod, '4'],
         answer: [mod, '5'],
+        startListen: [mod, 'L'],
+        stopListen: [mod, 'S'],
         codeHint: [mod, '6'],
         brainstorm: [mod, '7'],
         shorten: [],
@@ -93,6 +97,8 @@ const BACKEND_ID_TO_ACTION: Partial<Record<string, keyof ShortcutConfig>> = {
     'chat:clarify': 'clarify',
     'chat:dynamicAction4': 'dynamicAction4',
     'chat:answer': 'answer',
+    'chat:startListen': 'startListen',
+    'chat:stopListen': 'stopListen',
     'chat:codeHint': 'codeHint',
     'chat:brainstorm': 'brainstorm',
     'chat:shorten': 'shorten',

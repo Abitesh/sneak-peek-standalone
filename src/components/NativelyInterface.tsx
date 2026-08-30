@@ -6155,6 +6155,30 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
     return () => cleanups.forEach((fn) => fn());
   }, [currentModel, queueToken, flushToken]); // Ensure tracking captures correct model
 
+  const handleStartListening = () => {
+    if (isRecordingRef.current || isManualRecording) return;
+    setVoiceInput('');
+    voiceInputRef.current = '';
+    setManualTranscript('');
+    manualTranscriptRef.current = '';
+    isRecordingRef.current = true;
+    setIsManualRecording(true);
+  };
+
+  /** Stop mic capture without sending the transcript to the model. */
+  const handleStopListening = () => {
+    if (!isRecordingRef.current && !isManualRecording) return;
+    isRecordingRef.current = false;
+    setIsManualRecording(false);
+    window.electronAPI
+      ?.finalizeMicSTT?.()
+      .catch((err) => console.error('[NativelyInterface] Failed to send finalizeMicSTT:', err));
+    setVoiceInput('');
+    voiceInputRef.current = '';
+    setManualTranscript('');
+    manualTranscriptRef.current = '';
+  };
+
   const handleAnswerNow = async () => {
     if (isManualRecording) {
       if (!tryBeginOverlayAction('answer_now')) return;
@@ -6337,20 +6361,7 @@ Provide only the answer, nothing else.`;
         endOverlayAction('answer_now');
       }
     } else {
-      // Start recording - reset voice input state
-      setVoiceInput('');
-      voiceInputRef.current = '';
-      setManualTranscript('');
-      isRecordingRef.current = true; // Update ref immediately
-      setIsManualRecording(true);
-
-      // Ensure native audio is connected
-      try {
-        // Native audio is now managed by main process
-        // await window.electronAPI.invoke('native-audio-connect');
-      } catch (err) {
-        // Already connected, that's fine
-      }
+      handleStartListening();
     }
   };
 
@@ -7052,6 +7063,8 @@ Provide only the answer, nothing else.`;
     handleFollowUpQuestions,
     handleRecap,
     handleAnswerNow,
+    handleStartListening,
+    handleStopListening,
     handleClarify,
     handleCodeHint,
     handleBrainstorm,
@@ -7064,6 +7077,8 @@ Provide only the answer, nothing else.`;
     handleFollowUpQuestions,
     handleRecap,
     handleAnswerNow,
+    handleStartListening,
+    handleStopListening,
     handleClarify,
     handleCodeHint,
     handleBrainstorm,
@@ -7168,6 +7183,8 @@ Provide only the answer, nothing else.`;
         handleFollowUpQuestions,
         handleRecap,
         handleAnswerNow,
+        handleStartListening,
+        handleStopListening,
         handleClarify,
         handleCodeHint,
         handleBrainstorm,
@@ -7193,6 +7210,12 @@ Provide only the answer, nothing else.`;
       } else if (isShortcutPressed(e, 'answer')) {
         e.preventDefault();
         handleAnswerNow();
+      } else if (isShortcutPressed(e, 'startListen')) {
+        e.preventDefault();
+        handleStartListening();
+      } else if (isShortcutPressed(e, 'stopListen')) {
+        e.preventDefault();
+        handleStopListening();
       } else if (isShortcutPressed(e, 'codeHint')) {
         e.preventDefault();
         handleCodeHint();
@@ -7340,6 +7363,23 @@ Provide only the answer, nothing else.`;
       const target = e.target as HTMLElement;
       const isInput =
         target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+
+      // While listening: plain Enter submits the spoken transcript (same as
+      // finishing Listen). Modifiers stay reserved for Cmd/Ctrl+Enter process.
+      if (
+        isRecordingRef.current &&
+        e.key === 'Enter' &&
+        !e.repeat &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        !e.shiftKey
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        void handlersRef.current.handleAnswerNow();
+        return;
+      }
 
       if (isShortcutPressed(e, 'toggleVisibility')) {
         // Always allow toggling visibility
@@ -7554,6 +7594,8 @@ Provide only the answer, nothing else.`;
         if (actionButtonMode === 'brainstorm') handlers.handleBrainstorm();
         else handlers.handleRecap();
       } else if (action === 'answer') handlers.handleAnswerNow();
+      else if (action === 'startListen') handlers.handleStartListening();
+      else if (action === 'stopListen') handlers.handleStopListening();
       else if (action === 'clarify') handlers.handleClarify();
       else if (action === 'codeHint') handlers.handleCodeHint();
       else if (action === 'brainstorm') handlers.handleBrainstorm();
@@ -7669,7 +7711,13 @@ Provide only the answer, nothing else.`;
       switch (ev.keyCode) {
         case 36: // Return
         case 76: // Numpad Enter
-          handleManualSubmitRef.current();
+          // Listening session: Enter commits the spoken transcript.
+          // Otherwise Enter submits whatever is in the ask box.
+          if (isRecordingRef.current) {
+            void handlersRef.current.handleAnswerNow();
+          } else {
+            handleManualSubmitRef.current();
+          }
           // macOS parity: on macOS the input holds real DOM focus, so submitting
           // leaves the caret in the box and the user can type the next message
           // immediately. Windows can't hold focus — the stealth hook IS the
@@ -8009,35 +8057,11 @@ Provide only the answer, nothing else.`;
 
   return (
     <>
-    <TopControlBar
-      isListening={isManualRecording}
-      isProcessing={isProcessing}
-      currentModel={currentModel}
-      currentModelDisplayName={currentModelDisplayName}
-      activeModeLabel={activeModeLabel}
-      inputValue={inputValue}
-      onListen={() => void handleAnswerNow()}
-      onAnswer={() => void handleWhatToSay()}
-      onAsk={() => {
-        if (inputValue.trim()) {
-          void handleManualSubmit();
-        } else {
-          textInputRef.current?.focus();
-        }
-      }}
-      onScreen={() => void generalHandlersRef.current.takeScreenshot()}
-      onModel={(anchor) => {
-        const rect = anchor.getBoundingClientRect();
-        void window.electronAPI.toggleModelSelector({
-          x: window.screenX + rect.left,
-          y: window.screenY + rect.bottom + 8,
-          activate: false,
-        });
-      }}
-    />
     {/* The resize toggle and the TopPill render in their OWN aux
         BrowserWindows (OverlayAuxWindows.tsx), positioned by the main
-        process around this window. This window is exactly the shell card. */}
+        process around this window. This window is exactly the shell card.
+        Listen/Answer controls live INSIDE the shell so they stay in the
+        interactive hit region (transparent margins are click-through). */}
     <div
       ref={contentRef}
       data-interface-theme={isGlassTheme ? 'liquid-glass' : isModernTheme ? 'modern' : 'default'}
@@ -8123,6 +8147,36 @@ Provide only the answer, nothing else.`;
               }}
             >
               {isGlassTheme && <GlassEffectLayer parentRef={shellRef} cornerRadius={24} />}
+
+              <TopControlBar
+                isListening={isManualRecording}
+                isProcessing={isProcessing}
+                currentModel={currentModel}
+                currentModelDisplayName={currentModelDisplayName}
+                activeModeLabel={activeModeLabel}
+                inputValue={inputValue}
+                onListen={() => {
+                  if (isManualRecording) handleStopListening();
+                  else handleStartListening();
+                }}
+                onAnswer={() => void handleWhatToSay()}
+                onAsk={() => {
+                  if (inputValue.trim()) {
+                    void handleManualSubmit();
+                  } else {
+                    textInputRef.current?.focus();
+                  }
+                }}
+                onScreen={() => void generalHandlersRef.current.takeScreenshot()}
+                onModel={(anchor) => {
+                  const rect = anchor.getBoundingClientRect();
+                  void window.electronAPI.toggleModelSelector({
+                    x: window.screenX + rect.left,
+                    y: window.screenY + rect.bottom + 8,
+                    activate: false,
+                  });
+                }}
+              />
 
               {hasStatusPill && (
               <div className="relative no-drag flex flex-wrap items-center justify-center gap-1.5 px-4 pt-3 pb-1">
@@ -9071,7 +9125,13 @@ Provide only the answer, nothing else.`;
                       // empty input, which is why the shortcut appeared dead.
                       if (e.metaKey || e.ctrlKey) return;
                       e.preventDefault();
-                      handleManualSubmit();
+                      // While listening, Enter commits speech; otherwise send
+                      // the typed ask-box message.
+                      if (isRecordingRef.current || isManualRecording) {
+                        void handleAnswerNow();
+                      } else {
+                        handleManualSubmit();
+                      }
                     }}
                     // Block native DOM focus on click — the panel becoming
                     // key window is exactly the signal coding-interview
