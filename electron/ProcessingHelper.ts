@@ -95,11 +95,9 @@ export class ProcessingHelper {
       this.llmHelper.setLitellmConfig(credManager.getLitellmApiKey() || '', litellmBaseURL, credManager.getLitellmMaxTokens());
     }
 
-    const nativelyKey = credManager.getNativelyApiKey();
-    if (nativelyKey) {
-      console.log("[ProcessingHelper] Loading stored Natively API Key from CredentialsManager");
-      this.llmHelper.setNativelyKey(nativelyKey);
-    }
+    // Natively API is intentionally disabled in this build. The app now uses a
+    // single authoritative Gemini key and the provider list does not include the
+    // hosted backend at all.
 
     // CRITICAL: Re-initialize IntelligenceManager now that keys are loaded
     // This fixes the issue where buttons don't work in production because of late key loading

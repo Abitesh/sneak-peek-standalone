@@ -6674,10 +6674,12 @@ export function initializeIpcHandlers(appState: AppState): void {
       const llmHelper = appState.processingHelper.getLLMHelper();
       await llmHelper.switchToGemini(apiKey, modelId);
 
-      // Persist API key if provided
-      if (false && apiKey) {
-        const { CredentialsManager } = require('./services/CredentialsManager');
-        CredentialsManager.getInstance().setGeminiApiKey(apiKey);
+      if (apiKey) {
+        const trimmed = apiKey.trim();
+        if (trimmed) {
+          const { CredentialsManager } = require('./services/CredentialsManager');
+          CredentialsManager.getInstance().setGeminiApiKey(apiKey);
+        }
       }
 
       return { success: true };
@@ -7354,67 +7356,11 @@ export function initializeIpcHandlers(appState: AppState): void {
   });
 
   safeHandle('get-natively-pricing', async () => {
-    try {
-      const cached = _pricingCache.get('pricing');
-      if (cached && Date.now() - cached.ts < PRICING_CACHE_TTL_MS) {
-        return cached.data;
-      }
-
-      const res = await fetch('https://api.natively.software/v1/pricing', {
-        signal: AbortSignal.timeout(8000),
-      });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as any;
-        return { ok: false, error: body.error || 'request_failed', status: res.status };
-      }
-      const data = (await res.json()) as any;
-      const result = { ok: true, ...data };
-      _pricingCache.set('pricing', { data: result, ts: Date.now() });
-      return result;
-    } catch (error: any) {
-      return { ok: false, error: error.message || 'network_error' };
-    }
+    return { ok: false, error: 'natively_api_disabled' };
   });
 
-  safeHandle('get-natively-usage', async (_event, opts?: { force?: boolean }) => {
-    // Hoisted out of try so the catch block's stale-cache lookup can reach it.
-    let key: string | undefined;
-    try {
-      const { CredentialsManager } = require('./services/CredentialsManager');
-      key = CredentialsManager.getInstance().getNativelyApiKey();
-      if (!key) return { ok: false, error: 'no_key' };
-
-      // Return cached value if it's still fresh — skipped when the caller
-      // explicitly asks for a fresh fetch (the Refresh button). Without this,
-      // a manual refresh within the 60s TTL silently re-serves the same
-      // stale numbers, which reads as "the button doesn't work."
-      const cached = _usageCache.get(key);
-      if (!opts?.force && cached && Date.now() - cached.ts < USAGE_CACHE_TTL_MS) {
-        return cached.data;
-      }
-
-      const res = await fetch('https://api.natively.software/v1/usage', {
-        headers: { 'x-natively-key': key },
-        signal: AbortSignal.timeout(8000),
-      });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as any;
-        return { ok: false, error: body.error || 'request_failed', status: res.status };
-      }
-      const data = (await res.json()) as any;
-      const result = { ok: true, ...data };
-
-      // Cache the successful response
-      _usageCache.set(key, { data: result, ts: Date.now() });
-      return result;
-    } catch (error: any) {
-      // On transient DNS/network failure, serve stale cache rather than showing an error.
-      // Railway uses 1s TTL on DNS records, so a momentary resolver hiccup causes ENOTFOUND
-      // even when the server is up. Stale quota data is far better than a broken UI.
-      const stale = key ? _usageCache.get(key) : undefined;
-      if (stale) return { ...stale.data, stale: true };
-      return { ok: false, error: error.message || 'network_error' };
-    }
+  safeHandle('get-natively-usage', async (_event, _opts?: { force?: boolean }) => {
+    return { ok: false, error: 'natively_api_disabled' };
   });
 
   // Allow other handlers to force-invalidate the usage cache (e.g. after key change)
@@ -7427,92 +7373,12 @@ export function initializeIpcHandlers(appState: AppState): void {
 
   // Start or resume a free trial. Fetches HWID, calls server, persists token locally.
   safeHandle('trial:start', async () => {
-    try {
-      const { CredentialsManager } = require('./services/CredentialsManager');
-      const cm = CredentialsManager.getInstance();
-
-      // Get hardware ID for HWID-binding.
-      //
-      // F-601: this MUST be a real per-machine identity. LicenseManager
-      // returns the literal string 'unavailable' when the native module
-      // failed to load (its own JSDoc scopes that value to "display to the
-      // user for support purposes"), and the trial row is keyed
-      // `hwid text NOT NULL UNIQUE` server-side. Sending the sentinel makes
-      // every machine with a broken native module collide on ONE
-      // free_trials row: the server's idempotent re-issue branch hands back
-      // a valid signed trial token for a STRANGER's trial, exposing their
-      // usage counters and billing every request against their quota.
-      // Fail closed instead — a trial that cannot be bound to this machine
-      // must not be started.
-      let hwid = '';
-      try {
-        const { LicenseManager } = require('../premium/electron/services/LicenseManager');
-        hwid = LicenseManager.getInstance().getHardwareId() || '';
-      } catch {
-        /* LicenseManager not available — handled by the guard below */
-      }
-      if (!hwid || hwid === 'unavailable') {
-        console.error('[Trial] Refusing to start a trial without a real hardware id (native module unavailable).');
-        return { ok: false, error: 'hardware_id_unavailable' };
-      }
-
-      const res = await fetch('https://api.natively.software/v1/trial/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hwid }),
-        signal: AbortSignal.timeout(10_000),
-      });
-
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as any;
-        return { ok: false, error: body.error || 'request_failed', status: res.status };
-      }
-
-      const data = (await res.json()) as any;
-
-      if (data.ok && data.trial_token && !data.expired) {
-        cm.setTrialToken(data.trial_token, data.expires_at, data.started_at);
-
-        // Auto-configure natively as the model + STT provider during trial
-        const prevSttProvider = cm.getSttProvider();
-        cm.setNativelyApiKey(TRIAL_SENTINEL_KEY); // sentinel — activates natively model routing
-        const newSttProvider = cm.getSttProvider();
-        if (newSttProvider !== prevSttProvider) {
-          await appState.reconfigureSttProvider();
-        }
-        const llmHelper = appState.processingHelper?.getLLMHelper?.();
-        if (llmHelper) llmHelper.setNativelyKey(TRIAL_SENTINEL_KEY);
-      }
-
-      const { trial_token, ...safeData } = data;
-      return { ok: true, ...safeData, hasToken: Boolean(data.trial_token) };
-    } catch (error: any) {
-      console.error('[IPC] trial:start failed:', error);
-      return { ok: false, error: error.message || 'network_error' };
-    }
+    return { ok: false, error: 'natively_api_disabled' };
   });
 
   // Poll the server for live trial status (remaining time + usage counters).
   safeHandle('trial:status', async () => {
-    try {
-      const { CredentialsManager } = require('./services/CredentialsManager');
-      const token = CredentialsManager.getInstance().getTrialToken();
-      if (!token) return { ok: false, error: 'no_trial_token' };
-
-      const res = await fetch('https://api.natively.software/v1/trial/status', {
-        headers: { 'x-trial-token': token },
-        signal: AbortSignal.timeout(8_000),
-      });
-
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as any;
-        return { ok: false, error: body.error || 'request_failed', status: res.status };
-      }
-
-      return await res.json();
-    } catch (error: any) {
-      return { ok: false, error: error.message || 'network_error' };
-    }
+    return { ok: false, error: 'natively_api_disabled' };
   });
 
   // Return local trial state from credentials (no network call — safe for startup check).
@@ -7537,23 +7403,8 @@ export function initializeIpcHandlers(appState: AppState): void {
   });
 
   // Record the user's post-trial choice in analytics and clean up local state.
-  safeHandle('trial:convert', async (_, choice: string) => {
-    try {
-      const { CredentialsManager } = require('./services/CredentialsManager');
-      const token = CredentialsManager.getInstance().getTrialToken();
-      if (!token) return { ok: true }; // no token to report
-
-      await fetch('https://api.natively.software/v1/trial/convert', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-trial-token': token },
-        body: JSON.stringify({ choice }),
-        signal: AbortSignal.timeout(5_000),
-      }).catch(() => {}); // fire-and-forget — don't block local cleanup on network failure
-
-      return { ok: true };
-    } catch {
-      return { ok: true };
-    }
+  safeHandle('trial:convert', async (_event, _choice: string) => {
+    return { ok: true };
   });
 
   // End trial via BYOK path: wipe Pro-ingested data, clear trial token + natively key.
@@ -7728,16 +7579,10 @@ export function initializeIpcHandlers(appState: AppState): void {
       const { CredentialsManager } = require('./services/CredentialsManager');
       const cm = CredentialsManager.getInstance();
 
-      // 1. Fire-and-forget analytics (non-blocking)
+      // 1. The hosted Natively trial backend is intentionally disabled. Do not
+      // attempt any remote conversion or API call here; keep the local reset only.
       const token = cm.getTrialToken();
-      if (token) {
-        fetch('https://api.natively.software/v1/trial/convert', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-trial-token': token },
-          body: JSON.stringify({ choice: 'byok' }),
-          signal: AbortSignal.timeout(4_000),
-        }).catch(() => {});
-      }
+      void token;
 
       // 2. Clear trial token
       cm.clearTrialToken();

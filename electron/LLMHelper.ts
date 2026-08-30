@@ -70,7 +70,6 @@ import { createProviderRateLimiters, RateLimiter } from './services/RateLimiter'
 import { CodexCliConfig, CodexCliService, DEFAULT_CODEX_CLI_CONFIG } from './services/CodexCliService';
 import { GROQ_PRIMARY_MODEL, groqFallbackFor, isGroqModelGone } from './llm/groqModels';
 const execAsync = promisify(exec);
-const NATIVELY_API_URL = (process.env.NATIVELY_API_URL || 'https://api.natively.software').replace(/\/+$/, '');
 
 function nowMs(): number {
   try {
@@ -1194,15 +1193,10 @@ export class LLMHelper {
   }
 
   private hasNatively(): boolean {
-    // Switched off in Settings > AI Providers: not a fallback, not a primary.
-    // Checked before the E2E escape hatch so a test harness cannot resurrect a
-    // provider the user turned off.
-    if (this.isProviderDisabled('natively')) return false;
-    // E2E: a locally-run backend with NATIVELY_LOCAL_TEST_AUTH accepts the app
-    // via the x-natively-local-test header, so the natively provider is usable
-    // even without a stored key. Strictly gated behind NATIVELY_E2E=1.
-    if (process.env.NATIVELY_E2E === '1' && process.env.NATIVELY_E2E_LOCAL_TEST_TOKEN) return true;
-    return !!this.nativelyKey;
+    // Natively API is intentionally disabled in the runtime. This keeps the app
+    // from reintroducing a hosted backend dependency while leaving the legacy
+    // entry points in place for compatibility with older settings/tests.
+    return false;
   }
 
   /**
@@ -1237,14 +1231,12 @@ export class LLMHelper {
   // these named entry points so the surface stays auditable.
 
   public async runVisionRequest(
-    providerId: 'natively' | 'openai' | 'claude' | 'gemini_flash_lite' | 'gemini_flash' | 'gemini_pro' | 'groq_scout' | 'custom',
+    providerId: 'openai' | 'claude' | 'gemini_flash_lite' | 'gemini_flash' | 'gemini_pro' | 'groq_scout' | 'custom',
     userPrompt: string,
     systemPrompt: string,
     imagePath: string,
   ): Promise<string> {
     switch (providerId) {
-      case 'natively':
-        return this.generateWithNatively(userPrompt, systemPrompt, [imagePath]);
       case 'openai':
         return this.generateWithOpenai(userPrompt, systemPrompt, [imagePath]);
       case 'claude':
@@ -3240,19 +3232,11 @@ let isMultimodal = !!(imagePaths?.length);
         return this.processResponse(response);
       }
 
-      // --- Direct Routing based on Selected Model ---
+      // Legacy 'natively' model selection is intentionally disabled. This app
+      // uses a single Gemini-authoritative route and must never reach the old
+      // hosted backend even if a stale model id is still saved.
       if (this.currentModelId === 'natively') {
-        const { CredentialsManager } = require('./services/CredentialsManager');
-        const nativelyKey = CredentialsManager.getInstance().getNativelyApiKey();
-        if (nativelyKey) {
-          try {
-            return await this.generateWithNatively(cloudUserContent, openaiSystemPrompt, cloudImagePaths);
-          } catch (err: any) {
-            console.warn('[LLMHelper] Natively API failed in chatWithGemini, falling back to Gemini:', err.message);
-            // Fall through to smart dynamic fallback below
-          }
-        }
-        // No key or call failed — fall through to default routing
+        console.warn('[LLMHelper] Ignoring stale natively model selection; using Gemini fallback instead.');
       }
       if (this.isOpenAiModel(this.currentModelId) && this.openaiClient) {
         return await this.generateWithOpenai(cloudUserContent, openaiSystemPrompt, cloudImagePaths);
@@ -3305,7 +3289,6 @@ let isMultimodal = !!(imagePaths?.length);
         capability: 'chat',
         multimodal: cloudIsMultimodal,
         availability: {
-          hasNatively: this.hasNatively(),
           hasGroq: Boolean(this.groqClient),
           groqDisabled: this._groqLocalDisabled,
           hasCodex: this.isCodexAvailable(),
@@ -3337,9 +3320,6 @@ let isMultimodal = !!(imagePaths?.length);
       for (const routedProvider of routedProviders) {
         if (routedProvider.status !== 'available') continue;
         switch (routedProvider.provider) {
-          case 'natively':
-            providers.push({ name: routedProvider.name, execute: () => this.generateWithNatively(cloudUserContent, openaiSystemPrompt, cloudIsMultimodal ? cloudImagePaths : undefined) });
-            break;
           case 'groq':
             if (cloudIsMultimodal) {
               providers.push({ name: `Groq (${GROQ_VISION_MODEL})`, execute: () => this.generateWithGroqMultimodal(cloudUserContent, cloudImagePaths!, openaiSystemPrompt) });
@@ -3371,7 +3351,7 @@ let isMultimodal = !!(imagePaths?.length);
             }
             break;
           case 'ollama':
-            providers.push({ name: routedProvider.name, execute: () => this.callOllama(combinedMessages.gemini, imagePaths, undefined) });
+            providers.push({ name: routedProvider.name, execute: () => this.callOllama(combinedMessages.gemini, imagePaths ?? [], undefined) });
             break;
         }
       }
@@ -3604,21 +3584,6 @@ let isMultimodal = !!(imagePaths?.length);
       });
     }
 
-    // Priority 8: Natively API — used when no other provider is available, or as final fallback
-    const nativelyKeyForStructured = this.nativelyKey || (() => {
-      try { return require('./services/CredentialsManager').CredentialsManager.getInstance().getNativelyApiKey() || null; } catch { return null; }
-    })();
-    if (nativelyKeyForStructured) {
-      providers.push({
-        name: 'Natively API',
-        // Structured extraction: tell the server this is an extraction request so
-        // it runs its dedicated flash-lite→3.7-flash-only loop (3 cycles then
-        // hard-fail) and NEVER falls through to MiniMax/Pro/Scout. Older servers
-        // ignore the unknown field and route via their normal flash-first chain.
-        execute: () => this.generateWithNatively(message, undefined, undefined, { purpose: 'extraction' })
-      });
-    }
-
     if (providers.length === 0) {
       throw new Error('No reasoning model available. Please configure an API key (OpenAI, Claude, Gemini, Groq, Natively) or a custom provider.');
     }
@@ -3767,203 +3732,10 @@ let isMultimodal = !!(imagePaths?.length);
   }
 
   /**
-   * Non-streaming OpenAI generation with proper system/user separation
-   */
-  /**
-   * Routes AI generation through the Natively API backend (Gemini-powered).
+   * Legacy Natively API route retained as a fail-closed stub.
    */
   private async generateWithNatively(userMessage: string, systemPrompt?: string, imagePaths?: string[], opts?: { purpose?: 'extraction'; timeoutMs?: number }): Promise<string> {
-    this.assertOutboundScopes('natively', userMessage, imagePaths);
-    // Prefer the in-memory field; fall back to CredentialsManager for the direct-routing path
-    // where currentModelId === 'natively' but setNativelyKey() wasn't called yet.
-    const e2eLocalToken =
-      process.env.NATIVELY_E2E === '1' ? (process.env.NATIVELY_E2E_LOCAL_TEST_TOKEN || '') : '';
-    let nativelyKey = this.nativelyKey;
-    if (!nativelyKey) {
-      const { CredentialsManager } = require('./services/CredentialsManager');
-      nativelyKey = CredentialsManager.getInstance().getNativelyApiKey() || null;
-    }
-    if (!nativelyKey && !e2eLocalToken) throw new Error('Natively API key not set');
-
-    const endpointUrl = `${NATIVELY_API_URL}/v1/chat`;
-    const requestId = makeRequestId('nat_json');
-    const requestStartedAt = nowMs();
-    // When the key is the trial sentinel, authenticate with the real trial token
-    // instead — the server validates x-trial-token, not __trial__ as an API key.
-    const headers: any = { 'Content-Type': 'application/json', 'X-Request-Id': requestId };
-    if (e2eLocalToken) {
-      headers['x-natively-local-test'] = e2eLocalToken;
-    } else if (nativelyKey === TRIAL_SENTINEL_KEY) {
-      const { CredentialsManager } = require('./services/CredentialsManager');
-      const trialToken = CredentialsManager.getInstance().getTrialToken();
-      if (!trialToken) throw new Error('Trial token not found');
-      headers['x-trial-token'] = trialToken;
-    } else {
-      headers['x-natively-key'] = nativelyKey;
-    }
-
-    const body: any = { messages: [{ role: 'user', content: userMessage }] };
-
-    // Signal fast mode so the server routes to Groq Llama 3.3 (text-only, key-rotated).
-    // Only sent for text-only requests — server ignores it when images are present.
-    if (this.groqFastTextMode) body.fast_mode = true;
-
-    // EXTRACTION hint: opt-in signal that this is a structured document extraction
-    // (resume/JD). The server routes it through a dedicated flash-lite→3.7-flash
-    // loop (3 cycles, then hard-fail) and NEVER escalates to MiniMax/Pro/Scout.
-    // Advisory + backward-compatible: older servers drop the unknown field and use
-    // their normal flash-first chain. Never combined with fast_mode (opposite intents).
-    if (opts?.purpose === 'extraction') {
-      body.purpose = 'extraction';
-      delete body.fast_mode;
-    }
-
-    // Send images as a structured array so the server can build proper Gemini inlineData parts.
-    // Embedding base64 in the text content would be truncated at 4000 chars and treated as text.
-    //
-    // Compress before sending: retina screenshots are 2-5 MB PNG; the Natively API body limit
-    // is 4 MB. Resize to max 1920px (above the 1470px logical resolution of a MacBook Air, so
-    // no detail is lost) and encode as JPEG 85% — typically 200-250 KB per image.
-    // 4 screenshots × ~278KB base64 = ~1.1 MB, well within the 4 MB server limit.
-    if (imagePaths?.length) {
-      const images: { mime_type: string; data: string }[] = [];
-      for (const p of imagePaths) {
-        if (fs.existsSync(p)) {
-          try {
-            const compressed = await sharp(p)
-              .resize(1920, 1920, { fit: 'inside', withoutEnlargement: true })
-              .jpeg({ quality: 85 })
-              .toBuffer();
-            images.push({ mime_type: 'image/jpeg', data: compressed.toString('base64') });
-          } catch (compressErr: any) {
-            // Fallback: send raw if sharp fails (e.g. unsupported format)
-            console.warn('[LLMHelper] Image compression failed, sending raw:', compressErr.message);
-            const imageData = await fs.promises.readFile(p);
-            if (imageData.length > 500 * 1024) {
-              console.warn('[LLMHelper] Raw fallback image too large to send, skipping:', p);
-              continue;
-            }
-            images.push({ mime_type: 'image/png', data: imageData.toString('base64') });
-          }
-        }
-      }
-      if (images.length) body.images = images;
-    }
-    if (systemPrompt) body.system = systemPrompt;
-    if (this.aiResponseLanguage) {
-      // 'auto' AND 'English' are both forwarded — the server injects for each.
-      // English used to be excluded here, which (together with the empty prompt
-      // suffix above) left an English-pinned turn with no directive at all.
-      body.language = this.aiResponseLanguage;
-    }
-
-    // 8s hard cap by default: a `fetch failed` network error without this can stall the
-    // provider waterfall for 25-30s before the OS-level TCP reset fires. Callers doing a
-    // DENSE structured extraction (meeting notes) pass a larger bound — 8s is far too
-    // short for that, and silently selected for sparse output.
-    const timeoutMs = opts?.timeoutMs ?? 8000;
-    // Overall-deadline signal covers BOTH connect AND the body read below. Without
-    // a read-phase bound, a server that sends headers then hangs the body would
-    // stall `response.json()` forever (the 8s fetch-signal only covers connect).
-    // 45s is generous for a non-streaming completion body while still failing in
-    // bounded time.
-    // Must stay above timeoutMs or it becomes the new binding constraint.
-    const OVERALL_DEADLINE_MS = Math.max(45_000, timeoutMs + 15_000);
-    const overallController = new AbortController();
-    const overallTimer = setTimeout(() => overallController.abort(), OVERALL_DEADLINE_MS);
-    let response: Response;
-    try {
-      const serializedBody = JSON.stringify(body);
-      require('./llm/providerPayloadCapture').captureProviderPayload({
-        provider: 'natively_gateway',
-        classification: 'exact_serialized_provider_payload',
-        payload: body,
-        serializedPayload: serializedBody,
-      });
-      response = await fetch(endpointUrl, {
-        method: 'POST',
-        headers,
-        body: serializedBody,
-        signal: AbortSignal.any([AbortSignal.timeout(timeoutMs), overallController.signal]),
-      });
-    } catch (fetchErr: any) {
-      clearTimeout(overallTimer);
-      const durationMs = Math.round(nowMs() - requestStartedAt);
-      console.error('[NativelyAPI] JSON pre-response failure', {
-        requestId,
-        endpoint: endpointUrl,
-        method: 'POST',
-        stage: 'pre_response',
-        model: this.currentModelId,
-        provider: 'natively',
-        timeoutMs,
-        durationMs,
-        error: summarizeFetchError(fetchErr),
-      });
-      throw new Error(`Natively API request failed before response requestId=${requestId} endpoint=${endpointUrl} method=POST timeoutMs=${timeoutMs} durationMs=${durationMs} ${formatFetchError(fetchErr)}`);
-    }
-
-    // The overall-deadline timer must be cleared on EVERY post-connect exit
-    // (http-error, parse-error, success) so it never fires after we're done and
-    // never leaks. The reads below are covered by overallController.signal.
-    try {
-      const serverRequestId = response.headers.get('x-request-id');
-      if (!response.ok) {
-        const errText = await response.text().catch(() => '');
-        let errData: any = {};
-        try { errData = errText ? JSON.parse(errText) : {}; } catch { errData = {}; }
-        console.error('[NativelyAPI] JSON HTTP failure', {
-          requestId,
-          serverRequestId,
-          endpoint: endpointUrl,
-          method: 'POST',
-          stage: 'http_status',
-          status: response.status,
-          statusText: response.statusText,
-          model: this.currentModelId,
-          provider: 'natively',
-          timeoutMs,
-          durationMs: Math.round(nowMs() - requestStartedAt),
-          responseBody: errText.slice(0, 1000),
-        });
-        throw new Error(`Natively API HTTP ${response.status} requestId=${requestId} serverRequestId=${serverRequestId || 'n/a'} endpoint=${endpointUrl}: ${errData.error || errText.slice(0, 300) || 'unknown'}`);
-      }
-
-      let data: any;
-      try {
-        data = await response.json();
-      } catch (parseErr: any) {
-        console.error('[NativelyAPI] JSON parse failure', {
-          requestId,
-          serverRequestId,
-          endpoint: endpointUrl,
-          method: 'POST',
-          stage: 'after_response',
-          status: response.status,
-          model: this.currentModelId,
-          provider: 'natively',
-          durationMs: Math.round(nowMs() - requestStartedAt),
-          error: summarizeFetchError(parseErr),
-        });
-        throw new Error(`Natively API invalid JSON response requestId=${requestId} serverRequestId=${serverRequestId || 'n/a'} ${formatFetchError(parseErr)}`);
-      }
-      console.log('[NativelyAPI] JSON completed', {
-        requestId,
-        serverRequestId,
-        endpoint: endpointUrl,
-        method: 'POST',
-        status: response.status,
-        model: this.currentModelId,
-        provider: 'natively',
-        serverModel: data?.model,
-        timeoutMs,
-        durationMs: Math.round(nowMs() - requestStartedAt),
-        chars: typeof data?.content === 'string' ? data.content.length : 0,
-      });
-      return data.content || '';
-    } finally {
-      clearTimeout(overallTimer);
-    }
+    throw new Error('Natively API is disabled in this build.');
   }
 
   /**
@@ -7447,340 +7219,10 @@ let isMultimodal = !!(imagePaths?.length);
 
   /**
    * Fake-stream for Natively API (non-streaming endpoint).
-   * Yields the full response in small word-batches so the UI typing effect still plays.
-   * Throws on empty response so the fallback chain tries the next provider.
+   * This runtime intentionally never dials the hosted backend.
    */
   private async * streamWithNatively(userContent: string, systemPrompt?: string, imagePaths?: string[], abortSignal?: AbortSignal, connectTimeoutMs: number = INTERACTIVE_CONNECT_TIMEOUT_MS): AsyncGenerator<string, void, unknown> {
-    // ── REAL SSE STREAM (replaces the fake word-by-word simulation) ──────────
-    // Previous implementation called generateWithNatively() (blocking, waited for
-    // the full response), then drip-fed words with setTimeout delays — pure theater.
-    // This version opens a streaming fetch and yields tokens as the server generates
-    // them, cutting time-to-first-token from ~3s to ~80ms.
-    // E2E: when driving a locally-run backend with NATIVELY_LOCAL_TEST_AUTH=1, the
-    // app authenticates via the local-test header instead of a real key/trial. Only
-    // active when NATIVELY_E2E=1 AND the token env is set, so it can never affect a
-    // shipped app or a normal run.
-    const e2eLocalToken =
-      process.env.NATIVELY_E2E === '1' ? (process.env.NATIVELY_E2E_LOCAL_TEST_TOKEN || '') : '';
-    let nativelyKey = this.nativelyKey;
-    if (!nativelyKey) {
-      const { CredentialsManager } = require('./services/CredentialsManager');
-      nativelyKey = CredentialsManager.getInstance().getNativelyApiKey() || null;
-    }
-    if (!nativelyKey && !e2eLocalToken) throw new Error('Natively API key not set');
-
-    const body: Record<string, unknown> = {
-      messages: [{ role: 'user', content: userContent }],
-      stream: true,
-    };
-    if (this.groqFastTextMode) body.fast_mode = true;
-    if (systemPrompt) body.system = systemPrompt;
-    if (this.aiResponseLanguage) {
-      // 'auto' AND 'English' are both forwarded — the server injects for each.
-      // English used to be excluded here, which (together with the empty prompt
-      // suffix above) left an English-pinned turn with no directive at all.
-      body.language = this.aiResponseLanguage;
-    }
-
-    // Attach images — compress before sending (same as non-streaming generateWithNatively).
-    // Retina screenshots are 2-5 MB PNG; the Natively API body limit is 4 MB.
-    // Resize to max 1920px and encode as JPEG 85% — typically 200-250 KB per image.
-    // 4 screenshots × ~278KB base64 = ~1.1 MB, well within the 4 MB server limit.
-    if (imagePaths?.length) {
-      const images: { mime_type: string; data: string }[] = [];
-      for (const p of imagePaths) {
-        if (fs.existsSync(p)) {
-          try {
-            const compressed = await sharp(p)
-              .resize(1920, 1920, { fit: 'inside', withoutEnlargement: true })
-              .jpeg({ quality: 85 })
-              .toBuffer();
-            images.push({ mime_type: 'image/jpeg', data: compressed.toString('base64') });
-          } catch (compressErr: any) {
-            // Fallback: send raw if sharp fails (e.g. unsupported format)
-            console.warn('[LLMHelper] streamWithNatively: image compression failed, sending raw:', compressErr.message);
-            const imageData = await fs.promises.readFile(p);
-            if (imageData.length > 500 * 1024) {
-              console.warn('[LLMHelper] streamWithNatively: raw fallback image too large, skipping:', p);
-              continue;
-            }
-            images.push({ mime_type: 'image/png', data: imageData.toString('base64') });
-          }
-        }
-      }
-      if (images.length) body.images = images;
-    }
-
-    const endpointUrl = `${NATIVELY_API_URL}/v1/chat`;
-    const requestId = makeRequestId('nat_stream');
-    const streamStartedAt = nowMs();
-    let responseStartedAt = 0;
-    let firstTokenAt = 0;
-    let tokenCount = 0;
-    let charCount = 0;
-    let serverRequestId: string | null = null;
-    let responseStatus: number | null = null;
-    let providerModel: string | null = null;
-
-    // When the key is the trial sentinel, authenticate with the real trial token.
-    const streamHeaders: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'Accept': 'text/event-stream',
-      'X-Request-Id': requestId,
-    };
-    if (e2eLocalToken) {
-      streamHeaders['x-natively-local-test'] = e2eLocalToken;
-    } else if (nativelyKey === TRIAL_SENTINEL_KEY) {
-      const { CredentialsManager } = require('./services/CredentialsManager');
-      const trialToken = CredentialsManager.getInstance().getTrialToken();
-      if (!trialToken) throw new Error('Trial token not found');
-      streamHeaders['x-trial-token'] = trialToken;
-    } else {
-      // Non-null: this `else` implies `e2eLocalToken` is falsy, and the guard above
-      // (`if (!nativelyKey && !e2eLocalToken) throw`) already threw for a null key.
-      streamHeaders['x-natively-key'] = nativelyKey!;
-    }
-
-    // Early-bail if the caller has already aborted (e.g., user superseded
-    // the request before we even built the body). Saves an HTTP roundtrip.
-    if (abortSignal?.aborted) return;
-
-    // Single controller for the entire stream lifetime. Both phases (connect
-    // and read) honor it. We multiplex two abort sources into it:
-    //   1. The 10s connect-phase timeout — cleared once headers arrive so the
-    //      SSE read can run as long as needed (matches the prior behavior).
-    //   2. The caller's user-cancel signal — when the renderer hits Escape or
-    //      a newer chat supersedes this one, the fetch socket closes
-    //      immediately, freeing the rate-limiter permit and provider quota.
-    //      Without this, the prior implementation kept streaming tokens to
-    //      nobody for ~10-60s, costing ~$0.045 per cancelled Pro request.
-    // IMPORTANT: AbortSignal.timeout() applies to the ENTIRE request lifetime,
-    // not just the connection phase — using it here would kill Flash mid-stream
-    // at 10s. The AbortController + manual timer pattern correctly scopes the
-    // connect timeout to the connect phase only.
-    const streamController = new AbortController();
-    let connectTimer: NodeJS.Timeout | null = setTimeout(
-      () => streamController.abort(new Error(`Natively API connect timeout (${Math.round(connectTimeoutMs / 1000)}s)`)),
-      connectTimeoutMs,
-    );
-    const onCallerAbort = () => {
-      try { streamController.abort(abortSignal?.reason); } catch { /* already aborted */ }
-    };
-    abortSignal?.addEventListener('abort', onCallerAbort, { once: true });
-
-    // Definite-assignment: `response` is always assigned before the `response.ok`
-    // read below, via an invariant tsc cannot see.
-    //   - attempt 0 cannot take the `signal.aborted` break: the caller-abort
-    //     early-bail above returns, and there is no `await` between it and the
-    //     loop, so the connect-timeout `setTimeout` cannot have fired yet.
-    //   - attempts 1-2 are only reached from the DNS-retry path, which always
-    //     leaves `lastErr` set, so `if (lastErr) throw lastErr` fires first.
-    // NOTE: this invariant is fragile — introducing an `await` before the loop
-    // would make the abort break reachable and `response.ok` would throw a
-    // TypeError.
-    let response!: Response;
-    try {
-      // Retry on transient DNS failures (ENOTFOUND / EAI_AGAIN).
-      // Railway's 1s TTL means the OS resolver can return ENOTFOUND for 2-3s
-      // during a resolver hiccup even when the server is alive. undici (Node's
-      // built-in fetch) wraps the original error in err.cause, so check both.
-      const isDnsError = (e: any) =>
-        e?.code === 'ENOTFOUND' || e?.code === 'EAI_AGAIN' ||
-        e?.cause?.code === 'ENOTFOUND' || e?.cause?.code === 'EAI_AGAIN';
-
-      let lastErr: unknown;
-      for (let attempt = 0; attempt < 3; attempt++) {
-        if (streamController.signal.aborted) break;
-        try {
-          const serializedBody = JSON.stringify(body);
-          require('./llm/providerPayloadCapture').captureProviderPayload({
-            provider: 'natively_gateway',
-            classification: 'exact_serialized_provider_payload',
-            payload: body,
-            serializedPayload: serializedBody,
-          });
-          response = await fetch(endpointUrl, {
-            method: 'POST',
-            headers: streamHeaders,
-            body: serializedBody,
-            signal: streamController.signal,
-          });
-          responseStartedAt = nowMs();
-          responseStatus = response.status;
-          serverRequestId = response.headers.get('x-request-id');
-          lastErr = undefined;
-          break;
-        } catch (fetchErr: any) {
-          lastErr = fetchErr;
-          if (!isDnsError(fetchErr) || attempt >= 2 || streamController.signal.aborted) {
-            const durationMs = Math.round(nowMs() - streamStartedAt);
-            console.error('[NativelyAPI] stream pre-response failure', {
-              requestId,
-              endpoint: endpointUrl,
-              method: 'POST',
-              stage: streamController.signal.aborted ? 'connect_timeout_or_abort' : 'pre_response',
-              model: this.currentModelId,
-              provider: 'natively',
-              connectTimeoutMs,
-              durationMs,
-              error: summarizeFetchError(fetchErr),
-              aborted: streamController.signal.aborted,
-              abortReason: (streamController.signal as any).reason?.message ?? (streamController.signal as any).reason,
-            });
-            throw new Error(`Natively API stream request failed before response requestId=${requestId} endpoint=${endpointUrl} method=POST timeoutMs=${connectTimeoutMs} durationMs=${durationMs} ${formatFetchError(fetchErr)}`);
-          }
-          console.warn(`[streamWithNatively] DNS failure req=${requestId} (${fetchErr.cause?.code ?? fetchErr.code}), retry ${attempt + 1}/2 in 500ms`);
-          await new Promise<void>(r => setTimeout(r, 500));
-        }
-      }
-      if (lastErr) throw lastErr;
-    } finally {
-      // Connection established (or failed) — stop the connect-phase timer.
-      // The stream body will now be read without any timeout (until/unless
-      // the caller's abortSignal fires, in which case fetch's reader throws).
-      if (connectTimer) { clearTimeout(connectTimer); connectTimer = null; }
-    }
-
-    if (!response.ok) {
-      abortSignal?.removeEventListener('abort', onCallerAbort);
-      const errText = await response.text().catch(() => '');
-      let errData: any = {};
-      try { errData = errText ? JSON.parse(errText) : {}; } catch { errData = {}; }
-      console.error('[NativelyAPI] stream HTTP failure', {
-        requestId,
-        serverRequestId,
-        endpoint: endpointUrl,
-        method: 'POST',
-        stage: 'http_status',
-        status: response.status,
-        statusText: response.statusText,
-        model: this.currentModelId,
-        provider: 'natively',
-        connectTimeoutMs,
-        durationMs: Math.round(nowMs() - streamStartedAt),
-        responseBody: errText.slice(0, 1000),
-      });
-      throw new Error(`Natively API stream HTTP ${response.status} requestId=${requestId} serverRequestId=${serverRequestId || 'n/a'} endpoint=${endpointUrl}: ${errData.error || errText.slice(0, 300) || 'unknown'}`);
-    }
-
-    if (!response.body) {
-      abortSignal?.removeEventListener('abort', onCallerAbort);
-      throw new Error(`Natively API stream missing response body requestId=${requestId} serverRequestId=${serverRequestId || 'n/a'} endpoint=${endpointUrl}`);
-    }
-
-    // Parse the SSE response body incrementally.
-    // Protocol: each line starting with "data: " carries a JSON payload.
-    //   data: {"delta":"token","model":"llama-3.3-70b"}
-    //   data: [DONE]
-    const reader = response.body!.getReader();
-    const decoder = new TextDecoder();
-    let buf = '';
-
-    try {
-      outer: while (true) {
-        // Cheap pre-read abort check — saves one round trip to the reader if
-        // the caller cancelled while we were processing the previous chunk.
-        if (abortSignal?.aborted) break outer;
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buf += decoder.decode(value, { stream: true });
-        const lines = buf.split('\n');
-        buf = lines.pop()!;  // last line may be incomplete — carry it to next chunk
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const payload = line.slice(6).trim();
-          if (payload === '[DONE]') break outer;
-
-          let chunk: any;
-          try { chunk = JSON.parse(payload); } catch { continue; }
-
-          if (chunk.model) {
-            // Always update — a mid-stream cascade pivot (e.g. flash-lite →
-            // flash → pro) is observable, not noise. The E2E harness reads
-            // lastProviderModel to assert the real production model.
-            const next = String(chunk.model);
-            if (next !== providerModel) {
-              providerModel = next;
-              this.lastProviderModel = next;
-            }
-          }
-          if (chunk.error) {
-            console.error('[NativelyAPI] stream server error event', {
-              requestId,
-              serverRequestId,
-              endpoint: endpointUrl,
-              method: 'POST',
-              stage: firstTokenAt ? 'during_stream' : 'before_first_token',
-              status: responseStatus,
-              model: this.currentModelId,
-              provider: 'natively',
-              serverModel: providerModel,
-              connectTimeoutMs,
-              tfftMs: firstTokenAt ? Math.round(firstTokenAt - streamStartedAt) : null,
-              durationMs: Math.round(nowMs() - streamStartedAt),
-              error: chunk.error,
-              message: chunk.message,
-            });
-            throw new Error(`Natively API stream server error requestId=${requestId} serverRequestId=${serverRequestId || 'n/a'} model=${providerModel || 'unknown'} error=${chunk.error}`);
-          }
-          if (typeof chunk.delta === 'string' && chunk.delta) {
-            if (!firstTokenAt) firstTokenAt = nowMs();
-            tokenCount++;
-            charCount += chunk.delta.length;
-            yield chunk.delta;
-          }
-        }
-      }
-    } catch (streamErr: any) {
-      console.error('[NativelyAPI] stream read failure', {
-        requestId,
-        serverRequestId,
-        endpoint: endpointUrl,
-        method: 'POST',
-        stage: firstTokenAt ? 'during_stream' : 'before_first_token',
-        status: responseStatus,
-        model: this.currentModelId,
-        provider: 'natively',
-        serverModel: providerModel,
-        connectTimeoutMs,
-        tfftMs: firstTokenAt ? Math.round(firstTokenAt - streamStartedAt) : null,
-        durationMs: Math.round(nowMs() - streamStartedAt),
-        tokens: tokenCount,
-        chars: charCount,
-        error: summarizeFetchError(streamErr),
-      });
-      throw new Error(`Natively API stream failed during read requestId=${requestId} serverRequestId=${serverRequestId || 'n/a'} stage=${firstTokenAt ? 'during_stream' : 'before_first_token'} model=${providerModel || 'unknown'} ${formatFetchError(streamErr)}`);
-    } finally {
-      const totalMs = Math.max(1, nowMs() - streamStartedAt);
-      if (tokenCount > 0) {
-        console.log('[NativelyAPI] stream completed', {
-          requestId,
-          serverRequestId,
-          endpoint: endpointUrl,
-          method: 'POST',
-          status: responseStatus,
-          model: this.currentModelId,
-          provider: 'natively',
-          serverModel: providerModel,
-          fallbackUsed: false,
-          connectTimeoutMs,
-          responseHeaderMs: responseStartedAt ? Math.round(responseStartedAt - streamStartedAt) : null,
-          tfftMs: firstTokenAt ? Math.round(firstTokenAt - streamStartedAt) : null,
-          totalStreamMs: Math.round(totalMs),
-          tokens: tokenCount,
-          chars: charCount,
-          tokensPerSec: Number((tokenCount / (totalMs / 1000)).toFixed(2)),
-        });
-      }
-      // Always release the connection AND drop the caller-abort listener so
-      // we don't leak DOM event subscriptions on long-lived AbortSignals
-      // (e.g., the IPC handler's per-stream controller is short-lived, but a
-      // future caller might reuse a single signal across many calls).
-      try { reader.cancel(); } catch { }
-      abortSignal?.removeEventListener('abort', onCallerAbort);
-    }
+    throw new Error('Natively API is disabled in this build.');
   }
 
   /**
@@ -9689,7 +9131,10 @@ let isMultimodal = !!(imagePaths?.length);
       if (!trimmed) {
         this.apiKey = null;
         this.client = null;
-        throw new Error("No Gemini API key provided and no existing client");
+        if (this.useOllama) this.releaseOllamaPin(this.ollamaModel);
+        this.useOllama = false;
+        this.customProvider = null;
+        return;
       }
       this.apiKey = trimmed;
       this.client = new GoogleGenAI({

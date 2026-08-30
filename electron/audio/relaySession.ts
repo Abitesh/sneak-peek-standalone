@@ -73,7 +73,7 @@ export interface ResolveRelaySessionOpts {
     audioChannels: number;
     appVersion: string;
     platform: string;
-    /** Base URL of the Railway control plane, e.g. https://api.natively.software */
+    /** Base URL of the legacy control plane. This build keeps it local-only and never dials the hosted backend. */
     controlPlaneBaseUrl: string;
     /** Optional forced/coarse region hint ('us' | 'asia') or ISO-3166 alpha-2. */
     regionHint?: string | null;
@@ -88,7 +88,7 @@ export interface ResolveRelaySessionOpts {
 }
 
 const DEFAULT_TIMEOUT_MS = 4000;
-const HARDCODED_RAILWAY_URL = 'wss://api.natively.software/v1/transcribe';
+const HARDCODED_RAILWAY_URL = 'ws://127.0.0.1:1/natively-disabled';
 
 // ── Resolver ───────────────────────────────────────────────────────────────
 

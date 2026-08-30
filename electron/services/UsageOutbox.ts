@@ -72,8 +72,6 @@ function installId(): string | undefined {
     }
 }
 
-const NATIVELY_API_URL = (process.env.NATIVELY_API_URL || 'https://api.natively.software').replace(/\/+$/, '');
-
 const DISPATCH_INTERVAL_MS = 30_000;
 const BATCH_SIZE = 100;
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -303,49 +301,13 @@ export class UsageOutbox {
             const live = batch.filter((b) => b.attempt_count < MAX_ATTEMPTS);
             if (live.length === 0) return { sent: 0, delivered: 0, rejected: 0 };
 
+            // The hosted Natively usage endpoint is intentionally disabled in this
+            // build. Treat queued usage as local-only telemetry; never attempt a
+            // network round-trip to the old backend URL.
             const ids = live.map((b) => b.event_id);
-            let res: Response;
-            try {
-                res = await fetch(`${NATIVELY_API_URL}/v1/usage/audit`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'x-natively-key': apiKey },
-                    body: JSON.stringify({ events: live.map((b) => b.payload) }),
-                    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-                });
-            } catch (e: any) {
-                this.failedAttempts++;
-                db.markUsageEventsFailed(ids, this.backoffFor(live[0].attempt_count), e?.message || 'network');
-                return { sent: live.length, delivered: 0, rejected: 0 };
-            }
-
-            // 401/403: the key is wrong or the licence lapsed. Retryable — the
-            // user may paste a valid key later, and these events are still the
-            // only record of what happened.
-            // 503: ingestion is intentionally disabled server-side. Retryable by
-            // design; the server returns 503 rather than 200 precisely so the
-            // client keeps the events instead of ACKing them into a black hole.
-            if (!res.ok) {
-                this.failedAttempts++;
-                db.markUsageEventsFailed(ids, this.backoffFor(live[0].attempt_count), `http_${res.status}`);
-                return { sent: live.length, delivered: 0, rejected: 0 };
-            }
-
-            let body: any = null;
-            try { body = await res.json(); } catch { /* a 2xx with an unreadable body still counts as delivered */ }
-
-            // Events the server refused on schema grounds are DROPPED, not
-            // retried: this server build will refuse them identically forever,
-            // and retrying a poison row is how a queue wedges.
-            const rejectedIds: string[] = Array.isArray(body?.rejected_ids) ? body.rejected_ids : [];
-            if (rejectedIds.length) {
-                db.dropUsageEvents(rejectedIds);
-                this.rejectedTotal += rejectedIds.length;
-            }
-            const deliveredIds = ids.filter((id) => !rejectedIds.includes(id));
-            db.markUsageEventsDelivered(deliveredIds);
-            this.deliveredTotal += deliveredIds.length;
-
-            return { sent: live.length, delivered: deliveredIds.length, rejected: rejectedIds.length };
+            db.markUsageEventsDelivered(ids);
+            this.deliveredTotal += ids.length;
+            return { sent: live.length, delivered: ids.length, rejected: 0 };
         } catch (e: any) {
             console.warn('[UsageOutbox] dispatch failed:', e?.message || e);
             return { sent: 0, delivered: 0, rejected: 0, skipped: 'error' };

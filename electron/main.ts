@@ -13,7 +13,6 @@ import * as crypto from "crypto"
 import path from "path"
 import fs from "fs"
 import os from "os"
-import dns from "dns"
 import { SystemAudioHealthClassifier } from "./audio/systemAudioHealthClassifier.mjs"
 import { FatalMainProcessCoordinator } from "./utils/fatalMainProcess"
 import { MeetingLifecycleQueue, type MeetingLifecycleState } from "./audio/meetingLifecycleQueue"
@@ -24,31 +23,6 @@ import {
   describeServiceAccountRejection,
   type ServiceAccountVerdict,
 } from "./services/googleServiceAccount"
-
-// Override global dns.lookup to resolve macOS system resolver issues with api.natively.software
-const originalLookup = dns.lookup;
-dns.lookup = function(hostname: any, options: any, callback: any) {
-  if (typeof options === 'function') {
-    callback = options;
-    options = {};
-  }
-  if (hostname === 'api.natively.software') {
-    dns.resolve4(hostname, (err, addresses) => {
-      if (err || !addresses.length) {
-        originalLookup(hostname, options, callback);
-      } else {
-        const addr = addresses[0];
-        if (options && (options as any).all) {
-          callback(null, [{ address: addr, family: 4 }] as any);
-        } else {
-          callback(null, addr, 4);
-        }
-      }
-    });
-  } else {
-    originalLookup(hostname, options, callback);
-  }
-} as any;
 
 if (!app.isPackaged) {
   require('dotenv').config();
@@ -3316,32 +3290,11 @@ export class AppState {
     let stt: STTProvider;
 
     if (sttProvider === 'natively') {
-      const nativelyKey = CredentialsManager.getInstance().getNativelyApiKey();
-      if (!nativelyKey) {
-        // Natively is Coming Soon — no key means degrade gracefully like every other provider
-        console.warn(`[Main] No Natively API Key configured for ${speaker}, falling back to GoogleSTT`);
-        stt = new GoogleSTT(speaker);
-      } else {
-        // 'system' for interviewer (system audio), 'mic' for user (microphone).
-        // The server uses ${key}:${channel} as the session key so both streams
-        // can coexist without triggering concurrent_session_blocked.
-        //
-        // Phase 7/8: pass appVersion + platform for the regional-relay
-        // session-create body. The class reads the relay feature flags from
-        // SettingsManager itself and derives the control-plane base URL from
-        // its own host, so the construction site stays tiny. The relay path is
-        // flag-gated OFF by default — this is inert until regionalSttRelayEnabled.
-        stt = new NativelyProSTT(
-          nativelyKey,
-          speaker === 'interviewer' ? 'system' : 'mic',
-          {
-            appVersion: app.getVersion(),
-            platform: process.platform === 'darwin' ? 'mac'
-              : process.platform === 'win32' ? 'windows'
-              : 'linux',
-          },
-        );
-      }
+      // The hosted Natively API is intentionally disabled in this build. Treat the
+      // legacy STT selection as unavailable and fail closed to Google so the app
+      // never dials api.natively.software even if an old saved setting survives.
+      console.warn(`[Main] Natively STT is disabled in this build for ${speaker}; falling back to GoogleSTT`);
+      stt = new GoogleSTT(speaker);
     } else if (sttProvider === 'deepgram') {
       const apiKey = CredentialsManager.getInstance().getDeepgramApiKey();
       if (apiKey) {
@@ -8445,7 +8398,7 @@ async function initializeApp() {
   // UsageOutbox.isEnabled().
   try {
     const { usageOutbox } = require('./services/UsageOutbox');
-    usageOutbox.start(() => CredentialsManager.getInstance().getNativelyApiKey());
+    usageOutbox.start(() => undefined);
     // Drain anything queued while the app was closed, without waiting a full
     // dispatch interval. Deliberately not awaited — startup must not block on it.
     setTimeout(() => { void usageOutbox.dispatchOnce(); }, 5000);

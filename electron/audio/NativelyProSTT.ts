@@ -132,7 +132,7 @@ export class NativelyProSTT extends EventEmitter {
     // start()/stop() can cancel any in-flight inline timer.
     private pendingConnectTimer: NodeJS.Timeout | null = null;
 
-    private readonly BACKEND_URL = 'wss://api.natively.software/v1/transcribe';
+    private readonly BACKEND_URL = 'ws://127.0.0.1:1/natively-disabled';
 
     // ── Regional STT relay state (Phase 7/8 — all additive, flag-gated off) ──
     // Deps default to the real implementations; tests inject fakes.
@@ -162,20 +162,21 @@ export class NativelyProSTT extends EventEmitter {
         this.apiKey  = apiKey;
         this.channel = channel;
         this.deps    = deps;
-        // Derive the control-plane base from the same host as the legacy WS URL
-        // (https equivalent of wss://api.natively.software). Overridable via deps.
+        // Legacy Natively STT is disabled in this build. The fallback base is a
+        // local no-op endpoint so no runtime code can accidentally re-use the old
+        // hosted control plane.
         this.controlPlaneBaseUrl = deps.controlPlaneBaseUrl ?? this.deriveControlPlaneBase();
         this.appVersion = deps.appVersion ?? '';
         this.platform   = deps.platform ?? '';
     }
 
-    /** https://api.natively.software derived from the wss BACKEND_URL host. */
+    /** Legacy Natively STT is disabled; keep a local no-op base to avoid any accidental host reuse. */
     private deriveControlPlaneBase(): string {
         try {
-            const u = new URL(this.BACKEND_URL);          // wss://api.natively.software/v1/transcribe
-            return `https://${u.host}`;                    // https://api.natively.software
+            const u = new URL(this.BACKEND_URL);
+            return `http://${u.hostname}:${u.port || 80}`;
         } catch {
-            return 'https://api.natively.software';
+            return 'http://127.0.0.1:1';
         }
     }
 

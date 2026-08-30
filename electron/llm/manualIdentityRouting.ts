@@ -50,10 +50,10 @@ export function resolveIdentityProbe(message: string, profileReady: boolean): Id
   if (typeof message !== 'string' || !message.trim()) return { kind: 'none' };
 
   if (CREATOR_PROBE_RE.test(message)) {
-    return { kind: 'assistant_reply', reply: 'I was developed by Evin John.' };
+    return { kind: 'assistant_reply', reply: 'I was developed by the app team behind this project.' };
   }
   if (ASSISTANT_META_PROBE_RE.test(message)) {
-    return { kind: 'assistant_reply', reply: "I'm Natively, an AI assistant." };
+    return { kind: 'assistant_reply', reply: "I'm your AI assistant for this app." };
   }
   if (CANDIDATE_AMBIGUOUS_PROBE_RE.test(message)) {
     // Profile loaded → the user is rehearsing as the candidate; the profile
@@ -61,7 +61,7 @@ export function resolveIdentityProbe(message: string, profileReady: boolean): Id
     // → the canned assistant reply stands (general-chat identity ask).
     return profileReady
       ? { kind: 'candidate_fast_path' }
-      : { kind: 'assistant_reply', reply: "I'm Natively, an AI assistant." };
+      : { kind: 'assistant_reply', reply: "I'm your AI assistant for this app." };
   }
   return { kind: 'none' };
 }

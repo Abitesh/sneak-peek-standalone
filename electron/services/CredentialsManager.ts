@@ -68,6 +68,7 @@ export interface StoredCredentials {
     claudeApiKey?: string;
     deepseekApiKey?: string;
     nvidiaNimApiKey?: string;
+    nativelyApiKey?: string;
     litellmApiKey?: string;
     litellmBaseURL?: string;
     /** Manual output ceiling for LiteLLM-proxied models. Unset → Auto (per-model via /model/info). */
@@ -76,7 +77,6 @@ export interface StoredCredentials {
     customProviders?: CustomProvider[];
     curlProviders?: CurlProvider[];
     defaultModel?: string;
-    nativelyApiKey?: string;
     // STT Provider settings
     sttProvider?: 'none' | 'google' | 'groq' | 'openai' | 'deepgram' | 'elevenlabs' | 'azure' | 'ibmwatson' | 'soniox' | 'nvidia_nim' | 'natively' | 'local-whisper';
     nvidiaNimSttModel?: string;
@@ -638,6 +638,13 @@ export class CredentialsManager {
         return this.credentials.deepseekApiKey;
     }
 
+    public getNativelyApiKey(): string | undefined {
+        // The hosted Natively backend is intentionally disabled. Keeping this
+        // path present for compatibility but returning undefined prevents any
+        // legacy code from reintroducing a live backend dependency.
+        return undefined;
+    }
+
     public getNvidiaNimApiKey(): string | undefined { return this.credentials.nvidiaNimApiKey; }
 
     /** Persisted loopback-scoped companion-extension token (stable across restarts). */
@@ -796,9 +803,7 @@ export class CredentialsManager {
         return this.credentials.defaultModel || 'gemini-3.1-flash-lite';
     }
 
-    public getNativelyApiKey(): string | undefined {
-        return this.credentials.nativelyApiKey;
-    }
+
 
     public getDisabledProviders(): string[] {
         return this.credentials.disabledProviders || [];
@@ -873,7 +878,6 @@ export class CredentialsManager {
      * Used by ScreenUnderstandingService to gate vision_only / decide fallback.
      */
     public anyVisionProviderConfigured(): boolean {
-        if (this.credentials.nativelyApiKey) return true;       // Natively API supports vision
         if (this.credentials.openaiApiKey) return true;          // gpt-4o / gpt-5 vision
         if (this.credentials.claudeApiKey) return true;          // Claude vision
         if (this.credentials.geminiApiKey) return true;          // Gemini vision
@@ -1022,7 +1026,7 @@ export class CredentialsManager {
         return persisted;
     }
 
-    public setSttProvider(provider: 'none' | 'google' | 'groq' | 'openai' | 'deepgram' | 'elevenlabs' | 'azure' | 'ibmwatson' | 'soniox' | 'nvidia_nim' | 'natively' | 'local-whisper'): boolean {
+    public setSttProvider(provider: 'none' | 'google' | 'groq' | 'openai' | 'deepgram' | 'elevenlabs' | 'azure' | 'ibmwatson' | 'soniox' | 'nvidia_nim' | 'local-whisper'): boolean {
         if (this.refuseWriteWhileDegraded('set stt provider')) return false;
         this.credentials.sttProvider = provider;
         const persisted = this.saveCredentials();
@@ -1230,50 +1234,16 @@ export class CredentialsManager {
     }
 
     public setNativelyApiKey(key: string): void {
+        // The hosted Natively backend is intentionally disabled. This call is kept
+        // for compatibility only; it must never re-enable a live backend route.
         if (this.refuseWriteWhileDegraded('set natively api key')) return;
-        const trimmed = key.trim();
-        this.credentials.nativelyApiKey = trimmed || undefined;
-
-        if (trimmed) {
-            // Auto-promote natively to default model unless user already chose a non-Gemini/Groq model
-            const current = this.credentials.defaultModel || '';
-            // Only ids the APP itself ever auto-assigns count as auto-defaults
-            // (code-review 2026-08-23): the prefix list had grown to include
-            // 'openai/gpt-oss-' and 'groq/', which the auto paths NEVER set —
-            // they are deliberately pickable in the model selector — so a
-            // user's explicit choice was silently replaced with 'natively' the
-            // moment they added a key, contradicting groqModels.ts's "we do
-            // not silently reroute a model the user picked deliberately".
-            // Auto-assigned ids, past and present: the gemini defaults, the
-            // historical Groq fallbacks (llama-3.3, scout — both retired,
-            // which is exactly why sitting on them must not be treated as a
-            // choice), and the current Groq default qwen/qwen3.6-27b.
-            const AUTO_ASSIGNED_MODEL_IDS = new Set([
-                'gemini', 'llama',
-                'llama-3.3-70b-versatile',
-                'meta-llama/llama-4-scout-17b-16e-instruct',
-                'qwen/qwen3.6-27b',
-            ]);
-            const isAutoDefault = !current
-                || current.startsWith('gemini-')
-                || AUTO_ASSIGNED_MODEL_IDS.has(current);
-            if (isAutoDefault) {
-                this.credentials.defaultModel = 'natively';
-                console.log('[CredentialsManager] Auto-set default model to natively');
-            }
-
-            // Auto-promote natively STT if still on 'none' or the default Google STT
-            if (!this.credentials.sttProvider || this.credentials.sttProvider === 'none' || this.credentials.sttProvider === 'google') {
-                this.credentials.sttProvider = 'natively';
-                console.log('[CredentialsManager] Auto-set STT provider to natively');
-            }
-        } else {
-            // Key cleared — revert natively-auto-set defaults back to safe fallbacks
-            this.applyNativelyAutoDefaultRevert('Natively key cleared');
-        }
-
+        const trimmed = (key || '').trim();
+        this.credentials.nativelyApiKey = undefined;
+        this.applyNativelyAutoDefaultRevert('Natively API disabled in this build');
         this.saveCredentials();
-        console.log('[CredentialsManager] Natively API Key updated');
+        if (trimmed) {
+            console.log('[CredentialsManager] Natively API key ignored; backend disabled in this build');
+        }
     }
 
     public getPreferredModel(provider: PreferredModelProvider): string | undefined {
