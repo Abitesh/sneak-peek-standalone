@@ -35,6 +35,8 @@ import {
 } from './VisionProviderFallbackChain';
 import { getImageOptimizer, ImageOptimizer } from './ImageOptimizer';
 import { buildVisionProviders, VisionProviderBuildInputs } from './VisionProviderRegistry';
+import { extractOcrTextBestEffort, mergeScreenText } from './ScreenOcrBridge';
+import { buildScreenLayer } from '../../llm/contextEngine';
 
 export type UserAction =
   | 'manual_use_screen'
@@ -234,18 +236,23 @@ export class ScreenUnderstandingService {
     // System & user prompts come from the prompts module (Phase 6).
     const { systemPrompt, userPrompt, isTechnical } = await this.buildPrompts(request);
 
-    // Run the chain.
+    // Run the vision chain and a best-effort OCR pass IN PARALLEL (Problem 40 —
+    // dual path for accuracy). OCR never blocks or delays the vision answer:
+    // it races its own timeout and resolves to '' on any failure.
     const latestPath = validPaths[validPaths.length - 1];
-    const result = await runVisionFallback({
-      imagePath: latestPath,
-      cacheKey: imageHash,
-      mode,
-      providers,
-      systemPrompt,
-      userPrompt,
-      optimizer: this.optimizer,
-      optimizationProfile: profile,
-    });
+    const [result, ocr] = await Promise.all([
+      runVisionFallback({
+        imagePath: latestPath,
+        cacheKey: imageHash,
+        mode,
+        providers,
+        systemPrompt,
+        userPrompt,
+        optimizer: this.optimizer,
+        optimizationProfile: profile,
+      }),
+      extractOcrTextBestEffort(latestPath),
+    ]);
 
     const out = this.assembleResult(result, {
       request,
@@ -254,6 +261,7 @@ export class ScreenUnderstandingService {
       imagePaths: validPaths,
       imageHash,
       isTechnical,
+      ocrText: ocr.text,
     });
     this.lastResult = out;
     return out;
@@ -399,6 +407,10 @@ export class ScreenUnderstandingService {
       imagePaths: string[];
       imageHash?: string;
       isTechnical: boolean;
+      /** Independently-OCR'd text (Problem 40), always attempted in parallel
+       *  with the vision call — merged in below regardless of which one
+       *  actually produced usable text. */
+      ocrText?: string;
     },
   ): ScreenUnderstandingResult {
     const now = Date.now();
@@ -411,6 +423,10 @@ export class ScreenUnderstandingService {
             : fallback.failureReason === 'no_vision_provider'
               ? 'No vision-capable provider is configured.'
               : 'All configured vision providers failed.';
+      // Vision failed, but a parallel OCR pass may still have recovered the
+      // literal on-screen text — surface it instead of leaving the turn with
+      // no screen content at all.
+      const ocrFallbackLayer = buildScreenLayer(ctx.ocrText);
       return {
         status: 'failed',
         source: 'unavailable',
@@ -425,6 +441,8 @@ export class ScreenUnderstandingService {
         failureReason: fallback.failureReason,
         unavailableReason,
         source_kind: 'vision',
+        extractedText: ocrFallbackLayer?.text,
+        ocrText: ocrFallbackLayer?.text,
       };
     }
 
@@ -441,7 +459,11 @@ export class ScreenUnderstandingService {
         : 'vision_extract';
 
     const visibleSummary = structured.visibleSummary || structured.extractedText;
-    const extractedText = structured.extractedText || visibleSummary;
+    // Dual path (Problem 40): merge the vision model's extraction with the
+    // independently-OCR'd text so a misread table/code block in the vision
+    // summary is backed by Tesseract's literal characters too.
+    const visionExtractedText = structured.extractedText || visibleSummary;
+    const extractedText = buildScreenLayer(mergeScreenText(visionExtractedText, ctx.ocrText))?.text || visionExtractedText;
 
     return {
       status: 'available',

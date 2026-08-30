@@ -3,6 +3,7 @@
 import { AppState } from "./main"
 import { LLMHelper } from "./LLMHelper"
 import { CredentialsManager } from "./services/CredentialsManager"
+import { resolveDefaultOllamaUrl } from "./services/OllamaManager"
 import { app } from "electron"
 // import dotenv from "dotenv" // Removed static import
 
@@ -26,7 +27,9 @@ export class ProcessingHelper {
     // Check if user wants to use Ollama
     const useOllama = process.env.USE_OLLAMA === "true"
     const ollamaModel = process.env.OLLAMA_MODEL // Don't set default here, let LLMHelper auto-detect
-    const ollamaUrl = process.env.OLLAMA_URL || "http://localhost:11434"
+    // OLLAMA_HOST (Ollama's own env var, macOS + Windows) takes precedence over
+    // this app's legacy OLLAMA_URL — see resolveDefaultOllamaUrl().
+    const ollamaUrl = resolveDefaultOllamaUrl()
 
     if (useOllama) {
       // console.log("[ProcessingHelper] Initializing with Ollama")

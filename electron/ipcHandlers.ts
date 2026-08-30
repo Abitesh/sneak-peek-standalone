@@ -34,6 +34,9 @@ import { buildProfileJitPrompt } from './llm/ProfileJitPromptBuilder';
 import { decideSessionWritePolicy, type FinalGenerationMode, type SessionWriteDecision } from './llm/FinalAnswerGenerationPolicy';
 import { stripEmbeddedAnswerContract } from './llm/stripEmbeddedAnswerContract';
 import { isCodeVerificationEnabled } from './llm/codeVerification/verificationEnabled';
+import { isTrivialQuery } from './llm/contextEngine';
+import { fitPromptToBudget, resolveProviderCeiling } from './llm/promptBudget';
+import { getModelCapabilities } from './llm/modelCapabilities';
 import { CodingStreamGate } from './llm/codingStreamGate';
 import { PiLatencyTrace } from './services/telemetry/PiLatencyTracer';
 import { beginTrace, commitTrace } from './intelligence/IntelligenceTrace';
@@ -43,6 +46,7 @@ import { recordAttribution, hindsightModeFor, type AttributionInput } from './in
 import { routeContext, isBackwardLookingQuery } from './intelligence/ContextRouter';
 import { SearchOrchestrator, type SearchCandidate } from './intelligence/SearchOrchestrator';
 import { CHAT_MODE_PROMPT } from './llm/prompts';
+import { bindingFromModelId, resolveVisionGate, type ProviderFamily, type ProviderHealth, type VerifiedModelBinding } from './llm/providerRegistry';
 
 // Prompt System v2 (flag promptSystemV2): the manual-chat base prompt. When
 // the flag is ON this is the composed core+mode+answer prompt (which LLMHelper
@@ -996,6 +1000,26 @@ export function initializeIpcHandlers(appState: AppState): void {
         myController = new AbortController();
         _chatStreamsBySender.set(senderId, { streamId: myStreamId, controller: myController });
 
+        // Vision capability gate (Problem 39): a screenshot attached to manual
+        // chat is a screen ask too — the same rule as generate-what-to-say
+        // applies before any images reach the selected model. Auto-switch to a
+        // verified vision-capable binding, or refuse with a clear error.
+        if (imagePaths && imagePaths.length > 0) {
+          const { CredentialsManager: CredsForGate } = require('./services/CredentialsManager');
+          const gate = resolveVisionGate(llmHelper.getCapabilities(), CredsForGate.getInstance().getAllProviderHealth());
+          if (!gate.ok) {
+            event.sender.send('gemini-stream-error', gate.message, { streamId: myStreamId });
+            return null;  // sibling error paths return null; handler is typed `| null`
+          }
+          if (gate.switchTo) {
+            console.warn(
+              `[VisionGate] "${llmHelper.getCurrentModelId()}" has no vision — auto-switching to verified `
+              + `vision-capable model "${gate.switchTo.id}" for this screen ask.`,
+            );
+            llmHelper.setModel(gate.switchTo.id);
+          }
+        }
+
         // Skill invocation parsed EARLY (PR #429 Bug 003). It used to live ~35k
         // characters below, after the Context Intelligence V3 short-circuit had
         // already returned — so under V3 (default ON since 2026-07-30) the
@@ -1324,8 +1348,15 @@ export function initializeIpcHandlers(appState: AppState): void {
               resolvedProfileSources: v3ProfileResolved,
               extraAllowedSourceTypes: extraSourceTypes,
               debugSources: v3DebugSources as never,
+              // Intent-based inclusion (Problem 31): a bare greeting or short
+              // ack has nothing for a 180s transcript window to ground, and
+              // omitting it here isn't a loss — engine-bridge's own
+              // continuity fallback (conversation-state-store) already
+              // covers ordinary follow-ups without this render. Unconditional
+              // inclusion was the "10k+ tokens for hi" root cause (Problem 17).
               conversationSummary: (() => {
                 try {
+                  if (isTrivialQuery(v3Question)) return undefined;
                   return appState.getIntelligenceManager?.()?.getFormattedContext?.(180) || undefined;
                 } catch { return undefined; }
               })(),
@@ -1485,9 +1516,31 @@ export function initializeIpcHandlers(appState: AppState): void {
             // the antecedent for the NEXT turn's referent resolution.
             // Bug 003: V3 owns this turn end to end, so if the skill block is not
             // appended here it is injected nowhere at all.
-            const v3SystemPrompt = skillPromptBlock ? `${composed.system}\n\n## ACTIVE SKILL\n${skillPromptBlock}` : composed.system;
+            const v3SystemPromptRaw = skillPromptBlock ? `${composed.system}\n\n## ACTIVE SKILL\n${skillPromptBlock}` : composed.system;
+            // Final input-budget guard (Problem 17/18) — a backstop, not a
+            // second retrieval/packing pass: composed.user/composed.system
+            // are already budgeted by the bridge's own policy.contextBudget.
+            // This only clamps against the ACTIVE PROVIDER's real ceiling
+            // (e.g. Groq's ~8000-token effective input limit, which sits far
+            // below the 128k context window its model tier reports) so a
+            // provider swap never resurfaces the "10k tokens for hi" defect.
+            const v3BudgetModelId = llmHelper.getCurrentModelId();
+            const v3IsOllama = llmHelper.isUsingOllama();
+            const v3Caps = getModelCapabilities(v3BudgetModelId, v3IsOllama);
+            const v3ProviderCeiling = v3IsOllama
+              ? undefined
+              : resolveProviderCeiling(
+                  (require('./llm/groqModels') as typeof import('./llm/groqModels')).isGroqModelId(v3BudgetModelId) ? 'groq' : undefined,
+                );
+            const v3Fitted = fitPromptToBudget({
+              system: v3SystemPromptRaw,
+              user: composed.user,
+              caps: v3Caps,
+              providerCeiling: v3ProviderCeiling,
+            });
+            const v3SystemPrompt = v3Fitted.system;
             const v3Stream = llmHelper.streamChatWithOutcome(
-              composed.user,
+              v3Fitted.user,
               imagePaths,
               undefined,
               v3SystemPrompt,
@@ -6591,6 +6644,100 @@ export function initializeIpcHandlers(appState: AppState): void {
     }
   });
 
+  // Problems 5, 21-25 — real end-to-end verification for the LOCAL Ollama
+  // daemon, mirroring test-llm-connection/test-litellm-connection's
+  // reachability + list + chat-probe shape so Ollama gets a real ProviderHealth
+  // entry too (Settings badge parity, and forward-compat for whatever routing
+  // fallback eventually reads providerHealth — see providerRegistry.ts).
+  // Deliberately side-effect-free: unlike ensure-ollama-running/
+  // force-restart-ollama this never spawns or restarts the daemon (no
+  // useOllama-selection gate either) — it only probes whatever is already
+  // there, so it's safe to call opportunistically from Settings without the
+  // 2026-07-07 "don't spawn Ollama for an unselected user" contract applying.
+  safeHandle('test-ollama-connection', async () => {
+    const { CredentialsManager } = require('./services/CredentialsManager');
+    const creds = CredentialsManager.getInstance();
+    const llmHelper = appState.processingHelper.getLLMHelper();
+    const now = Date.now();
+
+    let reachable = false;
+    try { reachable = await llmHelper.isOllamaReachable(); } catch { reachable = false; }
+    if (!reachable) {
+      const health: ProviderHealth = {
+        status: 'disconnected',
+        authOk: false,
+        lastProbeAt: now,
+        lastError: { code: 'OLLAMA_UNREACHABLE', message: 'Ollama is not running or not reachable. Start it with `ollama serve`.' },
+        models: [],
+      };
+      creds.setProviderHealth('ollama', health);
+      return { success: false, error: health.lastError!.message, health };
+    }
+
+    let names: string[] = [];
+    try { names = await llmHelper.getOllamaModels(); } catch { names = []; }
+
+    if (names.length === 0) {
+      const health: ProviderHealth = {
+        status: 'degraded',
+        authOk: true,
+        lastProbeAt: now,
+        lastError: { code: 'NO_MODELS', message: 'Ollama is running but no models are installed. Run `ollama pull llama3` to get started.' },
+        models: [],
+      };
+      creds.setProviderHealth('ollama', health);
+      return { success: true, models: [], health };
+    }
+
+    // Minimal chat probe on ONE model only — Ollama cold-loads weights on
+    // first use (multi-second for a 7-9B model), so probing several
+    // candidates here would pay that tax repeatedly for a background health
+    // check the user never explicitly asked to wait on.
+    const candidate = names[0];
+    const baseUrl = llmHelper.getOllamaBaseUrl();
+    let probeOk = false;
+    let probeErr: any = null;
+    try {
+      const resp = await fetch(`${baseUrl}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: candidate, messages: [{ role: 'user', content: 'hi' }], stream: false }),
+        signal: AbortSignal.timeout(30000),
+      });
+      probeOk = resp.ok;
+      if (!resp.ok) probeErr = new Error(`HTTP ${resp.status}`);
+    } catch (err: any) {
+      probeErr = err;
+    }
+
+    // A successful probe verifies chat capability for the whole installed
+    // catalogue (mirrors test-llm-connection/test-litellm-connection) —
+    // `source` distinguishes the literally-probed model from the rest.
+    const models: VerifiedModelBinding[] = names.map((name) => {
+      const binding = bindingFromModelId(name, 'ollama', {
+        chatOk: probeOk,
+        source: name === candidate ? 'ollama-tags' : 'preset',
+        verifiedAt: now,
+      });
+      // Registry id convention: `ollama-<name>` (matches LLMHelper.switchToActiveModel
+      // and every other ollama-* id surface), not bindingFromModelId's bare default.
+      return { ...binding, id: `ollama-${name}` };
+    });
+
+    const health: ProviderHealth = probeOk
+      ? { status: 'verified', authOk: true, lastProbeAt: now, models }
+      : {
+          status: 'degraded',
+          authOk: true,
+          lastProbeAt: now,
+          lastError: { code: 'CHAT_PROBE_FAILED', message: probeErr?.message || `Model "${candidate}" did not respond to a test chat request.` },
+          models,
+        };
+
+    creds.setProviderHealth('ollama', health);
+    return { success: true, models: names.map((id) => ({ id, label: id })), health };
+  });
+
   safeHandle('switch-to-ollama', async (_, model?: string, url?: string) => {
     try {
       const { OllamaManager } = require('./services/OllamaManager');
@@ -7036,6 +7183,151 @@ export function initializeIpcHandlers(appState: AppState): void {
       console.error('[IPC] refresh-litellm-models failed:', error);
       return [];
     }
+  });
+
+  /** True when `err` (a fetch failure) means the HOST is unreachable — proxy down,
+   * wrong base URL, DNS failure, timeout — as opposed to the proxy answering with
+   * an HTTP error status. Distinguishing the two matters because "unreachable" and
+   * "the proxy rejected the key" need different user actions. */
+  function isLitellmUnreachable(err: any): boolean {
+    const code = err?.cause?.code || err?.code;
+    return code === 'ECONNREFUSED' || code === 'ENOTFOUND' || code === 'ETIMEDOUT' || code === 'EAI_AGAIN'
+      || err?.name === 'AbortError' || err?.name === 'TimeoutError';
+  }
+
+  /**
+   * Normalizes a LiteLLM proxy probe failure into the same {code, message} shape
+   * `normalizeProviderError` gives the 6 cloud providers — but with a DISTINCT
+   * category set: a self-hosted gateway fails in ways a cloud API never does
+   * (unreachable host, upstream 502) and NONE of them may render as "provider
+   * disabled" (see ProviderHealth.lastError doc in CredentialsManager.ts).
+   */
+  function normalizeLitellmError(stage: 'list' | 'chat', status: number | undefined, err: any): { code: string; message: string } {
+    if (err && isLitellmUnreachable(err)) {
+      return { code: 'PROXY_UNREACHABLE', message: 'Could not reach the LiteLLM proxy. Check the base URL and that it is running.' };
+    }
+    if (status === 401 || status === 403) {
+      return { code: 'INVALID_API_KEY', message: 'The proxy rejected the virtual key. Check it and try again.' };
+    }
+    if (status === 404) {
+      return {
+        code: 'PROXY_ERROR',
+        message: stage === 'list'
+          ? 'No /v1/models endpoint at this base URL — check the proxy address.'
+          : 'The proxy could not find that model.',
+      };
+    }
+    if (status && status >= 500) {
+      return { code: 'PROXY_ERROR', message: 'The proxy (or its upstream provider) returned a server error.' };
+    }
+    return { code: 'UNKNOWN_ERROR', message: err?.message || 'LiteLLM connection test failed.' };
+  }
+
+  // Problem 20 — real end-to-end verification for the LiteLLM gateway, mirroring
+  // test-llm-connection's auth+list+chat-probe shape so Settings can show the
+  // same Verified/Disconnected/Degraded vocabulary for the proxy as for every
+  // other provider. `config` lets the Settings "Test" button probe an
+  // unsaved baseURL/key the same way ProviderCard tests an unsaved API key;
+  // omitted fields fall back to the stored config.
+  safeHandle('test-litellm-connection', async (_, config?: { baseURL?: string; apiKey?: string }) => {
+    const { CredentialsManager } = require('./services/CredentialsManager');
+    const creds = CredentialsManager.getInstance();
+    const baseURL = (config?.baseURL?.trim() || creds.getLitellmBaseURL() || '').replace(/\/+$/, '');
+    const apiKey = config?.apiKey?.trim() || creds.getLitellmApiKey() || '';
+    const now = Date.now();
+
+    if (!baseURL) {
+      return { success: false, error: 'No LiteLLM proxy configured' };
+    }
+
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+
+    // Step 1 — reachability + auth + model list. A failure here means the PROXY
+    // or the KEY is the problem, never conflated with the user disabling LiteLLM.
+    let fetchedIds: string[];
+    try {
+      const resp = await fetch(`${baseURL}/models`, { method: 'GET', headers, signal: AbortSignal.timeout(8000) });
+      if (!resp.ok) {
+        const normalized = normalizeLitellmError('list', resp.status, null);
+        console.error('LiteLLM connection test failed (list):', { baseURL, status: resp.status });
+        const health: ProviderHealth = { status: 'disconnected', authOk: false, lastProbeAt: now, lastError: normalized, models: [] };
+        creds.setProviderHealth('litellm', health);
+        return { success: false, error: normalized.message, health };
+      }
+      const data: any = await resp.json();
+      fetchedIds = (data?.data || []).map((m: any) => m?.id).filter(Boolean);
+    } catch (error: any) {
+      console.error('LiteLLM connection test failed (list):', { baseURL, code: error?.code, message: error?.message });
+      const normalized = normalizeLitellmError('list', undefined, error);
+      const health: ProviderHealth = { status: 'disconnected', authOk: false, lastProbeAt: now, lastError: normalized, models: [] };
+      creds.setProviderHealth('litellm', health);
+      return { success: false, error: normalized.message, health };
+    }
+
+    // The catalogue cache backs the model picker — refresh it here too so a
+    // successful Test Connection doesn't need a separate manual Refresh.
+    if (fetchedIds.length > 0) creds.setLitellmModels(fetchedIds);
+
+    // Step 2 — chat probe on up to 2 candidates. Auth already succeeded, so a
+    // probe failure is 'degraded' (proxy reachable, nothing chat-verified yet),
+    // never re-classified as unreachable/auth.
+    const candidates = fetchedIds.slice(0, 2);
+    let probedId: string | null = null;
+    let probeStatus: number | undefined;
+    let probeErr: any = null;
+    for (const candidate of candidates) {
+      try {
+        const resp = await fetch(`${baseURL}/chat/completions`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ model: candidate, messages: [{ role: 'user', content: 'hi' }], max_tokens: 10 }),
+          signal: AbortSignal.timeout(15000),
+        });
+        if (resp.ok) { probedId = candidate; probeErr = null; break; }
+        probeStatus = resp.status;
+        probeErr = new Error(`HTTP ${resp.status}`);
+        // Only advance to the next candidate on a "model gone" style failure
+        // (400/404) — an auth/server error fails identically on every candidate.
+        if (resp.status !== 404 && resp.status !== 400) break;
+      } catch (err: any) {
+        probeErr = err;
+        break; // Network-level failure — no candidate behind the same host will succeed either.
+      }
+    }
+
+    // A successful probe verifies chat capability for the whole discovered
+    // catalogue (mirrors test-llm-connection) — `source` distinguishes the
+    // literally-probed id from the rest.
+    const models: VerifiedModelBinding[] = fetchedIds.map((id) => {
+      const binding = bindingFromModelId(id, 'litellm', {
+        chatOk: probedId != null,
+        source: id === probedId ? 'litellm-info' : 'preset',
+        verifiedAt: now,
+      });
+      // bindingFromModelId's capability lookup needs the bare upstream id
+      // (so vision/context defaults resolve correctly); the registry id
+      // itself must carry the `litellm/` prefix every other surface expects.
+      return { ...binding, id: `litellm/${id}` };
+    });
+
+    const health: ProviderHealth = probedId
+      ? { status: 'verified', authOk: true, lastProbeAt: now, models }
+      : {
+          status: 'degraded',
+          authOk: true,
+          lastProbeAt: now,
+          lastError: candidates.length > 0
+            ? normalizeLitellmError('chat', probeStatus, probeErr)
+            : { code: 'NO_MODELS', message: 'The proxy returned no models to verify.' },
+          models,
+        };
+
+    creds.setProviderHealth('litellm', health);
+    // success mirrors test-llm-connection: true once we got past auth/list,
+    // even in the degraded (chat-unverified) case — health.status carries the
+    // real state for the UI badge.
+    return { success: true, models: fetchedIds.map((id) => ({ id, label: id })), health };
   });
 
   safeHandle('get-disabled-providers', async () => {
@@ -8736,251 +9028,188 @@ export function initializeIpcHandlers(appState: AppState): void {
     return detectHardware();
   });
 
+  // OpenAI-compatible chat/completions endpoint per provider. Claude and
+  // Gemini have their own request shapes and are handled separately in
+  // probeChatModel() below.
+  const OPENAI_COMPAT_CHAT_URL: Record<string, string> = {
+    groq: 'https://api.groq.com/openai/v1/chat/completions',
+    openai: 'https://api.openai.com/v1/chat/completions',
+    deepseek: 'https://api.deepseek.com/chat/completions',
+    nvidia_nim: 'https://integrate.api.nvidia.com/v1/chat/completions',
+  };
+
+  /** Preferred probe candidates per provider, in order — same ids the app models by default. Intersected with the fetched catalog so a key without access to one still gets probed on something it can reach. */
+  const PREFERRED_PROBE_MODELS: Record<string, string[]> = {
+    gemini: ['gemini-3.7-flash'],
+    groq: [...(require('./llm/groqModels').GROQ_TEXT_MODEL_LADDER as string[])],
+    openai: ['gpt-4o', 'gpt-4o-mini'],
+    claude: ['claude-sonnet-4-20250514', 'claude-opus-4-1'],
+    deepseek: ['deepseek-v4-flash', 'deepseek-v4-pro'],
+    nvidia_nim: ['meta/llama-3.1-8b-instruct', 'z-ai/glm4.7'],
+  };
+
+  /** Up to 2 model ids to chat-probe, preferred ones first, then whatever the catalog actually returned. */
+  function pickProbeCandidates(provider: string, fetchedIds: string[]): string[] {
+    const preferred = (PREFERRED_PROBE_MODELS[provider] || []).filter((id) => fetchedIds.includes(id));
+    const rest = fetchedIds.filter((id) => !preferred.includes(id));
+    return [...preferred, ...rest].slice(0, 2);
+  }
+
+  /** Sends one minimal chat request to `modelId`. Throws (axios shape) on any failure — auth, rate limit, or model-gone alike; the caller classifies. */
+  async function probeChatModel(provider: string, apiKey: string, modelId: string): Promise<void> {
+    const axios = require('axios');
+    if (provider === 'gemini') {
+      await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelId)}:generateContent`,
+        { contents: [{ parts: [{ text: 'hi' }] }] },
+        { headers: { 'x-goog-api-key': apiKey }, timeout: 15000 },
+      );
+      return;
+    }
+    if (provider === 'claude') {
+      await axios.post(
+        'https://api.anthropic.com/v1/messages',
+        { model: modelId, max_tokens: 10, messages: [{ role: 'user', content: 'hi' }] },
+        {
+          headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+          timeout: 15000,
+        },
+      );
+      return;
+    }
+    const url = OPENAI_COMPAT_CHAT_URL[provider];
+    if (!url) throw new Error(`No chat probe endpoint for provider: ${provider}`);
+    await axios.post(
+      url,
+      { model: modelId, messages: [{ role: 'user', content: 'hi' }], max_tokens: 10 },
+      { headers: { Authorization: `Bearer ${apiKey}` }, timeout: 15000 },
+    );
+  }
+
+  /** True when `err` looks like "this specific model id is gone/unknown", as opposed to auth/rate-limit/server trouble that would fail identically on the next candidate too. */
+  function isProbeModelGone(provider: string, err: any): boolean {
+    if (provider === 'groq') return (require('./llm/groqModels').isGroqModelGone as (e: any) => boolean)(err);
+    const status = err?.response?.status;
+    const msg = String(err?.response?.data?.error?.message || err?.response?.data?.message || '').toLowerCase();
+    return status === 404 || msg.includes('model not found') || msg.includes('does not exist');
+  }
+
   safeHandle(
     'test-llm-connection',
     async (_, provider: 'gemini' | 'groq' | 'openai' | 'claude' | 'deepseek' | 'nvidia_nim', apiKey?: string) => {
       console.log(`[IPC] Received test-llm-connection request for provider: ${provider}`);
+      const { CredentialsManager } = require('./services/CredentialsManager');
+      const creds = CredentialsManager.getInstance();
+
+      if (!apiKey || !apiKey.trim()) {
+        if (provider === 'gemini') apiKey = creds.getGeminiApiKey();
+        else if (provider === 'groq') apiKey = creds.getGroqApiKey();
+        else if (provider === 'openai') apiKey = creds.getOpenaiApiKey();
+        else if (provider === 'claude') apiKey = creds.getClaudeApiKey();
+        else if (provider === 'deepseek') apiKey = creds.getDeepseekApiKey();
+        else if (provider === 'nvidia_nim') apiKey = creds.getNvidiaNimApiKey();
+      }
+
+      if (!apiKey || !apiKey.trim()) {
+        return { success: false, error: 'No API key provided' };
+      }
+
+      const { normalizeProviderError } = require('./utils/ProviderErrorNormalizer');
+      const now = Date.now();
+
+      // Step 1 — auth + model list. A throw here means the KEY is the
+      // problem, not the provider: persisted as 'disconnected', never
+      // conflated with the user having switched the provider off.
+      let fetched: { id: string; label: string }[];
       try {
-        if (!apiKey || !apiKey.trim()) {
-          const { CredentialsManager } = require('./services/CredentialsManager');
-          const creds = CredentialsManager.getInstance();
-          if (provider === 'gemini') apiKey = creds.getGeminiApiKey();
-          else if (provider === 'groq') apiKey = creds.getGroqApiKey();
-          else if (provider === 'openai') apiKey = creds.getOpenaiApiKey();
-          else if (provider === 'claude') apiKey = creds.getClaudeApiKey();
-          else if (provider === 'deepseek') apiKey = creds.getDeepseekApiKey();
-          else if (provider === 'nvidia_nim') apiKey = creds.getNvidiaNimApiKey();
-        }
-
-        if (!apiKey || !apiKey.trim()) {
-          return { success: false, error: 'No API key provided' };
-        }
-
-        const axios = require('axios');
-        let response;
-
-        if (provider === 'gemini') {
-          // Test with the exact model that the app uses: gemini-3.7-flash
-          const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent`;
-          response = await axios.post(
-            url,
-            {
-              contents: [{ parts: [{ text: 'Hello' }] }],
-            },
-            {
-              headers: { 'x-goog-api-key': apiKey },
-              timeout: 15000,
-            },
-          );
-        } else if (provider === 'groq') {
-          // Walk the ladder instead of pinning one id. The preferred Groq model
-          // is PREVIEW tier and Groq discontinues preview models without notice —
-          // pinning one turns its retirement into "your API key doesn't work",
-          // which is what users saw when llama-3.3-70b-versatile was switched off.
-          // Only a model-gone error advances; a bad key or a rate limit still
-          // fails immediately with its own message.
-          const { GROQ_TEXT_MODEL_LADDER, isGroqModelGone } = require('./llm/groqModels');
-          let lastGroqError: any = null;
-          for (const candidate of GROQ_TEXT_MODEL_LADDER) {
-            try {
-              response = await axios.post(
-                'https://api.groq.com/openai/v1/chat/completions',
-                {
-                  model: candidate,
-                  messages: [{ role: 'user', content: 'Hello' }],
-                },
-                {
-                  headers: { Authorization: `Bearer ${apiKey}` },
-                  timeout: 15000,
-                },
-              );
-              if (candidate !== GROQ_TEXT_MODEL_LADDER[0]) {
-                console.warn(`[IPC] Groq test: ${GROQ_TEXT_MODEL_LADDER[0]} is gone; the key works on ${candidate}`);
-              }
-              lastGroqError = null;
-              break;
-            } catch (groqErr: any) {
-              lastGroqError = groqErr;
-              if (!isGroqModelGone(groqErr)) break;
-            }
-          }
-          if (lastGroqError) throw lastGroqError;
-        } else if (provider === 'openai') {
-          // Test with gpt-4o (the current model configured in the app).
-          // Fallback to gpt-4o-mini if the first one is unavailable.
-          const candidates = ['gpt-4o', 'gpt-4o-mini'];
-          let lastOpenaiError: any = null;
-          for (const model of candidates) {
-            try {
-              response = await axios.post(
-                'https://api.openai.com/v1/chat/completions',
-                {
-                  model,
-                  messages: [{ role: 'user', content: 'Hello' }],
-                  max_tokens: 10,
-                },
-                {
-                  headers: { Authorization: `Bearer ${apiKey}` },
-                  timeout: 15000,
-                },
-              );
-              if (model !== candidates[0]) {
-                console.warn(`[IPC] OpenAI test: ${candidates[0]} not available; verified with ${model}`);
-              }
-              lastOpenaiError = null;
-              break;
-            } catch (openaiErr: any) {
-              lastOpenaiError = openaiErr;
-              // If it's a model-not-found error, try the next one
-              if (openaiErr?.response?.status === 404 || 
-                  openaiErr?.response?.data?.error?.code === 'model_not_found' ||
-                  openaiErr?.response?.data?.error?.type === 'invalid_request_error') {
-                continue;
-              }
-              // Other errors (auth, rate limit, etc) fail immediately
-              break;
-            }
-          }
-          if (lastOpenaiError) throw lastOpenaiError;
-        } else if (provider === 'claude') {
-          // Test with claude-sonnet-4-20250514 (the current model configured in the app)
-          // Fallback to claude-opus-4-1 if the primary is unavailable
-          const candidates = ['claude-sonnet-4-20250514', 'claude-opus-4-1'];
-          let lastClaudeError: any = null;
-          for (const model of candidates) {
-            try {
-              response = await axios.post(
-                'https://api.anthropic.com/v1/messages',
-                {
-                  model,
-                  max_tokens: 10,
-                  messages: [{ role: 'user', content: 'Hello' }],
-                },
-                {
-                  headers: {
-                    'x-api-key': apiKey,
-                    'anthropic-version': '2023-06-01',
-                    'content-type': 'application/json',
-                  },
-                  timeout: 15000,
-                },
-              );
-              if (model !== candidates[0]) {
-                console.warn(`[IPC] Claude test: ${candidates[0]} not available; verified with ${model}`);
-              }
-              lastClaudeError = null;
-              break;
-            } catch (claudeErr: any) {
-              lastClaudeError = claudeErr;
-              // If it's a model-not-found error, try the next one
-              if (claudeErr?.response?.status === 404 || 
-                  claudeErr?.response?.data?.error?.code === 'model_not_found' ||
-                  claudeErr?.response?.data?.error?.type === 'invalid_request_error') {
-                continue;
-              }
-              break;
-            }
-          }
-          if (lastClaudeError) throw lastClaudeError;
-        } else if (provider === 'deepseek') {
-          // Test with deepseek-v4-flash (the first model in the app's ladder)
-          // Fallback to deepseek-v4-pro if the first one fails
-          const candidates = ['deepseek-v4-flash', 'deepseek-v4-pro'];
-          let lastDeepseekError: any = null;
-          for (const model of candidates) {
-            try {
-              response = await axios.post(
-                'https://api.deepseek.com/chat/completions',
-                {
-                  model,
-                  max_tokens: 10,
-                  messages: [{ role: 'user', content: 'Hello' }],
-                },
-                {
-                  headers: {
-                    Authorization: `Bearer ${apiKey}`,
-                    'content-type': 'application/json',
-                  },
-                  timeout: 15000,
-                },
-              );
-              if (model !== candidates[0]) {
-                console.warn(`[IPC] DeepSeek test: ${candidates[0]} not found; using ${model}`);
-              }
-              lastDeepseekError = null;
-              break;
-            } catch (deepseekErr: any) {
-              lastDeepseekError = deepseekErr;
-              // If it's a model-not-found error, try the next one
-              if (deepseekErr?.response?.status === 404 || 
-                  deepseekErr?.response?.data?.error?.message?.includes('model not found')) {
-                continue;
-              }
-              // Other errors fail immediately
-              break;
-            }
-          }
-          if (lastDeepseekError) throw lastDeepseekError;
-        }
-        else if (provider === 'nvidia_nim') {
-          // Test with the first model in the app's ladder
-          const candidates = ['meta/llama-3.1-8b-instruct', 'z-ai/glm4.7'];
-          let lastNvidiaError: any = null;
-          for (const model of candidates) {
-            try {
-              response = await axios.post('https://integrate.api.nvidia.com/v1/chat/completions', {
-                model,
-                messages: [{ role: 'user', content: 'Hello' }],
-                max_tokens: 10,
-              }, { headers: { Authorization: `Bearer ${apiKey}` }, timeout: 15000 });
-              if (model !== candidates[0]) {
-                console.warn(`[IPC] Nvidia NIM test: ${candidates[0]} not found; using ${model}`);
-              }
-              lastNvidiaError = null;
-              break;
-            } catch (nvidiaErr: any) {
-              lastNvidiaError = nvidiaErr;
-              // Try next model on failure
-              if (nvidiaErr?.response?.status === 404 || 
-                  nvidiaErr?.response?.data?.error?.message?.includes('model not found')) {
-                continue;
-              }
-              break;
-            }
-          }
-          if (lastNvidiaError) throw lastNvidiaError;
-        }
-
-        if (response && (response.status === 200 || response.status === 201)) {
-          return { success: true };
-        } else {
-          return { success: false, error: 'Request failed with status ' + response?.status };
-        }
+        const { fetchProviderModels } = require('./utils/modelFetcher');
+        fetched = await fetchProviderModels(provider, apiKey);
       } catch (error: any) {
-        // CRITICAL: do NOT log the raw axios error — it includes the request config
-        // with the Authorization header (full API key) and is dumped verbatim by
-        // Node's util.inspect. Strip to a safe shape before logging.
         const safeInfo = {
           provider,
           status: error?.response?.status,
           statusText: error?.response?.statusText,
           code: error?.code,
           message: error?.message,
-          responseError: error?.response?.data?.error?.message || error?.response?.data?.message,
         };
-        console.error('LLM connection test failed:', safeInfo);
-        const rawMsg =
-          error?.response?.data?.error?.message ||
-          error?.response?.data?.message ||
-          (error.response?.data?.error?.type
-            ? `${error.response.data.error.type}: ${error.response.data.error.message}`
-            : error.message) ||
-          'Connection failed';
-        const msg = sanitizeErrorMessage(rawMsg);
-        return { success: false, error: msg };
+        // CRITICAL: do NOT log the raw axios error — it includes the request config
+        // with the Authorization header (full API key) and is dumped verbatim by
+        // Node's util.inspect. Strip to a safe shape before logging.
+        console.error('LLM connection test failed (auth/model-list):', safeInfo);
+        const normalized = normalizeProviderError(provider, error);
+        const health: ProviderHealth = {
+          status: 'disconnected',
+          authOk: false,
+          lastProbeAt: now,
+          lastError: { code: normalized.category, message: normalized.message },
+          models: [],
+        };
+        creds.setProviderHealth(provider, health);
+        return { success: false, error: sanitizeErrorMessage(normalized.message), health };
       }
+
+      // Step 2 — chat probe on 1-2 candidates. Auth already succeeded here,
+      // so a probe failure is 'degraded' (key works, nothing chat-verified
+      // yet), never re-classified as an auth/disabled failure.
+      const candidates = pickProbeCandidates(provider, fetched.map((m) => m.id));
+      let probedId: string | null = null;
+      let probeError: any = null;
+      // Candidates rejected as model-gone are known-bad, not merely
+      // unprobed — they must not inherit the catalog's default chat:true.
+      const goneIds = new Set<string>();
+      for (const candidate of candidates) {
+        try {
+          await probeChatModel(provider, apiKey, candidate);
+          probedId = candidate;
+          probeError = null;
+          break;
+        } catch (err: any) {
+          probeError = err;
+          // Only advance to the next candidate on a model-gone-style failure;
+          // an auth or rate-limit error fails identically on every candidate.
+          if (!isProbeModelGone(provider, err)) break;
+          goneIds.add(candidate);
+        }
+      }
+
+      // A successful probe verifies chat capability for the account's whole
+      // fetched catalog (the provider's own /models list already filters to
+      // chat-eligible ids) — not just the one id that round-tripped. `source`
+      // still distinguishes the literally-probed id from the rest.
+      const models: VerifiedModelBinding[] = fetched.map((m) =>
+        bindingFromModelId(m.id, provider as ProviderFamily, {
+          label: m.label,
+          chatOk: probedId != null && !goneIds.has(m.id),
+          source: m.id === probedId ? 'live-probe' : 'preset',
+          verifiedAt: now,
+          lastError: goneIds.has(m.id) ? 'Not available for this key/account' : undefined,
+        }),
+      );
+
+      const health: ProviderHealth = probedId
+        ? { status: 'verified', authOk: true, lastProbeAt: now, models }
+        : {
+            status: 'degraded',
+            authOk: true,
+            lastProbeAt: now,
+            lastError: probeError
+              ? (() => {
+                  const n = normalizeProviderError(provider, probeError);
+                  return { code: n.category, message: n.message };
+                })()
+              : { code: 'NO_MODELS', message: 'No chat-capable models were returned for this key.' },
+            models,
+          };
+
+      creds.setProviderHealth(provider, health);
+      return { success: true, models: fetched, health };
     },
   );
+
+  safeHandle('get-provider-health', () => {
+    const { CredentialsManager } = require('./services/CredentialsManager');
+    return CredentialsManager.getInstance().getAllProviderHealth();
+  });
 
   safeHandle('get-groq-fast-text-mode', () => {
     try {
@@ -9931,6 +10160,36 @@ export function initializeIpcHandlers(appState: AppState): void {
               };
             }
             validatedImagePaths!.push(imagePath);
+          }
+
+          // Vision capability gate (Problem 39): the chat model that will
+          // receive these images (not just ScreenUnderstandingService's own
+          // internal vision providers) must support image input. Auto-switch
+          // to a verified vision-capable binding when the current selection
+          // doesn't, or refuse with a clear error rather than silently
+          // sending pixels to (or dropping them from) a text-only model.
+          {
+            const { CredentialsManager: CredsForGate } = require('./services/CredentialsManager');
+            const llmHelperForGate = appState.processingHelper.getLLMHelper();
+            const gate = resolveVisionGate(
+              llmHelperForGate.getCapabilities(),
+              CredsForGate.getInstance().getAllProviderHealth(),
+            );
+            if (!gate.ok) {
+              return {
+                answer: null,
+                question: question || 'unknown',
+                screenContextStatus,
+                error: gate.message,
+              };
+            }
+            if (gate.switchTo) {
+              console.warn(
+                `[VisionGate] "${llmHelperForGate.getCurrentModelId()}" has no vision — auto-switching to verified `
+                + `vision-capable model "${gate.switchTo.id}" for this screen ask.`,
+              );
+              llmHelperForGate.setModel(gate.switchTo.id);
+            }
           }
 
           // Vision-first: run the ScreenUnderstandingService so the image is hashed, optimized,

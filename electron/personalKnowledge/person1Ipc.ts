@@ -52,6 +52,18 @@ export function registerPerson1Ipc(safeHandle: SafeHandle): void {
         }
     });
 
+    safeHandle('personal-files:set-file-type', async (_event: unknown, fileId: string, fileType: string) => {
+        if (typeof fileId !== 'string' || !fileId.trim()) {
+            return { success: false, error: 'Invalid file id.' };
+        }
+        try {
+            const file = getPersonalKnowledgeManager().setFileType(fileId, fileType);
+            return { success: true, file };
+        } catch (error) {
+            return { success: false, error: errorMessage(error, 'Could not update file type.') };
+        }
+    });
+
     safeHandle('personal-files:delete', async (_event: unknown, fileId: string) => {
         if (typeof fileId !== 'string' || !fileId.trim()) {
             return { success: false, error: 'Invalid file id.' };

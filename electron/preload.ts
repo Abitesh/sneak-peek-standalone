@@ -22,6 +22,7 @@ interface ElectronAPI {
   personalFilesList: () => Promise<{ success: boolean; files?: any[]; error?: string }>;
   personalFilesDelete: (fileId: string) => Promise<{ success: boolean; error?: string }>;
   personalFilesSearch: (query: string) => Promise<{ success: boolean; results?: any[]; error?: string }>;
+  personalFilesSetFileType: (fileId: string, fileType: string) => Promise<{ success: boolean; file?: any; error?: string }>;
   sendOverlayUiState: (state: Record<string, unknown>) => Promise<void>;
   onOverlayUiState: (callback: (state: Record<string, unknown>) => void) => () => void;
   sendOverlayToggleAnchor: (payload: { panelRight: number }) => Promise<void>;
@@ -103,9 +104,16 @@ interface ElectronAPI {
     modelId?: string,
   ) => Promise<{ success: boolean; error?: string }>;
   testLlmConnection: (
-    provider: 'gemini' | 'groq' | 'openai' | 'claude',
+    provider: 'gemini' | 'groq' | 'openai' | 'claude' | 'deepseek' | 'nvidia_nim',
     apiKey?: string,
-  ) => Promise<{ success: boolean; error?: string }>;
+  ) => Promise<{
+    success: boolean;
+    error?: string;
+    models?: { id: string; label: string }[];
+    health?: import('./llm/providerRegistry').ProviderHealth;
+  }>;
+  /** Persisted provider health, keyed by provider family — see providerRegistry.ts. */
+  getProviderHealth: () => Promise<Record<string, import('./llm/providerRegistry').ProviderHealth>>;
   selectServiceAccount: () => Promise<{
     success: boolean;
     path?: string;
@@ -125,6 +133,13 @@ interface ElectronAPI {
   setLitellmConfig: (config: { apiKey: string; baseURL: string; maxTokens?: number }) => Promise<{ success: boolean; error?: string }>;
   getAvailableLiteLLMModels: () => Promise<string[]>;
   refreshLiteLLMModels: () => Promise<string[]>;
+  /** Problem 20 — real verification for the LiteLLM proxy: reachability + auth + chat probe. */
+  testLitellmConnection: (config?: { baseURL?: string; apiKey?: string }) => Promise<{
+    success: boolean;
+    error?: string;
+    models?: { id: string; label: string }[];
+    health?: import('./llm/providerRegistry').ProviderHealth;
+  }>;
   getCloudFetchedModels: () => Promise<{ models: Record<string, { id: string; label: string }[]>; fetchedAt: Record<string, number> }>;
   getDisabledProviders: () => Promise<string[]>;
   setDisabledProviders: (providers: string[]) => Promise<{ success: boolean; error?: string }>;
@@ -517,6 +532,13 @@ interface ElectronAPI {
   modelSelectorCloseIfOpen: () => Promise<void>;
   forceRestartOllama: () => Promise<void>;
   isOllamaReachable: () => Promise<boolean>;
+  /** Problems 5, 21-25 — real Ollama verification: reachability + /api/tags + a minimal chat probe. */
+  testOllamaConnection: () => Promise<{
+    success: boolean;
+    error?: string;
+    models?: { id: string; label: string }[];
+    health?: import('./llm/providerRegistry').ProviderHealth;
+  }>;
 
   // Settings Window
   toggleSettingsWindow: (coords?: { x: number; y: number }) => Promise<void>;
@@ -1159,6 +1181,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   personalFilesList: () => ipcRenderer.invoke('personal-files:list'),
   personalFilesDelete: (fileId: string) => ipcRenderer.invoke('personal-files:delete', fileId),
   personalFilesSearch: (query: string) => ipcRenderer.invoke('personal-files:search', query),
+  personalFilesSetFileType: (fileId: string, fileType: string) => ipcRenderer.invoke('personal-files:set-file-type', fileId, fileType),
   // ── Overlay aux windows (pill / resize toggle) coordination ──────────────
   // Overlay renderer → main → aux windows: UI-state broadcast.
   sendOverlayUiState: (state: Record<string, unknown>) =>
@@ -1460,6 +1483,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('switch-to-gemini', apiKey, modelId),
   testLlmConnection: (provider: 'gemini' | 'groq' | 'openai' | 'claude' | 'deepseek' | 'nvidia_nim', apiKey: string) =>
     ipcRenderer.invoke('test-llm-connection', provider, apiKey),
+  getProviderHealth: () => ipcRenderer.invoke('get-provider-health'),
   selectServiceAccount: () => ipcRenderer.invoke('select-service-account'),
 
   // API Key Management
@@ -1472,6 +1496,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setLitellmConfig: (config: { apiKey: string; baseURL: string; maxTokens?: number }) => ipcRenderer.invoke('set-litellm-config', config),
   getAvailableLiteLLMModels: () => ipcRenderer.invoke('get-available-litellm-models'),
   refreshLiteLLMModels: () => ipcRenderer.invoke('refresh-litellm-models'),
+  testLitellmConnection: (config?: { baseURL?: string; apiKey?: string }) => ipcRenderer.invoke('test-litellm-connection', config),
   getCloudFetchedModels: () => ipcRenderer.invoke('get-cloud-fetched-models'),
   getDisabledProviders: () => ipcRenderer.invoke('get-disabled-providers'),
   setDisabledProviders: (providers: string[]) => ipcRenderer.invoke('set-disabled-providers', providers),
@@ -2110,6 +2135,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   modelSelectorCloseIfOpen: () => ipcRenderer.invoke('model-selector:close-if-open'),
   forceRestartOllama: () => ipcRenderer.invoke('force-restart-ollama'),
   isOllamaReachable: () => ipcRenderer.invoke('is-ollama-reachable'),
+  testOllamaConnection: () => ipcRenderer.invoke('test-ollama-connection'),
 
   // Settings Window
   toggleSettingsWindow: (coords?: { x: number; y: number }) =>
