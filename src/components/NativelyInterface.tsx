@@ -6168,16 +6168,6 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
     return () => cleanups.forEach((fn) => fn());
   }, [currentModel, queueToken, flushToken]); // Ensure tracking captures correct model
 
-  const handleStartListening = () => {
-    if (isRecordingRef.current || isManualRecording) return;
-    setVoiceInput('');
-    voiceInputRef.current = '';
-    setManualTranscript('');
-    manualTranscriptRef.current = '';
-    isRecordingRef.current = true;
-    setIsManualRecording(true);
-  };
-
   /** Stop mic capture without sending the transcript to the model. */
   const handleStopListening = () => {
     if (!isRecordingRef.current && !isManualRecording) return;
@@ -6352,17 +6342,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
         setAudioSessionState('processing');
 
         try {
-          let prompt = '';
-
-          if (currentAttachments.length > 0) {
-            prompt = `You are a helper. The user has provided a screenshot and a spoken question/command.
-User said: "${question}"
-
-Instructions:
-1. Analyze the screenshot in the context of what the user said.
-2. Provide a direct, helpful answer.
-3. Be concise.`;
-          } else {
+          if (currentAttachments.length === 0) {
             // Only try meeting RAG if a meeting is currently active
             const isMeetingActive = await window.electronAPI.getMeetingActive();
             if (isMeetingActive) {
@@ -6371,16 +6351,6 @@ Instructions:
                 return;
               }
             }
-
-            prompt = `You are a real-time interview assistant. The user just repeated or paraphrased a question from their interviewer.
-Instructions:
-1. Extract the core question being asked
-2. Provide a clear, concise, and professional answer that the user can say out loud
-3. Keep the answer conversational but informative (2-4 sentences ideal)
-4. Do NOT include phrases like "The question is..." - just give the answer directly
-5. Format for speaking out loud, not for reading
-
-Provide only the answer, nothing else.`;
           }
 
           // R-17: claim the desktop surface BEFORE the round-trip. The stream's
@@ -6392,17 +6362,13 @@ Provide only the answer, nothing else.`;
           chatStreamIdRef.current = null;
           chatStreamSourceRef.current = 'desktop';
           requestStartTimeRef.current = Date.now();
-          // Sprint S6 (Problems 29-30): deliberately only 3 args here, same
-          // shape as handleManualSubmit's streamGeminiChat call below — no
-          // options object opting this turn out of the system prompt. That
-          // flag used to mark this call "caller owns the whole prompt", which
-          // skipped Context Intelligence V3 (and with it My Files / résumé /
-          // JD retrieval, mode evidence, conversation continuity) entirely.
-          // Removing it lets voice answers ground the same way typed ones do.
+          // Same shape as handleManualSubmit: message + optional images only.
+          // Do not pass a fabricated interview/helper prompt as `context` —
+          // V3 ignores it for composition but it blocked personal-knowledge
+          // fill and poisoned legacy fallthrough.
           await window.electronAPI.streamGeminiChat(
             question,
             currentAttachments.length > 0 ? currentAttachments.map((s) => s.path) : undefined,
-            prompt,
           );
         } catch (err) {
           // R-17: a throw from invoke() never reaches the main process, so no
@@ -8159,32 +8125,6 @@ Provide only the answer, nothing else.`;
 
   return (
     <>
-    <TopControlBar
-      isListening={isManualRecording}
-      isProcessing={isProcessing}
-      currentModel={currentModel}
-      currentModelDisplayName={currentModelDisplayName}
-      activeModeLabel={activeModeLabel}
-      inputValue={inputValue}
-      onListen={() => void handleAnswerNow()}
-      onAnswer={() => void handleWhatToSay()}
-      onAsk={() => {
-        if (inputValue.trim()) {
-          void handleManualSubmit();
-        } else {
-          textInputRef.current?.focus();
-        }
-      }}
-      onScreen={() => void generalHandlersRef.current.takeScreenshot()}
-      onModel={(anchor) => {
-        const rect = anchor.getBoundingClientRect();
-        void window.electronAPI.toggleModelSelector({
-          x: window.screenX + rect.left,
-          y: window.screenY + rect.bottom + 8,
-          activate: false,
-        });
-      }}
-    />
     {/* The resize toggle and the TopPill render in their OWN aux
         BrowserWindows (OverlayAuxWindows.tsx), positioned by the main
         process around this window. This window is exactly the shell card.
@@ -8278,15 +8218,14 @@ Provide only the answer, nothing else.`;
 
               <TopControlBar
                 isListening={isManualRecording}
+                isAnalyzing={audioSessionState === 'transcribing' || audioSessionState === 'processing'}
                 isProcessing={isProcessing}
                 currentModel={currentModel}
                 currentModelDisplayName={currentModelDisplayName}
                 activeModeLabel={activeModeLabel}
                 inputValue={inputValue}
-                onListen={() => {
-                  if (isManualRecording) handleStopListening();
-                  else handleStartListening();
-                }}
+                onListen={() => handleStartListening()}
+                onAnalyze={() => void handleAnalyzeNow()}
                 onAnswer={() => void handleWhatToSay()}
                 onAsk={() => {
                   if (inputValue.trim()) {

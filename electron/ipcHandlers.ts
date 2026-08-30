@@ -34,7 +34,7 @@ import { buildProfileJitPrompt } from './llm/ProfileJitPromptBuilder';
 import { decideSessionWritePolicy, type FinalGenerationMode, type SessionWriteDecision } from './llm/FinalAnswerGenerationPolicy';
 import { stripEmbeddedAnswerContract } from './llm/stripEmbeddedAnswerContract';
 import { isCodeVerificationEnabled } from './llm/codeVerification/verificationEnabled';
-import { isTrivialQuery } from './llm/contextEngine';
+import { shouldAttachLiveTranscriptToManualChat } from './llm/contextEngine';
 import { fitPromptToBudget, resolveProviderCeiling } from './llm/promptBudget';
 import { getModelCapabilities } from './llm/modelCapabilities';
 import { CodingStreamGate } from './llm/codingStreamGate';
@@ -1348,15 +1348,23 @@ export function initializeIpcHandlers(appState: AppState): void {
               resolvedProfileSources: v3ProfileResolved,
               extraAllowedSourceTypes: extraSourceTypes,
               debugSources: v3DebugSources as never,
-              // Intent-based inclusion (Problem 31): a bare greeting or short
-              // ack has nothing for a 180s transcript window to ground, and
-              // omitting it here isn't a loss — engine-bridge's own
-              // continuity fallback (conversation-state-store) already
-              // covers ordinary follow-ups without this render. Unconditional
-              // inclusion was the "10k+ tokens for hi" root cause (Problem 17).
+              // Intent-based inclusion (Problem 31 + random-answer fix):
+              // Unconditional getFormattedContext(180) attached INTERVIEWER/ME
+              // Listen lines as "Conversation so far" on EVERY non-trivial typed
+              // chat turn, so answers drifted into unrelated meeting chatter
+              // whenever STT had recent audio. Trivial queries stay empty;
+              // non-referential chat relies on conversation-state-store in
+              // engine-bridge. Live STT only when a meeting is active AND the
+              // question clearly refers to that conversation.
               conversationSummary: (() => {
                 try {
-                  if (isTrivialQuery(v3Question)) return undefined;
+                  const meetingActive = Boolean(appState.getIsMeetingActive?.());
+                  if (!shouldAttachLiveTranscriptToManualChat({
+                    query: v3Question,
+                    meetingActive,
+                  })) {
+                    return undefined;
+                  }
                   return appState.getIntelligenceManager?.()?.getFormattedContext?.(180) || undefined;
                 } catch { return undefined; }
               })(),
@@ -1411,21 +1419,24 @@ export function initializeIpcHandlers(appState: AppState): void {
                 let bareCode = false;
                 if (isBareCodeRequest(v3Question) || isCodingContinuation(v3Question)) {
                   try {
-                    // IntelligenceManager exposes getLastAssistantMessage()
-                    // directly (it owns a PRIVATE SessionTracker and has no
-                    // getSessionTracker accessor) — the old chained form was a
-                    // phantom method that `as any` + optional chaining made
-                    // silently return undefined, so this whole guard was dead
-                    // code and every continuation was answered context-free.
-                    // No surface argument: "anywhere" is the point, so an
-                    // overlay answer can ground a chat follow-up.
-                    const lastAnywhere = appState.getIntelligenceManager?.()?.getLastAssistantMessage?.();
+                    // Prefer the last MANUAL CHAT assistant message so a WTA /
+                    // auto-answer card cannot poison a typed follow-up with an
+                    // unrelated "prior coding problem". Fall back to anywhere
+                    // only when chat has no prior answer — that keeps the
+                    // intentional "code?" after an on-screen WTA card working.
+                    const im = appState.getIntelligenceManager?.();
+                    const lastManual = im?.getLastAssistantMessage?.('manual_chat');
+                    const lastAnywhere = im?.getLastAssistantMessage?.();
+                    const candidate =
+                      (typeof lastManual === 'string' && lastManual.trim().length > 40)
+                        ? lastManual
+                        : lastAnywhere;
                     bareCode = isBareCodeRequest(v3Question);
-                    if (typeof lastAnywhere === 'string' && lastAnywhere.trim().length > 40
-                        && (bareCode || looksLikeCodingAnswer(lastAnywhere))) {
+                    if (typeof candidate === 'string' && candidate.trim().length > 40
+                        && (bareCode || looksLikeCodingAnswer(candidate))) {
                       priorProblem = '\n\n' + buildPriorCodingBlockForV3({
                         userMessage: '(the question answered just before this one)',
-                        assistantAnswer: lastAnywhere,
+                        assistantAnswer: candidate,
                       });
                     }
                   } catch { /* guard only; never blocks the answer */ }

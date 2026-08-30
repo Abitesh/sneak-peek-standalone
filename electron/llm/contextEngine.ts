@@ -37,6 +37,26 @@ export function isTrivialQuery(query: string | null | undefined): boolean {
   return q.length < 20 && !q.includes('?');
 }
 
+/**
+ * Manual-chat must NOT treat the last N seconds of Listen/meeting STT as
+ * "conversation so far" by default. That made ordinary typed questions answer
+ * from unrelated interview chatter whenever audio was recently active — the
+ * intermittent "random answer" defect. Continuity for follow-ups belongs to
+ * conversation-state-store (engine-bridge). Attach live transcript only when a
+ * meeting is active AND the question clearly refers to that live conversation.
+ */
+const LIVE_TRANSCRIPT_REFERENT_RE =
+  /\b(they|he|she|interviewer|just (said|asked)|what did (they|he|she|the interviewer)|repeat (that|the question)|said just now|asked me|that question|the (last|previous) question|transcript)\b/i;
+
+export function shouldAttachLiveTranscriptToManualChat(opts: {
+  query: string | null | undefined;
+  meetingActive: boolean;
+}): boolean {
+  if (!opts.meetingActive) return false;
+  if (isTrivialQuery(opts.query)) return false;
+  return LIVE_TRANSCRIPT_REFERENT_RE.test((opts.query ?? '').trim());
+}
+
 export interface AssembleContextInput {
   query: string;
   /** Candidate optional layers, highest priority first. Caller has already retrieved/chunked their content. */

@@ -4,7 +4,6 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  GripVertical,
   MessageSquare,
   Mic,
   Monitor,
@@ -31,8 +30,7 @@ type TopControlBarProps = {
   onModel: (anchor: HTMLElement) => void;
 };
 
-const positionKey = 'natively_top_control_bar_position';
-const defaultPosition = () => ({ x: window.innerWidth / 2, y: 16 });
+const collapsedKey = 'natively_top_control_bar_collapsed';
 
 export function TopControlBar({
   isListening,
@@ -52,9 +50,8 @@ export function TopControlBar({
   const [autoEnabled, setAutoEnabled] = useState(false);
   const [modes, setModes] = useState<ModeOption[]>([]);
   const [language, setLanguage] = useState('EN');
-  // Non-blocking overlay (Problem 48): collapsing the bar down to just the
-  // drag handle + a status dot lets the user reclaim the space over the chat
-  // transcript without losing their position on screen.
+  // Non-blocking overlay (Problem 48): collapsing the bar to a chevron +
+  // status dot lets the user reclaim space over the chat transcript.
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(collapsedKey) === 'true');
 
   useEffect(() => {
@@ -96,21 +93,6 @@ export function TopControlBar({
       role="toolbar"
       aria-label="Natively controls"
     >
-      <button
-        type="button"
-        data-top-control-drag-handle="true"
-        className="no-drag h-8 w-7 inline-flex items-center justify-center rounded-lg text-white/55 hover:bg-white/10 hover:text-white cursor-grab active:cursor-grabbing touch-none pointer-events-auto"
-        title="Drag toolbar"
-        aria-label="Drag toolbar"
-        onPointerDown={startDrag}
-        onPointerUp={stopDrag}
-        onPointerCancel={stopDrag}
-      >
-        <GripVertical size={15} />
-      </button>
-
-      <div className="h-5 w-px bg-white/15" />
-
       {collapsed ? (
         <>
           {(isListening || isAnalyzing) && (
