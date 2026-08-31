@@ -1342,8 +1342,17 @@ export function initializeIpcHandlers(appState: AppState): void {
               modeTemplateType: rawMode,
               modeUniqueId: modeInfo?.id ?? null,
               modeName: (modeInfo as any)?.name ?? null,
-              attachedSourceCount: files.length,
-              attachedFileNames: (files as Array<{ fileName?: string }>).map((f) => f.fileName ?? '').filter(Boolean),
+              // Count BOTH mode reference files AND My Files. My Files are
+              // searched via createPersonalFileRetrievalPort above, but the old
+              // count used only mode attachments — so a user with only My Files
+              // hit the "nothing was searched / no document attached" branch and
+              // the model refused instead of falling back to general knowledge
+              // when the files did not cover the question.
+              attachedSourceCount: files.length + personalFiles.length,
+              attachedFileNames: [
+                ...(files as Array<{ fileName?: string }>).map((f) => f.fileName ?? '').filter(Boolean),
+                ...personalFiles.map((f) => f.fileName).filter(Boolean),
+              ],
               profileSourceCount: v3ProfileCounts.profileResume + v3ProfileCounts.profileJd + v3ProfileCounts.profileFact,
               resolvedProfileSources: v3ProfileResolved,
               extraAllowedSourceTypes: extraSourceTypes,
