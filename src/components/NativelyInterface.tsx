@@ -330,6 +330,7 @@ import { NegotiationCoachingCard } from '../premium';
 import type { DynamicActionPayload } from '../types/electron';
 import { getCodexCliModelDisplayName, litellmModelLabel } from '../utils/modelUtils';
 import { getModifierSymbol, isMac, isWindows } from '../utils/platformUtils';
+import { isInternalCaptureDevice } from '../../electron/audio/audioDeviceSelection.mjs';
 import { DynamicActionBar } from './dynamic-actions/DynamicActionBar';
 import GlassEffectLayer from './ui/GlassEffectLayer';
 import { OverlayBanner, OverlayBannerButton } from './ui/OverlayBanner';
@@ -1120,6 +1121,9 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
   const interviewerListenRef = useRef('');
   const [interviewerListenPartial, setInterviewerListenPartial] = useState('');
   const interviewerListenPartialRef = useRef('');
+  // Wall-clock start of the current Listen turn — used to size the SessionTracker
+  // fallback window on Analyze when renderer buffers missed system-audio IPC.
+  const listenStartedAtRef = useRef(0);
   // Listen → Analyze audio state machine (Idle → Listening → Speaking detected
   // → Transcribing → Processing). Deliberately independent from
   // `showAnswerPanel` so the indicator stays visible for the whole session
@@ -6197,6 +6201,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
     if (!isRecordingRef.current && !isManualRecording) return;
     isRecordingRef.current = false;
     setIsManualRecording(false);
+    listenStartedAtRef.current = 0;
     window.electronAPI
       ?.finalizeMicSTT?.()
       .catch((err) => console.error('[NativelyInterface] Failed to send finalizeMicSTT:', err));
@@ -6233,8 +6238,8 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
   // for the life of the meeting; "Listen" gates which transcript chunks the UI
   // accumulates (see `isRecordingRef` in onNativeAudioTranscript) — mic (you)
   // and system/loopback (the other person on the call). The defensive
-  // getMeetingActive/startMeeting call below covers the edge case where that
-  // invariant doesn't hold.
+  // getMeetingActive/startMeeting + ensureListenAudioCapture path below covers
+  // Ambient AI Chat (capture skipped at meeting start) and failed system starts.
   const handleStartListening = () => {
     setVoiceInput('');
     voiceInputRef.current = '';
@@ -6244,18 +6249,62 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
     interviewerListenRef.current = '';
     setInterviewerListenPartial('');
     interviewerListenPartialRef.current = '';
+    listenStartedAtRef.current = Date.now();
     isRecordingRef.current = true; // Update ref immediately
     setIsManualRecording(true);
     setAudioSessionState('listening');
     // Force the overlay open so the live transcript is immediately visible.
     setIsExpanded(true);
 
-    void window.electronAPI
-      .getMeetingActive()
-      .then((active) => (active ? undefined : window.electronAPI.startMeeting()))
-      .catch((err) =>
-        console.error('[NativelyInterface] Failed to verify meeting/mic state on Listen:', err),
-      );
+    void (async () => {
+      try {
+        let inputDeviceId = localStorage.getItem('preferredInputDeviceId');
+        if (isInternalCaptureDevice(inputDeviceId)) {
+          localStorage.removeItem('preferredInputDeviceId');
+          inputDeviceId = null;
+        }
+        let outputDeviceId = localStorage.getItem('preferredOutputDeviceId');
+        const useExperimentalSck =
+          isMac && localStorage.getItem('useExperimentalSckBackend') === 'true';
+        if (useExperimentalSck) {
+          outputDeviceId = 'sck';
+        }
+
+        const active = await window.electronAPI.getMeetingActive();
+        if (!active) {
+          await window.electronAPI.startMeeting({
+            audio: { inputDeviceId, outputDeviceId },
+          });
+          // Audio init is async (CoreAudio/SCK can take several seconds). Brief
+          // pause so ensureListenAudioCapture sees the pipeline objects.
+          await new Promise((r) => setTimeout(r, 400));
+        }
+
+        const status = await window.electronAPI.ensureListenAudioCapture?.();
+        if (!status) return;
+        if (!status.system && status.message) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: genMessageId(),
+              role: 'system',
+              text: `⚠️ ${status.message}`,
+            },
+          ]);
+        } else if (status.sameDevice && status.message) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: genMessageId(),
+              role: 'system',
+              text: `⚠️ ${status.message}`,
+            },
+          ]);
+        }
+      } catch (err) {
+        console.error('[NativelyInterface] Failed to ensure Listen audio:', err);
+      }
+    })();
   };
 
   // ── Analyze ── Auto-stop the Listen capture, finalize BOTH STT channels, and
@@ -6276,19 +6325,38 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
         ?.finalizeMicSTT?.()
         .catch((err) => console.error('[NativelyInterface] Failed to send finalizeMicSTT:', err));
 
-      await new Promise((resolve) => setTimeout(resolve, 220));
+      await new Promise((resolve) => setTimeout(resolve, 280));
 
       const currentAttachments = attachedContext;
       setAttachedContext([]);
 
-      const me = mergeTranscriptChunks(
+      let me = mergeTranscriptChunks(
         voiceInputRef.current,
         manualTranscriptRef.current,
       ).trim();
-      const them = mergeTranscriptChunks(
+      let them = mergeTranscriptChunks(
         interviewerListenRef.current,
         interviewerListenPartialRef.current,
       ).trim();
+
+      // Safety net: SessionTracker may already have interviewer (system audio)
+      // lines that the Listen UI buffers missed (late IPC, Ambient Chat late
+      // start, throttle drop). Fill only empty sides to avoid double-paste.
+      if (!them || !me) {
+        const listenMs = listenStartedAtRef.current
+          ? Date.now() - listenStartedAtRef.current
+          : 30_000;
+        const secs = Math.max(8, Math.ceil(listenMs / 1000) + 3);
+        try {
+          const snap = await window.electronAPI.getListenWindowTranscript?.(secs);
+          if (snap?.interviewer && !them) them = snap.interviewer.trim();
+          if (snap?.user && !me) me = snap.user.trim();
+        } catch {
+          /* non-fatal — keep renderer buffers */
+        }
+      }
+      listenStartedAtRef.current = 0;
+
       const question = [them && `Interviewer: ${them}`, me && `Me: ${me}`]
         .filter(Boolean)
         .join('\n')
@@ -6321,6 +6389,20 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
                 id: genMessageId(),
                 role: 'system',
                 text: '⏳ STT is reconnecting, try again in a moment.',
+              },
+            ]);
+          } else if (
+            sttInterviewerStatus === 'failed' ||
+            sttInterviewerStatus === 'awaiting-audio'
+          ) {
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: genMessageId(),
+                role: 'system',
+                text: isMac
+                  ? '⚠️ No speech detected. If the other person was speaking, enable Screen Recording for Natively and make sure call audio is playing on this Mac.'
+                  : '⚠️ No speech detected. If the other person was speaking, check system-audio / loopback capture in Settings.',
               },
             ]);
           } else {

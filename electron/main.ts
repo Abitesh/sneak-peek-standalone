@@ -5977,6 +5977,91 @@ export class AppState {
   }
 
   /**
+   * Listen explicitly needs mic + system audio even when Ambient AI Chat left
+   * capture off for the meeting, or when system capture failed to start.
+   * Idempotent: safe to call every Listen press.
+   */
+  public async ensureListenAudioCapture(): Promise<{
+    ok: boolean;
+    meetingActive: boolean;
+    mic: boolean;
+    system: boolean;
+    ambientChatEnabled: boolean;
+    screenDenied: boolean;
+    sameDevice: string | null;
+    message?: string;
+  }> {
+    const ambientChatEnabled = this._ambientChatEnabled;
+    const out = {
+      ok: false,
+      meetingActive: this.isMeetingActive,
+      mic: false,
+      system: false,
+      ambientChatEnabled,
+      screenDenied: false,
+      sameDevice: null as string | null,
+      message: undefined as string | undefined,
+    };
+
+    if (!this.isMeetingActive) {
+      out.message = 'Start a meeting first, then press Listen.';
+      return out;
+    }
+
+    let screenDenied = false;
+    if (process.platform === 'darwin') {
+      try {
+        const cap = await resolveMacScreenCaptureCapability('listen ensure capture');
+        screenDenied = !!cap.effectiveDenied;
+        out.screenDenied = screenDenied;
+        if (screenDenied) {
+          const message = cap.message ?? formatPermissionMessage('screen-recording-denied');
+          out.message = message;
+          this.sendSystemAudioPermissionDenied(
+            message,
+            cap.titleKey ?? permissionTitleKey('screen-recording-denied'),
+          );
+        }
+      } catch {
+        /* probe failure — continue and try to start capture */
+      }
+    }
+
+    try {
+      // Ambient AI Chat skips capture at meeting start. Listen is an explicit
+      // request for audio — build the pipeline now without flipping the setting.
+      if (!this.microphoneCapture || !this.systemAudioCapture || !this.googleSTT || !this.googleSTT_User) {
+        if (ambientChatEnabled) {
+          console.warn('[Main] Listen requested while Ambient AI Chat is ON — starting mic/system capture for this session.');
+        }
+        await this.setupSystemAudioPipeline();
+      }
+      this.startCaptureChannels('ensureListenAudioCapture');
+    } catch (err) {
+      console.error('[Main] ensureListenAudioCapture failed:', err);
+      out.message = (err as Error)?.message || 'Failed to start Listen audio capture.';
+    }
+
+    out.mic = !!(this.microphoneCapture && this.googleSTT_User);
+    out.system = !!(this.systemAudioCapture && this.googleSTT);
+    out.ok = out.mic || out.system;
+
+    if (process.platform === 'darwin' && out.system) {
+      out.sameDevice = this.detectSameInputOutputDevice() ?? null;
+      if (out.sameDevice && !out.message) {
+        out.message = formatPermissionMessage('mac-same-device-input-output', { device: out.sameDevice });
+      }
+    }
+
+    if (!out.system && !out.message) {
+      out.message = screenDenied
+        ? undefined
+        : 'System audio is not capturing the other person. Grant Screen Recording to Natively, and play call audio through speakers or headphones (not a virtual cable Natively cannot tap).';
+    }
+    return out;
+  }
+
+  /**
    * Start the mic and system capture channels with per-channel failure
    * isolation (F-105). MicrophoneCapture.start() rethrows by design (the
    * native open is lazy and happens inside start()); running the four starts

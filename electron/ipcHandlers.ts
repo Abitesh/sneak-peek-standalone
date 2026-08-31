@@ -843,6 +843,28 @@ export function initializeIpcHandlers(appState: AppState): void {
     appState.finalizeMicSTT();
   });
 
+  // Listen press: ensure mic + system/loopback are actually running (Ambient AI
+  // Chat and failed pipeline starts otherwise leave interviewer STT dead).
+  safeHandle('ensure-listen-audio-capture', async () => {
+    return appState.ensureListenAudioCapture();
+  });
+
+  // Analyze safety net: interviewer/user lines SessionTracker already has for
+  // the Listen window, in case renderer buffers missed system-audio IPC.
+  safeHandle('get-listen-window-transcript', async (_event, lastSeconds?: number) => {
+    const secs = typeof lastSeconds === 'number' && lastSeconds > 0 ? Math.min(lastSeconds, 600) : 120;
+    try {
+      return (
+        appState.getIntelligenceManager?.()?.getListenWindowRoles?.(secs) ?? {
+          interviewer: '',
+          user: '',
+        }
+      );
+    } catch {
+      return { interviewer: '', user: '' };
+    }
+  });
+
   // IPC handler for analyzing image from file path
   safeHandle('analyze-image-file', async (event, filePath: string) => {
     // Guard: only allow reading files within the app's own userData directory

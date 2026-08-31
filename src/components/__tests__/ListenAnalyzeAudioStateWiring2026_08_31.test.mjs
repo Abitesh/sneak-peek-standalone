@@ -17,13 +17,43 @@ const topControlBarSource = fs.readFileSync(path.resolve(here, '../TopControlBar
 test('Listen actually starts the mic/STT pipeline, expands the overlay, and clears buffers', () => {
   assert.match(
     nativelyInterfaceSource,
-    /const handleStartListening = \(\) => \{[\s\S]*?setIsManualRecording\(true\);[\s\S]*?setIsExpanded\(true\);[\s\S]*?getMeetingActive\(\)[\s\S]*?startMeeting\(\)/,
-    'BUG: Listen must set isManualRecording, force the overlay open (setIsExpanded(true)), and wire the real meeting mic/STT path (getMeetingActive/startMeeting) instead of only flipping a UI flag.',
+    /const handleStartListening = \(\) => \{[\s\S]*?setIsManualRecording\(true\);[\s\S]*?setIsExpanded\(true\);[\s\S]*?getMeetingActive\(\)[\s\S]*?ensureListenAudioCapture/,
+    'BUG: Listen must set isManualRecording, force the overlay open (setIsExpanded(true)), verify meeting active, and ensure mic+system capture (ensureListenAudioCapture).',
   );
   assert.match(
     nativelyInterfaceSource,
     /const handleStartListening = \(\) => \{[\s\S]*?setVoiceInput\(''\);[\s\S]*?voiceInputRef\.current = '';[\s\S]*?setManualTranscript\(''\);[\s\S]*?manualTranscriptRef\.current = '';[\s\S]*?interviewerListenRef\.current = '';/,
     'BUG: Listen must clear user AND interviewer Listen buffers before starting a new turn.',
+  );
+});
+
+test('Listen ensures system audio capture is running (Ambient AI Chat / failed starts)', () => {
+  assert.match(
+    nativelyInterfaceSource,
+    /ensureListenAudioCapture/,
+    'BUG: Listen must call ensureListenAudioCapture so system/loopback starts even when Ambient AI Chat skipped capture at meeting start.',
+  );
+  const mainSource = fs.readFileSync(
+    path.resolve(here, '../../../electron/main.ts'),
+    'utf8',
+  );
+  assert.match(
+    mainSource,
+    /async ensureListenAudioCapture\(\)/,
+    'BUG: main process must expose ensureListenAudioCapture for Listen.',
+  );
+  assert.match(
+    mainSource,
+    /Ambient AI Chat is ON — starting mic\/system capture/,
+    'BUG: Listen must override Ambient AI Chat and start capture when the user explicitly presses Listen.',
+  );
+});
+
+test('Analyze falls back to SessionTracker interviewer lines when Listen buffers are empty', () => {
+  assert.match(
+    nativelyInterfaceSource,
+    /getListenWindowTranscript/,
+    'BUG: Analyze must query getListenWindowTranscript when Them/You Listen buffers are empty.',
   );
 });
 

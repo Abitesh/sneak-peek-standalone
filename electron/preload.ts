@@ -453,6 +453,17 @@ interface ElectronAPI {
   debugInjectTranscript: (segments: Array<{ speaker?: string; text: string; timestamp?: number; confidence?: number }>)
     => Promise<{ success: boolean; injected?: number; error?: string }>;
   finalizeMicSTT: () => Promise<void>;
+  ensureListenAudioCapture: () => Promise<{
+    ok: boolean;
+    meetingActive: boolean;
+    mic: boolean;
+    system: boolean;
+    ambientChatEnabled: boolean;
+    screenDenied: boolean;
+    sameDevice: string | null;
+    message?: string;
+  }>;
+  getListenWindowTranscript: (lastSeconds?: number) => Promise<{ interviewer: string; user: string }>;
   getRecentMeetings: () => Promise<
     Array<{ id: string; title: string; date: string; duration: string; summary: string }>
   >;
@@ -1862,6 +1873,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   debugInjectTranscript: (segments: Array<{ speaker?: string; text: string; timestamp?: number; confidence?: number }>) =>
     ipcRenderer.invoke('debug-inject-transcript', segments),
   finalizeMicSTT: () => ipcRenderer.invoke('finalize-mic-stt'),
+  ensureListenAudioCapture: () => ipcRenderer.invoke('ensure-listen-audio-capture'),
+  getListenWindowTranscript: (lastSeconds?: number) =>
+    ipcRenderer.invoke('get-listen-window-transcript', lastSeconds),
   getRecentMeetings: () => ipcRenderer.invoke('get-recent-meetings'),
   getMeetingDetails: (id: string) => ipcRenderer.invoke('get-meeting-details', id),
   searchGlobalMeetings: (query: string, filters?: any) => ipcRenderer.invoke('search:global-meetings', { query, filters }),

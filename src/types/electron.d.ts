@@ -425,6 +425,17 @@ export interface ElectronAPI {
   debugInjectTranscript: (segments: Array<{ speaker?: string; text: string; timestamp?: number; confidence?: number }>)
     => Promise<{ success: boolean; injected?: number; error?: string }>
   finalizeMicSTT: () => Promise<void>
+  ensureListenAudioCapture: () => Promise<{
+    ok: boolean
+    meetingActive: boolean
+    mic: boolean
+    system: boolean
+    ambientChatEnabled: boolean
+    screenDenied: boolean
+    sameDevice: string | null
+    message?: string
+  }>
+  getListenWindowTranscript: (lastSeconds?: number) => Promise<{ interviewer: string; user: string }>
   getRecentMeetings: () => Promise<Array<{ id: string; title: string; date: string; duration: string; summary: string }>>
   getMeetingDetails: (id: string) => Promise<any>
   searchGlobalMeetings: (query: string, filters?: any) => Promise<{ enabled: boolean; results: any[] }>

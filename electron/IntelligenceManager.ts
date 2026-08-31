@@ -159,6 +159,27 @@ export class IntelligenceManager extends EventEmitter {
         return this.session.getFormattedContext(lastSeconds);
     }
 
+    /**
+     * Listen → Analyze safety net: role-split transcript for the last N seconds
+     * (includes interim interviewer speech). Used when the renderer Listen
+     * buffers miss system-audio chunks that SessionTracker already stored.
+     */
+    getListenWindowRoles(lastSeconds: number = 120): { interviewer: string; user: string } {
+        const items = this.session.getContextWithInterim(lastSeconds);
+        const interviewer: string[] = [];
+        const user: string[] = [];
+        for (const item of items) {
+            const text = (item.text || '').trim();
+            if (!text) continue;
+            if (item.role === 'interviewer') interviewer.push(text);
+            else if (item.role === 'user') user.push(text);
+        }
+        return {
+            interviewer: interviewer.join(' ').trim(),
+            user: user.join(' ').trim(),
+        };
+    }
+
     getLastInterviewerTurn(): string | null {
         return this.session.getLastInterviewerTurn();
     }
