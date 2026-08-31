@@ -5962,10 +5962,17 @@ export class AppState {
   }
 
   public finalizeMicSTT(): void {
-    // We only want to finalize the user microphone, because the context is Manual Answer
+    // Listen → Analyze needs BOTH channels flushed: user mic (what you said)
+    // and system/loopback (what the other person said on the call). End-meeting
+    // already finalizes both; Analyze used to finalize mic only, so interviewer
+    // finals never landed in the Listen buffers before the question was built.
     if (this.googleSTT_User?.finalize) {
-      console.log('[Main] Finalizing STT');
+      console.log('[Main] Finalizing user mic STT');
       this.googleSTT_User.finalize();
+    }
+    if (this.googleSTT?.finalize) {
+      console.log('[Main] Finalizing system/interviewer STT');
+      this.googleSTT.finalize();
     }
   }
 

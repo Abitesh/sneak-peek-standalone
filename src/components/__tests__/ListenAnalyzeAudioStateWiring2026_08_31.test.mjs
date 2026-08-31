@@ -22,8 +22,21 @@ test('Listen actually starts the mic/STT pipeline, expands the overlay, and clea
   );
   assert.match(
     nativelyInterfaceSource,
-    /const handleStartListening = \(\) => \{\s*setVoiceInput\(''\);\s*voiceInputRef\.current = '';\s*setManualTranscript\(''\);\s*manualTranscriptRef\.current = '';/,
-    'BUG: Listen must clear both the React state AND the refs for voiceInput/manualTranscript before starting a new turn.',
+    /const handleStartListening = \(\) => \{[\s\S]*?setVoiceInput\(''\);[\s\S]*?voiceInputRef\.current = '';[\s\S]*?setManualTranscript\(''\);[\s\S]*?manualTranscriptRef\.current = '';[\s\S]*?interviewerListenRef\.current = '';/,
+    'BUG: Listen must clear user AND interviewer Listen buffers before starting a new turn.',
+  );
+});
+
+test('Listen accumulates system/interviewer audio during a session (other person on the call)', () => {
+  assert.match(
+    nativelyInterfaceSource,
+    /isRecordingRef\.current && transcript\.speaker === 'interviewer'/,
+    'BUG: while Listen is active, interviewer (system audio) transcripts must enter Listen-scoped buffers — not only the rolling bar.',
+  );
+  assert.match(
+    nativelyInterfaceSource,
+    /Interviewer: \$\{them\}/,
+    'BUG: Analyze must include the other person\'s speech in the question sent to the AI.',
   );
 });
 
@@ -48,6 +61,18 @@ test('Analyze auto-stops Listen, finalizes STT, and sends to the AI', () => {
     nativelyInterfaceSource,
     /const handleAnalyzeNow = async \(\) => \{[\s\S]*?setIsManualRecording\(false\);[\s\S]*?finalizeMicSTT/,
     'BUG: Analyze must stop recording and finalize the mic STT turn.',
+  );
+});
+
+test('finalizeMicSTT flushes BOTH user mic and system/interviewer STT channels', () => {
+  const mainSource = fs.readFileSync(
+    path.resolve(here, '../../../electron/main.ts'),
+    'utf8',
+  );
+  assert.match(
+    mainSource,
+    /finalizeMicSTT\(\)[\s\S]*?googleSTT_User\?\.finalize[\s\S]*?googleSTT\?\.finalize/,
+    'BUG: Analyze finalize must flush system audio STT as well as the user mic, or the other person\'s finals never land in Listen buffers.',
   );
 });
 

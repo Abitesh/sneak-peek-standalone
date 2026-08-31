@@ -1113,6 +1113,13 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
   const isRecordingRef = useRef(false); // Ref to track recording state (avoids stale closure)
   const [manualTranscript, setManualTranscript] = useState('');
   const manualTranscriptRef = useRef<string>('');
+  // Listen-scoped interviewer (system audio) buffers — parallel to voiceInput /
+  // manualTranscript for the user mic. Rolling transcript is meeting-lifetime
+  // and capped; these are only the window since Listen started.
+  const [interviewerListenFinal, setInterviewerListenFinal] = useState('');
+  const interviewerListenRef = useRef('');
+  const [interviewerListenPartial, setInterviewerListenPartial] = useState('');
+  const interviewerListenPartialRef = useRef('');
   // Listen → Analyze audio state machine (Idle → Listening → Speaking detected
   // → Transcribing → Processing). Deliberately independent from
   // `showAnswerPanel` so the indicator stays visible for the whole session
@@ -4835,8 +4842,9 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
     // Real-time Transcripts
     cleanups.push(
       window.electronAPI.onNativeAudioTranscript((transcript) => {
-        // When Answer button is active, capture USER transcripts for voice input
-        // Use ref to avoid stale closure issue
+        // Listen session: accumulate BOTH user mic and system/interviewer audio
+        // for Analyze/Enter. Capture already runs both channels via startMeeting;
+        // this gate only decides which chunks enter the Listen-scoped buffers.
         if (isRecordingRef.current && transcript.speaker === 'user') {
           // First sound from the user's mic after Listen — surface "Speaking
           // detected" so the state machine reflects real audio, not just the
@@ -4858,18 +4866,34 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
             setManualTranscript(transcript.text);
             manualTranscriptRef.current = transcript.text;
           }
-          return; // Don't add to messages while recording
+          return; // Don't add user mic lines to the rolling interviewer bar
         }
 
-        // Ignore user mic transcripts when not recording
-        // Only interviewer (system audio) transcripts should appear in chat
+        if (isRecordingRef.current && transcript.speaker === 'interviewer') {
+          setAudioSessionState((prev) => (prev === 'listening' ? 'speaking' : prev));
+          if (transcript.final) {
+            setInterviewerListenFinal((prev) => {
+              const updated = mergeTranscriptChunks(prev, transcript.text);
+              interviewerListenRef.current = updated;
+              return updated;
+            });
+            setInterviewerListenPartial('');
+            interviewerListenPartialRef.current = '';
+          } else {
+            setInterviewerListenPartial(transcript.text);
+            interviewerListenPartialRef.current = transcript.text;
+          }
+          // Fall through so the rolling interviewer bar still updates.
+        }
+
+        // Ignore user mic transcripts when not in a Listen session
         if (transcript.speaker === 'user') {
-          return; // Skip user mic input - only relevant when Answer button is active
+          return;
         }
 
         // Only show interviewer (system audio) transcripts in rolling bar
         if (transcript.speaker !== 'interviewer') {
-          return; // Safety check for any other speaker types
+          return;
         }
 
         // Route to rolling transcript bar — partials debounced; finals commit immediately.
@@ -6168,7 +6192,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
     return () => cleanups.forEach((fn) => fn());
   }, [currentModel, queueToken, flushToken]); // Ensure tracking captures correct model
 
-  /** Stop mic capture without sending the transcript to the model. */
+  /** Stop mic + system Listen capture without sending the transcript to the model. */
   const handleStopListening = () => {
     if (!isRecordingRef.current && !isManualRecording) return;
     isRecordingRef.current = false;
@@ -6180,6 +6204,11 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
     voiceInputRef.current = '';
     setManualTranscript('');
     manualTranscriptRef.current = '';
+    setInterviewerListenFinal('');
+    interviewerListenRef.current = '';
+    setInterviewerListenPartial('');
+    interviewerListenPartialRef.current = '';
+    setAudioSessionState('idle');
   };
 
   // The shared `isProcessing` flag is flipped false by several different
@@ -6193,27 +6222,28 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
     }
   }, [isProcessing, audioSessionState]);
 
-  // ── Listen ── Start mic/STT capture for a manual push-to-talk turn.
+  // ── Listen ── Start mic + system-audio STT capture for a push-to-talk turn.
   //
   // NativelyInterface only mounts as the overlay's *meeting* UI (see
   // App.tsx's `isOverlayWindow` branch) — the window swap to this component
   // happens inside main's startMeeting(), which is what actually constructs
-  // MicrophoneCapture + the user STT provider and starts them
+  // MicrophoneCapture + SystemAudioCapture and both STT providers
   // (setupSystemAudioPipeline / startCaptureChannels in electron/main.ts).
-  // So by the time this button is clickable, the real mic/STT pipeline is
-  // already running continuously for the life of the meeting; "Listen" gates
-  // which transcript chunks the UI accumulates (see `isRecordingRef` check in
-  // the onNativeAudioTranscript listener), it does not need to open the mic
-  // itself. The defensive `getMeetingActive`/`startMeeting` call below covers
-  // the one edge case where that invariant doesn't hold (e.g. a dev harness
-  // rendering this component without a real meeting) by reusing the exact
-  // same cross-platform mic/STT start path the Launcher uses — never a new,
-  // untested capture path.
+  // So by the time this button is clickable, BOTH channels are already running
+  // for the life of the meeting; "Listen" gates which transcript chunks the UI
+  // accumulates (see `isRecordingRef` in onNativeAudioTranscript) — mic (you)
+  // and system/loopback (the other person on the call). The defensive
+  // getMeetingActive/startMeeting call below covers the edge case where that
+  // invariant doesn't hold.
   const handleStartListening = () => {
     setVoiceInput('');
     voiceInputRef.current = '';
     setManualTranscript('');
     manualTranscriptRef.current = '';
+    setInterviewerListenFinal('');
+    interviewerListenRef.current = '';
+    setInterviewerListenPartial('');
+    interviewerListenPartialRef.current = '';
     isRecordingRef.current = true; // Update ref immediately
     setIsManualRecording(true);
     setAudioSessionState('listening');
@@ -6228,21 +6258,18 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
       );
   };
 
-  // ── Analyze ── Auto-stop the Listen capture, finalize the STT turn, and
-  // send the transcribed question to the AI. Split out of the old
-  // handleAnswerNow toggle so TopControlBar can expose Listen/Analyze as two
-  // distinct actions (Problem 47) while the keyboard shortcut / phone-bridge
-  // "answer" action and the legacy quick-action chip keep their existing
-  // toggle behavior via `handleAnswerNow` below.
+  // ── Analyze ── Auto-stop the Listen capture, finalize BOTH STT channels, and
+  // send the combined interviewer + user transcript to the AI.
   const handleAnalyzeNow = async () => {
     if (!isManualRecording) return;
     if (!tryBeginOverlayAction('answer_now')) return;
     try {
-      // Stop recording, finalize the active STT session, then wait a beat for
+      // Stop recording, finalize mic + system STT, then wait a beat for
       // final transcript chunks to land before consuming the transcript.
       isRecordingRef.current = false;
       setIsManualRecording(false);
       setManualTranscript('');
+      setInterviewerListenPartial('');
       setAudioSessionState('transcribing');
 
       window.electronAPI
@@ -6254,14 +6281,26 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
       const currentAttachments = attachedContext;
       setAttachedContext([]);
 
-      const question = mergeTranscriptChunks(
+      const me = mergeTranscriptChunks(
         voiceInputRef.current,
         manualTranscriptRef.current,
       ).trim();
+      const them = mergeTranscriptChunks(
+        interviewerListenRef.current,
+        interviewerListenPartialRef.current,
+      ).trim();
+      const question = [them && `Interviewer: ${them}`, me && `Me: ${me}`]
+        .filter(Boolean)
+        .join('\n')
+        .trim();
       setVoiceInput('');
       voiceInputRef.current = '';
       setManualTranscript('');
       manualTranscriptRef.current = '';
+      setInterviewerListenFinal('');
+      interviewerListenRef.current = '';
+      setInterviewerListenPartial('');
+      interviewerListenPartialRef.current = '';
 
       if (!question && currentAttachments.length === 0) {
         setAudioSessionState('idle');
@@ -8659,12 +8698,29 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
                         <span className="text-[10px] opacity-70">{t('Live transcription')}</span>
                       )}
                     </div>
-                    {(manualTranscript || voiceInput) &&
+                    {(manualTranscript || voiceInput || interviewerListenFinal || interviewerListenPartial) &&
                       (audioSessionState === 'listening' || audioSessionState === 'speaking') && (
-                        <div className="w-full max-w-[90%] self-end rounded-[14px] rounded-tr-[4px] border border-current/20 bg-current/5 px-3 py-2 text-left text-[12.5px]">
-                          {voiceInput}
-                          {voiceInput && manualTranscript ? ' ' : ''}
-                          {manualTranscript}
+                        <div className="w-full max-w-[90%] self-end space-y-1.5 text-left text-[12.5px]">
+                          {(interviewerListenFinal || interviewerListenPartial) && (
+                            <div className="rounded-[14px] rounded-tl-[4px] border border-current/20 bg-current/5 px-3 py-2">
+                              <div className="mb-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] opacity-60">
+                                {t('Them')}
+                              </div>
+                              {interviewerListenFinal}
+                              {interviewerListenFinal && interviewerListenPartial ? ' ' : ''}
+                              {interviewerListenPartial}
+                            </div>
+                          )}
+                          {(voiceInput || manualTranscript) && (
+                            <div className="rounded-[14px] rounded-tr-[4px] border border-current/20 bg-current/5 px-3 py-2">
+                              <div className="mb-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] opacity-60">
+                                {t('You')}
+                              </div>
+                              {voiceInput}
+                              {voiceInput && manualTranscript ? ' ' : ''}
+                              {manualTranscript}
+                            </div>
+                          )}
                         </div>
                       )}
                   </div>
