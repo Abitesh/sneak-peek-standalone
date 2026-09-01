@@ -3894,6 +3894,17 @@ export class AppState {
       // interleaved with the owner's audio it garbles the interviewer
       // transcript (F-102).
       if (this.systemAudioCapture === capture) {
+        // Check if chunk is all zeros before forwarding to STT
+        let allZeros = true;
+        for (let i = 0; i < chunk.length; i++) {
+          if (chunk[i] !== 0) {
+            allZeros = false;
+            break;
+          }
+        }
+        if (chunkCount <= 3 || chunkCount % 500 === 0) {
+          console.log(`${prefix}  \u2192 write() called with ${chunk.length}B${allZeros ? ' (ALL ZEROS)' : ' (real audio)'}`);
+        }
         this.googleSTT?.write(chunk);
         // Smart Turn ring buffer (256 KB, interviewer channel only). Cheap
         // int16 copy; skipped entirely while Auto Answer is off.

@@ -508,7 +508,13 @@ export class LocalWhisperSTT extends EventEmitter {
     }
 
     write(chunk: Buffer): void {
-        if (!this.isActive || !this.vad) return;
+        if (!this.isActive || !this.vad) {
+            if (this.taskCounter <= 1) console.log(`[LocalWhisperSTT/${this.channelLabel}] write() called but NOT READY: isActive=${this.isActive}, vad=${!!this.vad}`);
+            return;
+        }
+        if (this.taskCounter <= 1 || this.taskCounter % 500 === 0) {
+            console.log(`[LocalWhisperSTT/${this.channelLabel}] write() received ${chunk.length}B (chunk #${this.taskCounter})`);
+        }
         const f32 = resampleToF32(chunk, this.inputSampleRate);
         const segs = this.vad.push(f32);
         segs.forEach(s => this.dispatchFinal(s.samples));

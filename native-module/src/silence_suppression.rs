@@ -151,6 +151,8 @@ pub struct SilenceSuppressor {
     decimation_factor: f64,
     /// Reusable buffer for decimated 16kHz samples (avoids allocation per frame)
     vad_buf: Vec<i16>,
+    /// Channel identifier for logging ("system" or "mic")
+    channel: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -183,6 +185,10 @@ pub enum SpeechEdge {
 
 impl SilenceSuppressor {
     pub fn new(config: SilenceSuppressionConfig) -> Self {
+        Self::new_with_channel(config, "unknown")
+    }
+
+    pub fn new_with_channel(config: SilenceSuppressionConfig, channel: &str) -> Self {
         let now = Instant::now();
         let initial_threshold = config.speech_threshold_rms;
         let decimation_factor = config.native_sample_rate as f64 / 16000.0;
@@ -205,8 +211,9 @@ impl SilenceSuppressor {
         let vad = Vad::new_with_rate_and_mode(VadSampleRate::Rate16kHz, mode_clone);
 
         println!(
-            "[SilenceSuppressor] Created: threshold={} (adaptive), hangover={}ms, \
+            "[SilenceSuppressor][{}] Created: threshold={} (adaptive), hangover={}ms, \
              keepalive={}ms, native_rate={}Hz, decimation={:.2}x, use_vad={}, VAD_mode={}",
+            channel,
             config.speech_threshold_rms,
             config.speech_hangover.as_millis(),
             config.silence_keepalive_interval.as_millis(),
@@ -229,6 +236,7 @@ impl SilenceSuppressor {
             frames_sent: 0,
             frames_suppressed: 0,
             was_speaking: false, // Prevents false edge detection immediately after init
+            channel: channel.to_string(),
         }
     }
 
@@ -250,6 +258,7 @@ impl SilenceSuppressor {
     pub fn process_edges(&mut self, frame: &[i16]) -> (FrameAction, SpeechEdge) {
         let now = Instant::now();
         let rms = calculate_rms(frame);
+        eprintln!("[RUST-DSP][{}] RMS={:.2} threshold={:.2} VAD_enabled={} state={:?}", self.channel, rms, self.adaptive_threshold, self.config.use_vad, self.state);
 
         // ── TWO-STAGE GATE ──────────────────────────────────────────────
         // Stage 1: Fast RMS check (rejects obvious silence cheaply)
@@ -268,6 +277,7 @@ impl SilenceSuppressor {
 
         // ALWAYS check for speech first - immediate response
         if has_speech {
+            eprintln!("[RUST-DSP][{}] → FrameAction::Send (REAL AUDIO, has_speech=true)", self.channel);
             self.state = SuppressionState::Active;
             self.last_speech_time = now;
             self.frames_sent += 1;
@@ -292,6 +302,7 @@ impl SilenceSuppressor {
                 } else {
                     // Still in hangover - send full frame
                     self.state = SuppressionState::Hangover;
+                    eprintln!("[RUST-DSP][{}] → FrameAction::Send (HANGOVER - still sending speech tail)", self.channel);
                     self.frames_sent += 1;
                     return (FrameAction::Send(frame.to_vec()), SpeechEdge::None);
                 }
@@ -311,10 +322,12 @@ impl SilenceSuppressor {
         let edge = if speech_just_ended { SpeechEdge::Ended } else { SpeechEdge::None };
         // Check if time for keepalive
         if now.duration_since(self.last_keepalive_time) >= self.config.silence_keepalive_interval {
+            eprintln!("[RUST-DSP][{}] → FrameAction::SendSilence (KEEPALIVE - zero-filled silence frame)", self.channel);
             self.last_keepalive_time = now;
             self.frames_sent += 1;
             (FrameAction::SendSilence, edge)
         } else {
+            eprintln!("[RUST-DSP][{}] → FrameAction::Suppress (no speech, no keepalive due yet)", self.channel);
             self.frames_suppressed += 1;
             (FrameAction::Suppress, edge)
         }
@@ -392,6 +405,7 @@ impl SilenceSuppressor {
         self.noise_floor_ema = self.config.adaptive_min_floor;
         self.adaptive_threshold = self.config.speech_threshold_rms;
         self.was_speaking = false;
+        eprintln!("[RUST-DSP][{}] Reset state machine", self.channel);
     }
 }
 

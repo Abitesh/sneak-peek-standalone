@@ -195,6 +195,11 @@ extern "C" fn proc(
     ctx: Option<&mut Ctx>,
 ) -> os::Status {
     let ctx = ctx.unwrap();
+    static PROC_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let count = PROC_COUNTER.fetch_add(1, Ordering::Relaxed);
+    if count <= 3 || count % 500 == 0 {
+        eprintln!("[CoreAudio-Tap-Proc] Callback invoked (count={})", count);
+    }
 
     // BUGFIX: Do NOT overwrite with the overall aggregate device actual_sample_rate().
     // The macOS Global Process Tap forces the actual input_data buffer to operate strictly

@@ -273,7 +273,10 @@ export class GoogleSTT extends EventEmitter {
         // no purpose here and only corrupts recognition. Real audio is never
         // bit-exactly zero (noise floor/dither), so an all-zero chunk is
         // unambiguously a keepalive.
-        if (this.isAllZeroChunk(audioData)) return;
+        if (this.isAllZeroChunk(audioData)) {
+            console.log(`[GoogleSTT/${this.label}] ZERO-FILLED chunk detected, silently dropping (keepalive)`);
+            return;
+        }
 
         // Diagnostic: capture the exact non-keepalive bytes handed to Google.
         if (this.dumpStream) {

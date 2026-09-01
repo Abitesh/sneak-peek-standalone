@@ -254,9 +254,10 @@ impl SystemAudioCapture {
         let device_id = self.device_id.clone();
 
         // ALL init + DSP runs in background thread — start() returns INSTANTLY
+        println!("[SystemAudioCapture] start() called - spawning background thread for system audio");
         self.capture_thread = Some(thread::spawn(move || {
             // 1. SpeakerInput Init (takes 5-7 seconds — runs OFF main thread)
-            println!("[SystemAudioCapture] Background init starting...");
+            println!("[SystemAudioCapture] [LIFECYCLE] Background thread started (system audio capture)");
             let input = match speaker::SpeakerInput::new(device_id.clone()) {
                 Ok(i) => i,
                 Err(e) => {
@@ -338,10 +339,13 @@ impl SystemAudioCapture {
             // 2. DSP loop with silence suppression + WebRTC VAD.
             // Suppressor operates on the EMITTED-rate stream, so its internal VAD
             // decimation is a no-op when emitted_rate == 16000.
-            let mut suppressor = SilenceSuppressor::new(SilenceSuppressionConfig {
-                native_sample_rate: emitted_rate,
-                ..SilenceSuppressionConfig::for_system_audio()
-            });
+            let mut suppressor = SilenceSuppressor::new_with_channel(
+                SilenceSuppressionConfig {
+                    native_sample_rate: emitted_rate,
+                    ..SilenceSuppressionConfig::for_system_audio()
+                },
+                "system"
+            );
 
             // 20ms chunks at the EMITTED rate (320 samples at 16kHz).
             let chunk_size = (emitted_rate as usize / 1000) * 20;
@@ -393,11 +397,13 @@ impl SystemAudioCapture {
                     match action {
                         FrameAction::Send(data) => {
                             let bytes = i16_slice_to_le_bytes(&data);
+                            eprintln!("[RUST-EMIT][system] Sending {} bytes to JS (REAL AUDIO)", bytes.len());
                             emitter.push(&bytes, &tsfn);
                         }
                         FrameAction::SendSilence => {
                             // Zero-filled bytes to keep streaming APIs alive.
                             let silence = vec![0u8; chunk_size * 2];
+                            eprintln!("[RUST-EMIT][system] Sending {} bytes to JS (KEEPALIVE - zero-filled)", silence.len());
                             emitter.push(&silence, &tsfn);
                         }
                         FrameAction::Suppress => {
@@ -432,7 +438,7 @@ impl SystemAudioCapture {
 
             // Flush any remaining batched audio before exit.
             emitter.flush(&tsfn);
-            println!("[SystemAudioCapture] DSP thread stopped.");
+            println!("[SystemAudioCapture] DSP thread stopped (system audio capture ended).");
             // stream is dropped here → SpeakerStream::Drop calls stop_with_ch
         }));
 
@@ -596,10 +602,13 @@ impl MicrophoneCapture {
             };
             let emitted_rate = if resampler.is_some() { CANONICAL_STT_RATE } else { native_rate };
 
-            let mut suppressor = SilenceSuppressor::new(SilenceSuppressionConfig {
-                native_sample_rate: emitted_rate,
-                ..SilenceSuppressionConfig::for_microphone()
-            });
+            let mut suppressor = SilenceSuppressor::new_with_channel(
+                SilenceSuppressionConfig {
+                    native_sample_rate: emitted_rate,
+                    ..SilenceSuppressionConfig::for_microphone()
+                },
+                "mic"
+            );
 
             // 20ms chunks at the EMITTED rate (320 samples at 16kHz).
             let chunk_size = (emitted_rate as usize / 1000) * 20;
@@ -669,10 +678,12 @@ impl MicrophoneCapture {
                     match action {
                         FrameAction::Send(data) => {
                             let bytes = i16_slice_to_le_bytes(&data);
+                            eprintln!("[RUST-EMIT][mic] Sending {} bytes to JS (REAL AUDIO)", bytes.len());
                             emitter.push(&bytes, &tsfn);
                         }
                         FrameAction::SendSilence => {
                             let silence = vec![0u8; chunk_size * 2];
+                            eprintln!("[RUST-EMIT][mic] Sending {} bytes to JS (KEEPALIVE - zero-filled)", silence.len());
                             emitter.push(&silence, &tsfn);
                         }
                         FrameAction::Suppress => {
