@@ -397,13 +397,11 @@ impl SystemAudioCapture {
                     match action {
                         FrameAction::Send(data) => {
                             let bytes = i16_slice_to_le_bytes(&data);
-                            eprintln!("[RUST-EMIT][system] Sending {} bytes to JS (REAL AUDIO)", bytes.len());
                             emitter.push(&bytes, &tsfn);
                         }
                         FrameAction::SendSilence => {
                             // Zero-filled bytes to keep streaming APIs alive.
                             let silence = vec![0u8; chunk_size * 2];
-                            eprintln!("[RUST-EMIT][system] Sending {} bytes to JS (KEEPALIVE - zero-filled)", silence.len());
                             emitter.push(&silence, &tsfn);
                         }
                         FrameAction::Suppress => {
@@ -678,12 +676,10 @@ impl MicrophoneCapture {
                     match action {
                         FrameAction::Send(data) => {
                             let bytes = i16_slice_to_le_bytes(&data);
-                            eprintln!("[RUST-EMIT][mic] Sending {} bytes to JS (REAL AUDIO)", bytes.len());
                             emitter.push(&bytes, &tsfn);
                         }
                         FrameAction::SendSilence => {
                             let silence = vec![0u8; chunk_size * 2];
-                            eprintln!("[RUST-EMIT][mic] Sending {} bytes to JS (KEEPALIVE - zero-filled)", silence.len());
                             emitter.push(&silence, &tsfn);
                         }
                         FrameAction::Suppress => {

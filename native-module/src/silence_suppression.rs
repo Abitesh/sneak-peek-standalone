@@ -139,6 +139,8 @@ pub struct SilenceSuppressor {
     last_keepalive_time: Instant,
     frames_sent: u64,
     frames_suppressed: u64,
+    frames_processed: u64,
+    last_summary_at: Instant,
     /// Exponential moving average of ambient noise floor RMS
     noise_floor_ema: f32,
     /// Current adaptive speech threshold
@@ -235,6 +237,8 @@ impl SilenceSuppressor {
             last_keepalive_time: now,
             frames_sent: 0,
             frames_suppressed: 0,
+            frames_processed: 0,
+            last_summary_at: now,
             was_speaking: false, // Prevents false edge detection immediately after init
             channel: channel.to_string(),
         }
@@ -258,7 +262,7 @@ impl SilenceSuppressor {
     pub fn process_edges(&mut self, frame: &[i16]) -> (FrameAction, SpeechEdge) {
         let now = Instant::now();
         let rms = calculate_rms(frame);
-        eprintln!("[RUST-DSP][{}] RMS={:.2} threshold={:.2} VAD_enabled={} state={:?}", self.channel, rms, self.adaptive_threshold, self.config.use_vad, self.state);
+        self.frames_processed += 1;
 
         // ── TWO-STAGE GATE ──────────────────────────────────────────────
         // Stage 1: Fast RMS check (rejects obvious silence cheaply)
@@ -277,13 +281,14 @@ impl SilenceSuppressor {
 
         // ALWAYS check for speech first - immediate response
         if has_speech {
-            eprintln!("[RUST-DSP][{}] → FrameAction::Send (REAL AUDIO, has_speech=true)", self.channel);
             self.state = SuppressionState::Active;
             self.last_speech_time = now;
             self.frames_sent += 1;
             let edge = if self.was_speaking { SpeechEdge::None } else { SpeechEdge::Started };
             self.was_speaking = true;
-            return (FrameAction::Send(frame.to_vec()), edge);
+            let action = FrameAction::Send(frame.to_vec());
+            self.maybe_log_summary(now, &action, rms, "send");
+            return (action, edge);
         }
 
         // No speech detected - check state
@@ -302,9 +307,10 @@ impl SilenceSuppressor {
                 } else {
                     // Still in hangover - send full frame
                     self.state = SuppressionState::Hangover;
-                    eprintln!("[RUST-DSP][{}] → FrameAction::Send (HANGOVER - still sending speech tail)", self.channel);
                     self.frames_sent += 1;
-                    return (FrameAction::Send(frame.to_vec()), SpeechEdge::None);
+                    let action = FrameAction::Send(frame.to_vec());
+                    self.maybe_log_summary(now, &action, rms, "hangover");
+                    return (action, SpeechEdge::None);
                 }
             }
             SuppressionState::Suppressed => {
@@ -322,14 +328,16 @@ impl SilenceSuppressor {
         let edge = if speech_just_ended { SpeechEdge::Ended } else { SpeechEdge::None };
         // Check if time for keepalive
         if now.duration_since(self.last_keepalive_time) >= self.config.silence_keepalive_interval {
-            eprintln!("[RUST-DSP][{}] → FrameAction::SendSilence (KEEPALIVE - zero-filled silence frame)", self.channel);
             self.last_keepalive_time = now;
             self.frames_sent += 1;
-            (FrameAction::SendSilence, edge)
+            let action = FrameAction::SendSilence;
+            self.maybe_log_summary(now, &action, rms, "keepalive");
+            (action, edge)
         } else {
-            eprintln!("[RUST-DSP][{}] → FrameAction::Suppress (no speech, no keepalive due yet)", self.channel);
             self.frames_suppressed += 1;
-            (FrameAction::Suppress, edge)
+            let action = FrameAction::Suppress;
+            self.maybe_log_summary(now, &action, rms, "suppress");
+            (action, edge)
         }
     }
 
@@ -381,6 +389,40 @@ impl SilenceSuppressor {
     /// Get statistics
     pub fn stats(&self) -> (u64, u64) {
         (self.frames_sent, self.frames_suppressed)
+    }
+
+    fn maybe_log_summary(&mut self, now: Instant, action: &FrameAction, rms: f32, action_label: &str) {
+        let summary_due = self.frames_processed % 128 == 0
+            || now.duration_since(self.last_summary_at) >= Duration::from_secs(3);
+        if !summary_due {
+            return;
+        }
+
+        let action_name = match action {
+            FrameAction::Send(_) => "send",
+            FrameAction::SendSilence => "keepalive",
+            FrameAction::Suppress => "suppress",
+        };
+
+        let state_label = match self.state {
+            SuppressionState::Active => "active",
+            SuppressionState::Hangover => "hangover",
+            SuppressionState::Suppressed => "suppressed",
+        };
+
+        println!(
+            "[RUST-DSP][{}] summary frames={} sent={} suppressed={} rms={:.2} threshold={:.2} state={} last_action={} vad={}",
+            self.channel,
+            self.frames_processed,
+            self.frames_sent,
+            self.frames_suppressed,
+            rms,
+            self.adaptive_threshold,
+            state_label,
+            action_name,
+            self.config.use_vad,
+        );
+        self.last_summary_at = now;
     }
 
     /// Get current state for UI
