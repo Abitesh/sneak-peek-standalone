@@ -1,6 +1,6 @@
 use anyhow::Result;
 use ca::aggregate_device_keys as agg_keys;
-use cidre::{api, arc, av, ca, cat, cf, core_audio as ca, ns, os};
+use cidre::{api, arc, av, cat, cf, core_audio as ca, ns, os};
 use ringbuf::{
     traits::{Producer, Split},
     HeapCons, HeapProd, HeapRb,
