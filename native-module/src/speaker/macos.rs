@@ -2,6 +2,8 @@ use super::core_audio;
 use super::sck;
 use anyhow::Result;
 use ringbuf::HeapCons;
+use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
 
 pub use super::sck::list_output_devices;
 
@@ -71,6 +73,13 @@ enum BackendStream {
 }
 
 impl SpeakerStream {
+    pub fn callback_stats(&self) -> Option<(Arc<AtomicU64>, Arc<AtomicU64>)> {
+        match &self.backend {
+            BackendStream::CoreAudio(s) => Some(s.callback_stats()),
+            BackendStream::Sck(_) => None,
+        }
+    }
+
     pub fn sample_rate(&self) -> u32 {
         match &self.backend {
             BackendStream::CoreAudio(s) => s.sample_rate(),
@@ -107,3 +116,4 @@ impl SpeakerStream {
         }
     }
 }
+

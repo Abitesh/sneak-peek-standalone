@@ -13,6 +13,9 @@ export class SystemAudioCapture extends EventEmitter {
     private detectedSampleRate: number = 48000;
     private monitor: any = null;
     private chunkCount: number = 0;
+    private lastChunkDiagnosticTime: number = 0;
+    private zeroChunkCount: number = 0;
+    private nonZeroChunkCount: number = 0;
     private sampleRatePollTimers: NodeJS.Timeout[] = [];
     // See MicrophoneCapture for the full rationale — same idempotent
     // teardown-tracking pattern. Awaiting stop() guarantees the CoreAudio
@@ -136,6 +139,20 @@ export class SystemAudioCapture extends EventEmitter {
                             allZeros = false;
                             break;
                         }
+                    }
+                    
+                    // Track chunk types for diagnostics
+                    if (allZeros) {
+                        this.zeroChunkCount++;
+                    } else {
+                        this.nonZeroChunkCount++;
+                    }
+                    
+                    // DIAGNOSTIC: Always-on periodic logging (every 3 seconds) to track system audio flow
+                    const now = Date.now();
+                    if (now - this.lastChunkDiagnosticTime > 3000) {
+                        console.log(`[SystemAudioCapture][DIAG] Chunks: total=${this.chunkCount} real=${this.nonZeroChunkCount} silence=${this.zeroChunkCount} ratio=${this.chunkCount > 0 ? ((this.nonZeroChunkCount / this.chunkCount) * 100).toFixed(1) : 0}%`);
+                        this.lastChunkDiagnosticTime = now;
                     }
                     
                     if (this.chunkCount <= 3 || this.chunkCount % 500 === 0) {

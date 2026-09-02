@@ -53,7 +53,7 @@ use std::time::Instant;
 const CANONICAL_STT_RATE: u32 = 16000;
 
 // ============================================================================
-// HELPERS — i16 slice → zero-copy LE bytes
+// HELPERS — i16 slice  zero-copy LE bytes
 // ============================================================================
 
 /// Convert an i16 slice to little-endian bytes.
@@ -296,6 +296,8 @@ impl SystemAudioCapture {
                     return;
                 }
             };
+            let callback_stats = stream.callback_stats();
+
             let mut consumer = match stream.take_consumer() {
                 Some(c) => c,
                 None => {
@@ -356,6 +358,19 @@ impl SystemAudioCapture {
             // PERF: coalesce up to CHUNK_BATCH_COUNT frames into one tsfn call.
             // Cuts V8 boundary crossings 3× with no perceptible STT-side latency.
             let mut emitter = BatchEmitter::new(chunk_size * 2);
+            
+            // DIAGNOSTIC: Track system audio frame flow
+            let mut total_samples_popped = 0u64;
+            let mut health_total_samples_consumed = 0u64;
+            let mut chunks_processed = 0u64;
+            let mut last_diag_time = std::time::Instant::now();
+            
+            // HEALTH CHECK: Detect if CoreAudio Tap callback is never invoked
+            // (known macOS issue where tap starts but callback never fires).
+            // If we get zero samples for 15+ seconds, signal error to trigger JS fallback.
+            let mut last_sample_received = std::time::Instant::now();
+            let mut no_sample_error_sent = false;
+            const NO_SAMPLE_TIMEOUT_SECS: u64 = 15;
 
             loop {
                 if stop_signal.load(Ordering::Relaxed) {
@@ -363,8 +378,56 @@ impl SystemAudioCapture {
                 }
 
                 // Drain ALL available samples from ring buffer (lock-free)
+                let mut samples_in_this_poll = 0;
                 while let Some(sample) = consumer.try_pop() {
                     raw_batch.push(sample);
+                    samples_in_this_poll += 1;
+                }
+                total_samples_popped += samples_in_this_poll as u64;
+                health_total_samples_consumed += samples_in_this_poll as u64;
+                
+                // HEALTH CHECK: Track when we last got samples
+                if samples_in_this_poll > 0 {
+                    last_sample_received = std::time::Instant::now();
+                    no_sample_error_sent = false; // Reset error flag if samples resume
+                }
+                
+                // HEALTH CHECK: If no samples for 15+ seconds, report the
+                // callback and DSP health signals separately.
+                if !no_sample_error_sent && last_sample_received.elapsed().as_secs() > NO_SAMPLE_TIMEOUT_SECS {
+                    let callback_invocations = callback_stats
+                        .as_ref()
+                        .map(|(invocations, _)| invocations.load(Ordering::Relaxed))
+                        .unwrap_or(0);
+                    let callback_samples_pushed = callback_stats
+                        .as_ref()
+                        .map(|(_, pushed)| pushed.load(Ordering::Relaxed))
+                        .unwrap_or(0);
+                    let msg = format!(
+                        "[SystemAudioCapture] FATAL: no audio samples consumed from ring buffer for {}s; callback_invocations={}; callback_samples_pushed={}; dsp_samples_consumed={}",
+                        NO_SAMPLE_TIMEOUT_SECS,
+                        callback_invocations,
+                        callback_samples_pushed,
+                        health_total_samples_consumed
+                    );
+                    eprintln!("{}", msg);
+                    no_sample_error_sent = true;
+                    tsfn.call(
+                        Err(napi::Error::from_reason(msg)),
+                        ThreadsafeFunctionCallMode::NonBlocking,
+                    );
+                }
+                
+                // DIAGNOSTIC: Every 3 seconds, report ring buffer activity
+                if last_diag_time.elapsed().as_secs_f64() > 3.0 {
+                    eprintln!("[SystemAudioCapture][DSP-DIAG] total_samples={} chunks={} avg_samples_per_chunk={}", 
+                        total_samples_popped,
+                        chunks_processed,
+                        if chunks_processed > 0 { total_samples_popped / chunks_processed } else { 0 }
+                    );
+                    total_samples_popped = 0;
+                    chunks_processed = 0;
+                    last_diag_time = std::time::Instant::now();
                 }
 
                 // Resample (anti-aliased) to 16kHz then convert to i16, OR convert
@@ -390,6 +453,7 @@ impl SystemAudioCapture {
                 while frame_buffer.len() >= chunk_size {
                     frame_scratch.clear();
                     frame_scratch.extend(frame_buffer.drain(0..chunk_size));
+                    chunks_processed += 1;
 
                     let (action, edge) = suppressor.process_edges(&frame_scratch);
                     let speech_ended = edge == SpeechEdge::Ended;
@@ -437,7 +501,7 @@ impl SystemAudioCapture {
             // Flush any remaining batched audio before exit.
             emitter.flush(&tsfn);
             println!("[SystemAudioCapture] DSP thread stopped (system audio capture ended).");
-            // stream is dropped here → SpeakerStream::Drop calls stop_with_ch
+            // stream is dropped here  SpeakerStream::Drop calls stop_with_ch
         }));
 
         Ok(())
@@ -463,7 +527,7 @@ impl Drop for SystemAudioCapture {
 //
 // Design: The MicrophoneStream (CPAL handle) is recreated on every start()
 // call. This guarantees the ring buffer consumer is always fresh, allowing
-// seamless stop→start restart cycles (e.g. between meetings).
+// seamless stopstart restart cycles (e.g. between meetings).
 // ============================================================================
 
 #[napi]
@@ -784,3 +848,4 @@ pub fn get_output_devices() -> Vec<AudioDeviceInfo> {
 pub fn get_default_output_device_id() -> String {
     speaker::default_output_device_uid()
 }
+

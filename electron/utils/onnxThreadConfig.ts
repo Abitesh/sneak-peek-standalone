@@ -181,7 +181,7 @@ const _sem: OnnxSemaphore = (() => {
 })();
 
 function readMaxConcurrent(): number {
-    return readIntEnv('NATIVELY_ONNX_MAX_CONCURRENT_SESSIONS', 2);
+    return readIntEnv('NATIVELY_ONNX_MAX_CONCURRENT_SESSIONS', 3);
 }
 
 function readMinFreeGB(): number {

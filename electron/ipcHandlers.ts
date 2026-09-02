@@ -1372,8 +1372,8 @@ export function initializeIpcHandlers(appState: AppState): void {
               // when the files did not cover the question.
               attachedSourceCount: files.length + personalFiles.length,
               attachedFileNames: [
-                ...(files as Array<{ fileName?: string }>).map((f) => f.fileName ?? '').filter(Boolean),
-                ...personalFiles.map((f) => f.fileName).filter(Boolean),
+                ...(files as Array<{ fileName?: string }>).map((f: { fileName?: string }) => f.fileName ?? '').filter(Boolean),
+                ...personalFiles.map((f: any) => f.fileName).filter(Boolean),
               ],
               profileSourceCount: v3ProfileCounts.profileResume + v3ProfileCounts.profileJd + v3ProfileCounts.profileFact,
               resolvedProfileSources: v3ProfileResolved,

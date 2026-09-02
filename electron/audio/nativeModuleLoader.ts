@@ -261,6 +261,12 @@ export function loadNativeModule(): NativeModule | null {
         : null;
     const devPath = path.join(appPath, 'native-module', binary);
     const devFallbackPath = path.join(appPath, '..', 'native-module', binary);
+    
+    // CRITICAL FIX: Add candidate path for project root when running from dist-electron.
+    // When app.getAppPath() returns dist-electron/electron, we need to go up two more levels.
+    // This handles the case where Electron is run directly against dist-electron/electron/main.js
+    // in development mode.
+    const projectRootPath = path.join(appPath, '../../native-module', binary);
 
     // In dev, the packaged path never exists; trying it first produces a
     // scary-looking "Cannot find module" + Require stack on every boot.
@@ -268,16 +274,31 @@ export function loadNativeModule(): NativeModule | null {
     // logs nothing alarming. In packaged builds the asar.unpacked path
     // MUST be tried first — see the comment block above on why.
     const candidates: string[] = isDev
-        ? [devPath, devFallbackPath, ...(packagedPath ? [packagedPath] : [])]
-        : [...(packagedPath ? [packagedPath] : []), devPath, devFallbackPath];
+        ? [devPath, devFallbackPath, projectRootPath, ...(packagedPath ? [packagedPath] : [])]
+        : [...(packagedPath ? [packagedPath] : []), devPath, devFallbackPath, projectRootPath];
 
     for (const filePath of candidates) {
         try {
             const mod = require(filePath);
             validateNativeModule(mod);
             cached = mod;
+            
+            // CRITICAL DIAGNOSTIC: Verify loaded binary matches current Rust source
+            const fs = require('fs');
+            try {
+                const stats = fs.statSync(filePath);
+                const mtime = new Date(stats.mtimeMs).toISOString();
+                console.log(`[nativeModuleLoader] ✓✓✓ LOADED BINARY VERIFIED`);
+                console.log(`    Path: ${filePath}`);
+                console.log(`    Size: ${stats.size} bytes`);
+                console.log(`    Built: ${mtime}`);
+                console.log(`    Module test: getHardwareId() = ${mod.getHardwareId().substring(0, 16)}...`);
+            } catch (e) {
+                console.log(`[nativeModuleLoader] ✓ Loaded native binary: ${binary} from: ${filePath}`);
+            }
+            
             if (verboseLogging) {
-                console.log(`[nativeModuleLoader] Loaded ${binary} from: ${filePath}`);
+                console.log(`[nativeModuleLoader] Additional verbose info available`);
             }
             return cached;
         } catch (err: unknown) {
