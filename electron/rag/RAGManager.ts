@@ -13,37 +13,91 @@ import { LiveRAGIndexer } from './LiveRAGIndexer';
 import { buildRAGPrompt, NO_CONTEXT_FALLBACK, NO_GLOBAL_CONTEXT_FALLBACK } from './prompts';
 import type { ProviderDataScopePolicy } from '../llm/ProviderRouter';
 
-/**
- * Change 1: unified RAG result contract.
- *
- * This is intentionally a small coordination contract. It does not replace the
- * existing meeting, mode, or personal retrieval implementations; it gives the
- * application one place to ask those existing stores for evidence and one stable
- * shape to consume their results.
- */
-export type RAGSource = 'meeting' | 'mode' | 'personal';
-
-export interface UnifiedRAGResult {
-    source: RAGSource;
-    sourceId: string;
-    fileName?: string;
-    text: string;
-    score?: number;
-    vectorScore?: number;
-    lexicalScore?: number;
-    chunkIndex?: number;
-    metadata?: Record<string, unknown>;
+interface ModesManagerLike {
+    getActiveModeInfo(): { id?: string } | null;
+    getActiveMode(): any | null;
+    getModes(): any[];
+    getReferenceFiles(modeId: string): any[];
+    retrieveHybridRaw(
+        mode: any,
+        files: any[],
+        options: {
+            query: string;
+            topK?: number;
+            tokenBudget?: number;
+            allowRerank?: boolean;
+            forceDocumentGrounding?: boolean;
+        },
+    ): Promise<any>;
 }
+
+interface PersonalKnowledgeLike {
+    searchRelevantAsync(query: string, limit?: number): Promise<any[]>;
+    searchRelevant?(query: string, limit?: number): any[];
+    search?(query: string, limit?: number): any[];
+}
+
+/**
+ * Canonical source kinds used by the unified RAG layer.
+ *
+ * These three values deliberately cover only the document/chunk sources that
+ * Change 2 is normalizing. Other evidence families in the application (for
+ * example profile, browser, OKF, and memory evidence) are not silently folded
+ * into this contract.
+ */
+export type RagSourceType = 'meeting' | 'mode' | 'personal';
+export type RAGSource = RagSourceType;
+
+/** A source document independent of its source-specific storage schema. */
+export interface RagDocument {
+    id: string;
+    sourceType: RagSourceType;
+    name: string;
+    path?: string;
+    mimeType?: string;
+    metadata: Record<string, unknown>;
+}
+
+/** A canonical retrievable unit with source-specific provenance normalized into one shape. */
+export interface RagChunk {
+    id: string;
+    documentId: string;
+    text: string;
+    pageStart?: number;
+    pageEnd?: number;
+    section?: string;
+    heading?: string;
+    chunkIndex: number;
+    startOffset?: number;
+    endOffset?: number;
+    speaker?: string;
+    timestampStart?: number;
+    timestampEnd?: number;
+    metadata: Record<string, unknown>;
+}
+
+/** Unified retrieval result. Source and chunk always travel together. */
+export interface RagSearchResult {
+    chunk: RagChunk;
+    score: number;
+    semanticScore?: number;
+    lexicalScore?: number;
+    rerankScore?: number;
+    source: RagDocument;
+}
+
+/** @deprecated Use RagSearchResult. Kept as an export alias for Change 1 callers. */
+export type UnifiedRAGResult = RagSearchResult;
 
 export interface RAGSearchOptions {
-    source?: RAGSource | 'all';
+    source?: RagSourceType | 'all';
     meetingId?: string;
     modeId?: string;
-    userId?: string;
     topK?: number;
     tokenBudget?: number;
+    allowRerank?: boolean;
+    forceDocumentGrounding?: boolean;
 }
-
 
 /**
  * A bare `for await` over an LLM stream blocks forever if the provider hangs
@@ -133,18 +187,18 @@ export class RAGManager {
      * so RAGManager remains safe to construct during AppState startup and does not
      * introduce an eager circular dependency with main.ts/services.
      */
-    private getSourceManagers(): { modesManager: any | null; personalKnowledge: any | null } {
-        let modesManager: any | null = null;
-        let personalKnowledge: any | null = null;
+    private getSourceManagers(): { modesManager: ModesManagerLike | null; personalKnowledge: PersonalKnowledgeLike | null } {
+        let modesManager: ModesManagerLike | null = null;
+        let personalKnowledge: PersonalKnowledgeLike | null = null;
         try {
             const { ModesManager } = require('../services/ModesManager');
-            modesManager = ModesManager.getInstance();
+            modesManager = ModesManager.getInstance() as ModesManagerLike;
         } catch (error) {
             console.warn('[RAGManager] Mode source unavailable:', error);
         }
         try {
             const { getPersonalKnowledgeManager } = require('../personalKnowledge');
-            personalKnowledge = getPersonalKnowledgeManager();
+            personalKnowledge = getPersonalKnowledgeManager() as PersonalKnowledgeLike;
         } catch (error) {
             console.warn('[RAGManager] Personal source unavailable:', error);
         }
@@ -195,19 +249,19 @@ export class RAGManager {
     /**
      * Unified retrieval entry point for the application.
      *
-     * Important: this method only coordinates existing source owners. Meeting
-     * retrieval remains RAGRetriever, mode retrieval remains ModesManager's hybrid
-     * path, and Personal Files remains PersonalKnowledgeManager's existing search.
-     * No ranking, chunking, embedding, or database behavior is duplicated here.
+     * Change 2 adds canonical document/chunk/result objects here without
+     * changing the underlying Meeting, Mode, or Personal retrieval algorithms.
+     * Each adapter preserves only metadata that the existing source actually
+     * provides; missing provenance remains undefined rather than fabricated.
      */
-    async search(query: string, options: RAGSearchOptions = {}): Promise<UnifiedRAGResult[]> {
+    async search(query: string, options: RAGSearchOptions = {}): Promise<RagSearchResult[]> {
         const normalizedQuery = String(query ?? '').trim();
         if (!normalizedQuery) return [];
 
         const source = options.source ?? 'all';
         const topK = Math.max(1, Math.min(50, options.topK ?? 8));
         const tokenBudget = Math.max(1, options.tokenBudget ?? 1800);
-        const results: UnifiedRAGResult[] = [];
+        const results: RagSearchResult[] = [];
         const { modesManager, personalKnowledge } = this.getSourceManagers();
 
         if (source === 'meeting' || source === 'all') {
@@ -217,24 +271,42 @@ export class RAGManager {
                     topK,
                     maxTokens: tokenBudget,
                 });
-                for (const chunk of context.chunks ?? []) {
-                    const c = chunk as any;
-                    const sourceId = String(c.meetingId ?? options.meetingId ?? '');
+
+                const documentCache = new Map<string, RagDocument>();
+                for (const rawChunk of context.chunks ?? []) {
+                    const c = rawChunk as any;
+                    const documentId = String(c.meetingId ?? options.meetingId ?? '');
                     const text = String(c.text ?? '');
-                    if (!sourceId || !text.trim()) continue;
+                    if (!documentId || !text.trim()) continue;
+
+                    let document = documentCache.get(documentId);
+                    if (!document) {
+                        document = this.buildMeetingDocument(documentId);
+                        documentCache.set(documentId, document);
+                    }
+
+                    const chunkId = c.id ?? c.chunkId;
+                    const chunkIndex = Number(c.chunkIndex);
+                    const score = Number(c.finalScore ?? c.similarity);
+                    const semanticScore = Number(c.similarity);
+
                     results.push({
-                        source: 'meeting',
-                        sourceId,
-                        fileName: `meeting:${sourceId}`,
-                        text,
-                        score: Number.isFinite(Number(c.finalScore)) ? Number(c.finalScore) : Number(c.similarity),
-                        vectorScore: Number.isFinite(Number(c.similarity)) ? Number(c.similarity) : undefined,
-                        chunkIndex: Number.isFinite(Number(c.chunkIndex)) ? Number(c.chunkIndex) : undefined,
-                        metadata: {
-                            speaker: c.speaker,
-                            startMs: c.startMs,
-                            endMs: c.endMs,
+                        chunk: {
+                            id: String(chunkId ?? `${documentId}:${Number.isFinite(chunkIndex) ? chunkIndex : results.length}`),
+                            documentId,
+                            text,
+                            chunkIndex: Number.isFinite(chunkIndex) ? chunkIndex : 0,
+                            speaker: typeof c.speaker === 'string' ? c.speaker : undefined,
+                            timestampStart: Number.isFinite(Number(c.startMs)) ? Number(c.startMs) : undefined,
+                            timestampEnd: Number.isFinite(Number(c.endMs)) ? Number(c.endMs) : undefined,
+                            metadata: {
+                                tokenCount: c.tokenCount,
+                                meetingId: documentId,
+                            },
                         },
+                        score: Number.isFinite(score) ? score : 0,
+                        semanticScore: Number.isFinite(semanticScore) ? semanticScore : undefined,
+                        source: document,
                     });
                 }
             } catch (error) {
@@ -244,38 +316,73 @@ export class RAGManager {
 
         if ((source === 'mode' || source === 'all') && modesManager) {
             try {
-                const modeInfo = modesManager.getActiveModeInfo?.() ?? null;
+                const modeInfo = modesManager.getActiveModeInfo() ?? null;
                 const modeId = options.modeId ?? modeInfo?.id;
                 const activeMode = options.modeId
-                    ? (modesManager.getModes?.() ?? []).find((mode: any) => mode?.id === options.modeId) ?? null
-                    : modesManager.getActiveMode?.() ?? null;
-                const files = modeId ? (modesManager.getReferenceFiles?.(modeId) ?? []) : [];
-                if (activeMode && files.length && modesManager.retrieveHybridRaw) {
+                    ? (modesManager.getModes() ?? []).find((mode: any) => mode?.id === options.modeId) ?? null
+                    : modesManager.getActiveMode() ?? null;
+                const files = modeId ? (modesManager.getReferenceFiles(modeId) ?? []) : [];
+
+                if (activeMode && files.length) {
                     const context = await modesManager.retrieveHybridRaw(activeMode, files, {
                         query: normalizedQuery,
                         topK,
                         tokenBudget,
-                        allowRerank: false,
+                        ...(options.allowRerank !== undefined ? { allowRerank: options.allowRerank } : {}),
+                        ...(options.forceDocumentGrounding !== undefined ? { forceDocumentGrounding: options.forceDocumentGrounding } : {}),
                     });
-                    for (const chunk of context?.chunks ?? []) {
-                        const c = chunk as any;
-                        const sourceId = String(c.sourceId ?? '');
+
+                    // ModeContextRetriever's public context uses `snippets`; the
+                    // hybrid raw context uses `chunks` in some builds. Accept both
+                    // without changing either source implementation.
+                    const rawChunks = context?.chunks ?? context?.snippets ?? [];
+                    const fileById = new Map<string, any>(
+                        files.map((file: any) => [String(file?.id ?? ''), file]),
+                    );
+
+                    for (const rawChunk of rawChunks) {
+                        const c = rawChunk as any;
+                        const documentId = String(c.sourceId ?? c.fileId ?? '');
                         const text = String(c.text ?? '');
-                        if (!sourceId || !text.trim()) continue;
+                        if (!documentId || !text.trim()) continue;
+
+                        const file = fileById.get(documentId);
+                        const sourceDocument = this.buildModeDocument(documentId, file, modeId);
+                        const pageRange = this.extractModePageRange(text);
+                        const heading = this.extractModeHeading(text);
+                        const section = this.extractModeSection(heading);
+                        const chunkIndex = Number(c.chunkIndex);
+                        const resolvedChunkIndex = Number.isFinite(chunkIndex) ? chunkIndex : 0;
+                        const score = Number(c.score);
+                        const semanticScore = Number(c.vectorScore);
+                        const lexicalScore = Number(c.ftsScore);
+                        const rerankScore = Number(c.rerankScore);
+
                         results.push({
-                            source: 'mode',
-                            sourceId,
-                            fileName: c.fileName,
-                            text,
-                            score: Number.isFinite(Number(c.score)) ? Number(c.score) : undefined,
-                            vectorScore: Number.isFinite(Number(c.vectorScore)) ? Number(c.vectorScore) : undefined,
-                            lexicalScore: Number.isFinite(Number(c.ftsScore)) ? Number(c.ftsScore) : undefined,
-                            chunkIndex: Number.isFinite(Number(c.chunkIndex)) ? Number(c.chunkIndex) : undefined,
-                            metadata: {
-                                trustLevel: c.trustLevel,
-                                provenance: c.provenance,
-                                ...(c.metadata && typeof c.metadata === 'object' ? c.metadata : {}),
+                            chunk: {
+                                // Mode storage exposes (file_id, chunk_index) as the
+                                // effective public identity. Keep that identity stable
+                                // rather than pretending the internal SQLite row id is
+                                // available to callers.
+                                id: `${documentId}:${resolvedChunkIndex}`,
+                                documentId,
+                                text,
+                                ...(pageRange ? { pageStart: pageRange.start, pageEnd: pageRange.end } : {}),
+                                ...(section ? { section } : {}),
+                                ...(heading ? { heading } : {}),
+                                chunkIndex: resolvedChunkIndex,
+                                metadata: {
+                                    trustLevel: c.trustLevel,
+                                    embeddingSpace: c.embeddingSpace,
+                                    ...(c.provenance && typeof c.provenance === 'object' ? c.provenance : {}),
+                                    ...(c.metadata && typeof c.metadata === 'object' ? c.metadata : {}),
+                                },
                             },
+                            score: Number.isFinite(score) ? score : 0,
+                            semanticScore: Number.isFinite(semanticScore) ? semanticScore : undefined,
+                            lexicalScore: Number.isFinite(lexicalScore) ? lexicalScore : undefined,
+                            rerankScore: Number.isFinite(rerankScore) ? rerankScore : undefined,
+                            source: sourceDocument,
                         });
                     }
                 }
@@ -290,21 +397,41 @@ export class RAGManager {
                     ?? Promise.resolve(personalKnowledge.searchRelevant?.(normalizedQuery, topK)
                         ?? personalKnowledge.search?.(normalizedQuery, topK)
                         ?? []));
+
+                const documentCache = new Map<string, RagDocument>();
                 for (const item of items ?? []) {
-                    const sourceId = String(item.fileId ?? '');
+                    const documentId = String(item.fileId ?? '');
                     const text = String(item.text ?? '');
-                    if (!sourceId || !text.trim()) continue;
+                    const chunkId = String(item.chunkId ?? '');
+                    if (!documentId || !chunkId || !text.trim()) continue;
+
+                    let document = documentCache.get(documentId);
+                    if (!document) {
+                        document = this.buildPersonalDocument(documentId, item);
+                        documentCache.set(documentId, document);
+                    }
+
+                    const chunkMeta = this.getPersonalChunkMetadata(documentId, chunkId);
+                    const chunkIndex = Number(item.chunkIndex ?? chunkMeta?.chunkIndex);
+                    const startOffset = Number(item.startChar ?? chunkMeta?.startChar);
+                    const endOffset = Number(item.endChar ?? chunkMeta?.endChar);
+                    const score = Number(item.score);
+
                     results.push({
-                        source: 'personal',
-                        sourceId,
-                        fileName: item.fileName,
-                        text,
-                        score: Number.isFinite(Number(item.score)) ? Number(item.score) : undefined,
-                        metadata: {
-                            chunkId: item.chunkId,
-                            startChar: item.startChar,
-                            endChar: item.endChar,
+                        chunk: {
+                            id: chunkId,
+                            documentId,
+                            text,
+                            chunkIndex: Number.isFinite(chunkIndex) ? chunkIndex : 0,
+                            ...(Number.isFinite(startOffset) ? { startOffset } : {}),
+                            ...(Number.isFinite(endOffset) ? { endOffset } : {}),
+                            metadata: {
+                                sourceType: 'personal',
+                            },
                         },
+                        score: Number.isFinite(score) ? score : 0,
+                        lexicalScore: Number.isFinite(score) ? score : undefined,
+                        source: document,
                     });
                 }
             } catch (error) {
@@ -315,11 +442,120 @@ export class RAGManager {
         return results;
     }
 
+    /** Build the canonical document object for a meeting from the existing meetings row. */
+    private buildMeetingDocument(meetingId: string): RagDocument {
+        let row: any = null;
+        try {
+            row = this.db.prepare(`
+                SELECT id, title, start_time, duration_ms, source, created_at, summary_json
+                FROM meetings
+                WHERE id = ?
+                LIMIT 1
+            `).get(meetingId);
+        } catch (error) {
+            console.warn('[RAGManager] Failed to load meeting metadata:', error);
+        }
+
+        return {
+            id: meetingId,
+            sourceType: 'meeting',
+            name: String(row?.title ?? meetingId),
+            metadata: {
+                meetingId,
+                ...(row?.start_time !== undefined ? { startTime: row.start_time } : {}),
+                ...(row?.duration_ms !== undefined ? { durationMs: row.duration_ms } : {}),
+                ...(row?.source !== undefined ? { source: row.source } : {}),
+                ...(row?.created_at !== undefined ? { createdAt: row.created_at } : {}),
+                ...(row?.summary_json !== undefined ? { summaryJson: row.summary_json } : {}),
+            },
+        };
+    }
+
+    /** Build a canonical mode document from the existing reference-file record. */
+    private buildModeDocument(documentId: string, file: any, modeId?: string): RagDocument {
+        return {
+            id: documentId,
+            sourceType: 'mode',
+            name: String(file?.fileName ?? file?.file_name ?? documentId),
+            metadata: {
+                ...(modeId ? { modeId } : {}),
+                ...(file?.pageCount !== undefined ? { pageCount: file.pageCount } : {}),
+                ...(file?.extractedPageCount !== undefined ? { extractedPageCount: file.extractedPageCount } : {}),
+            },
+        };
+    }
+
+    /** Build a canonical personal document from the existing search result/DB-backed record. */
+    private buildPersonalDocument(documentId: string, item: any): RagDocument {
+        const row = this.getPersonalDocumentMetadata(documentId);
+        return {
+            id: documentId,
+            sourceType: 'personal',
+            name: String(item.fileName ?? row?.file_name ?? documentId),
+            ...(row?.file_path ? { path: String(row.file_path) } : {}),
+            ...(row?.mime_type ? { mimeType: String(row.mime_type) } : {}),
+            metadata: {
+                fileType: row?.file_type,
+                sizeBytes: row?.size_bytes,
+                contentHash: row?.content_hash,
+                createdAt: row?.created_at,
+                updatedAt: row?.updated_at,
+            },
+        };
+    }
+
+    private getPersonalDocumentMetadata(documentId: string): any | null {
+        try {
+            return this.db.prepare(`
+                SELECT id, file_name, file_path, mime_type, size_bytes, content_hash, created_at, updated_at, file_type
+                FROM personal_files
+                WHERE id = ?
+                LIMIT 1
+            `).get(documentId) ?? null;
+        } catch (error) {
+            console.warn('[RAGManager] Failed to load personal document metadata:', error);
+            return null;
+        }
+    }
+
+    private getPersonalChunkMetadata(documentId: string, chunkId: string): any | null {
+        try {
+            return this.db.prepare(`
+                SELECT chunk_index, start_char, end_char
+                FROM personal_file_chunks
+                WHERE id = ? AND file_id = ?
+                LIMIT 1
+            `).get(chunkId, documentId) ?? null;
+        } catch (error) {
+            console.warn('[RAGManager] Failed to load personal chunk metadata:', error);
+            return null;
+        }
+    }
+
+    private extractModePageRange(text: string): { start: number; end: number } | null {
+        const matches = [...text.matchAll(/\[Page\s+(\d+)\]/gi)]
+            .map(match => Number(match[1]))
+            .filter(Number.isFinite);
+        if (matches.length === 0) return null;
+        return { start: Math.min(...matches), end: Math.max(...matches) };
+    }
+
+    private extractModeHeading(text: string): string | undefined {
+        const match = text.match(/^\s*(?:#{1,3}\s+|(?:\d+(?:\.\d+){0,2}\s+))([^\n]+)/m);
+        return match?.[1]?.trim() || undefined;
+    }
+
+    private extractModeSection(heading?: string): string | undefined {
+        if (!heading) return undefined;
+        const match = heading.match(/^((?:\d+)(?:\.\d+){0,2})\s+/);
+        return match?.[1];
+    }
+
     /**
      * Alias for callers that use retrieval terminology. Kept intentionally thin so
      * there is still exactly one unified search implementation.
      */
-    async retrieve(query: string, options: RAGSearchOptions = {}): Promise<UnifiedRAGResult[]> {
+    async retrieve(query: string, options: RAGSearchOptions = {}): Promise<RagSearchResult[]> {
         return this.search(query, options);
     }
 
