@@ -14,6 +14,38 @@ import { buildRAGPrompt, NO_CONTEXT_FALLBACK, NO_GLOBAL_CONTEXT_FALLBACK } from 
 import type { ProviderDataScopePolicy } from '../llm/ProviderRouter';
 
 /**
+ * Change 1: unified RAG result contract.
+ *
+ * This is intentionally a small coordination contract. It does not replace the
+ * existing meeting, mode, or personal retrieval implementations; it gives the
+ * application one place to ask those existing stores for evidence and one stable
+ * shape to consume their results.
+ */
+export type RAGSource = 'meeting' | 'mode' | 'personal';
+
+export interface UnifiedRAGResult {
+    source: RAGSource;
+    sourceId: string;
+    fileName?: string;
+    text: string;
+    score?: number;
+    vectorScore?: number;
+    lexicalScore?: number;
+    chunkIndex?: number;
+    metadata?: Record<string, unknown>;
+}
+
+export interface RAGSearchOptions {
+    source?: RAGSource | 'all';
+    meetingId?: string;
+    modeId?: string;
+    userId?: string;
+    topK?: number;
+    tokenBudget?: number;
+}
+
+
+/**
  * A bare `for await` over an LLM stream blocks forever if the provider hangs
  * mid-stream (no token, no error, no close) — this is the exact mechanism
  * behind the previously-fixed 134s manual-chat hang (see electron/llm/
@@ -94,6 +126,31 @@ export class RAGManager {
     private retriever: RAGRetriever;
     private llmHelper: LLMHelper | null = null;
     private liveIndexer: LiveRAGIndexer;
+
+    /**
+     * Change 1: source coordination lives here, while each source keeps ownership
+     * of its existing retrieval implementation. The managers are resolved lazily
+     * so RAGManager remains safe to construct during AppState startup and does not
+     * introduce an eager circular dependency with main.ts/services.
+     */
+    private getSourceManagers(): { modesManager: any | null; personalKnowledge: any | null } {
+        let modesManager: any | null = null;
+        let personalKnowledge: any | null = null;
+        try {
+            const { ModesManager } = require('../services/ModesManager');
+            modesManager = ModesManager.getInstance();
+        } catch (error) {
+            console.warn('[RAGManager] Mode source unavailable:', error);
+        }
+        try {
+            const { getPersonalKnowledgeManager } = require('../personalKnowledge');
+            personalKnowledge = getPersonalKnowledgeManager();
+        } catch (error) {
+            console.warn('[RAGManager] Personal source unavailable:', error);
+        }
+        return { modesManager, personalKnowledge };
+    }
+
     /**
      * Guards against concurrent reprocessMeeting()/reindex calls for the same
      * target. Process-wide on globalThis, not per-instance: RAGManager is
@@ -133,6 +190,137 @@ export class RAGManager {
             // a Gemini embedding-model bump). No-op when everything already matches.
             this.scheduleAutoReindex();
         }).catch(() => { /* non-critical, suppress */ });
+    }
+
+    /**
+     * Unified retrieval entry point for the application.
+     *
+     * Important: this method only coordinates existing source owners. Meeting
+     * retrieval remains RAGRetriever, mode retrieval remains ModesManager's hybrid
+     * path, and Personal Files remains PersonalKnowledgeManager's existing search.
+     * No ranking, chunking, embedding, or database behavior is duplicated here.
+     */
+    async search(query: string, options: RAGSearchOptions = {}): Promise<UnifiedRAGResult[]> {
+        const normalizedQuery = String(query ?? '').trim();
+        if (!normalizedQuery) return [];
+
+        const source = options.source ?? 'all';
+        const topK = Math.max(1, Math.min(50, options.topK ?? 8));
+        const tokenBudget = Math.max(1, options.tokenBudget ?? 1800);
+        const results: UnifiedRAGResult[] = [];
+        const { modesManager, personalKnowledge } = this.getSourceManagers();
+
+        if (source === 'meeting' || source === 'all') {
+            try {
+                const context = await this.retriever.retrieve(normalizedQuery, {
+                    ...(options.meetingId ? { meetingId: options.meetingId } : {}),
+                    topK,
+                    maxTokens: tokenBudget,
+                });
+                for (const chunk of context.chunks ?? []) {
+                    const c = chunk as any;
+                    const sourceId = String(c.meetingId ?? options.meetingId ?? '');
+                    const text = String(c.text ?? '');
+                    if (!sourceId || !text.trim()) continue;
+                    results.push({
+                        source: 'meeting',
+                        sourceId,
+                        fileName: `meeting:${sourceId}`,
+                        text,
+                        score: Number.isFinite(Number(c.finalScore)) ? Number(c.finalScore) : Number(c.similarity),
+                        vectorScore: Number.isFinite(Number(c.similarity)) ? Number(c.similarity) : undefined,
+                        chunkIndex: Number.isFinite(Number(c.chunkIndex)) ? Number(c.chunkIndex) : undefined,
+                        metadata: {
+                            speaker: c.speaker,
+                            startMs: c.startMs,
+                            endMs: c.endMs,
+                        },
+                    });
+                }
+            } catch (error) {
+                console.warn('[RAGManager] Meeting retrieval failed:', error);
+            }
+        }
+
+        if ((source === 'mode' || source === 'all') && modesManager) {
+            try {
+                const modeInfo = modesManager.getActiveModeInfo?.() ?? null;
+                const modeId = options.modeId ?? modeInfo?.id;
+                const activeMode = options.modeId
+                    ? (modesManager.getModes?.() ?? []).find((mode: any) => mode?.id === options.modeId) ?? null
+                    : modesManager.getActiveMode?.() ?? null;
+                const files = modeId ? (modesManager.getReferenceFiles?.(modeId) ?? []) : [];
+                if (activeMode && files.length && modesManager.retrieveHybridRaw) {
+                    const context = await modesManager.retrieveHybridRaw(activeMode, files, {
+                        query: normalizedQuery,
+                        topK,
+                        tokenBudget,
+                        allowRerank: false,
+                    });
+                    for (const chunk of context?.chunks ?? []) {
+                        const c = chunk as any;
+                        const sourceId = String(c.sourceId ?? '');
+                        const text = String(c.text ?? '');
+                        if (!sourceId || !text.trim()) continue;
+                        results.push({
+                            source: 'mode',
+                            sourceId,
+                            fileName: c.fileName,
+                            text,
+                            score: Number.isFinite(Number(c.score)) ? Number(c.score) : undefined,
+                            vectorScore: Number.isFinite(Number(c.vectorScore)) ? Number(c.vectorScore) : undefined,
+                            lexicalScore: Number.isFinite(Number(c.ftsScore)) ? Number(c.ftsScore) : undefined,
+                            chunkIndex: Number.isFinite(Number(c.chunkIndex)) ? Number(c.chunkIndex) : undefined,
+                            metadata: {
+                                trustLevel: c.trustLevel,
+                                provenance: c.provenance,
+                                ...(c.metadata && typeof c.metadata === 'object' ? c.metadata : {}),
+                            },
+                        });
+                    }
+                }
+            } catch (error) {
+                console.warn('[RAGManager] Mode retrieval failed:', error);
+            }
+        }
+
+        if ((source === 'personal' || source === 'all') && personalKnowledge) {
+            try {
+                const items = await (personalKnowledge.searchRelevantAsync?.(normalizedQuery, topK)
+                    ?? Promise.resolve(personalKnowledge.searchRelevant?.(normalizedQuery, topK)
+                        ?? personalKnowledge.search?.(normalizedQuery, topK)
+                        ?? []));
+                for (const item of items ?? []) {
+                    const sourceId = String(item.fileId ?? '');
+                    const text = String(item.text ?? '');
+                    if (!sourceId || !text.trim()) continue;
+                    results.push({
+                        source: 'personal',
+                        sourceId,
+                        fileName: item.fileName,
+                        text,
+                        score: Number.isFinite(Number(item.score)) ? Number(item.score) : undefined,
+                        metadata: {
+                            chunkId: item.chunkId,
+                            startChar: item.startChar,
+                            endChar: item.endChar,
+                        },
+                    });
+                }
+            } catch (error) {
+                console.warn('[RAGManager] Personal retrieval failed:', error);
+            }
+        }
+
+        return results;
+    }
+
+    /**
+     * Alias for callers that use retrieval terminology. Kept intentionally thin so
+     * there is still exactly one unified search implementation.
+     */
+    async retrieve(query: string, options: RAGSearchOptions = {}): Promise<UnifiedRAGResult[]> {
+        return this.search(query, options);
     }
 
     /**
