@@ -191,8 +191,8 @@ function parseHeading(line: string): { num: string; title: string } | null {
     // Tracking" — common in robotics/vision theses. Use a word-boundary form
     // AND only reject when the row also carries data-row shapes (brackets, units)
     // so a genuine "Pose Estimation" heading survives.
-    if (/[[\]]|\bmm\b|\brx\b/i.test(t)) return null; // bracketed / unit-bearing data rows
-    if (/\bpose\b/i.test(t) && /\[|\b\d+\s*,|\bx\s*,\s*y\b/i.test(t)) return null; // pose DATA rows only
+    if (/[\[\]]|\bmm\b|\brx\b/i.test(t)) return null; // bracketed / unit-bearing data rows
+    if (/\bpose\b/i.test(t) && /[\[]|\b\d+\s*,|\bx\s*,\s*y\b/i.test(t)) return null; // pose DATA rows only
     if (BIBLIO_RE.test(t)) return null;            // numbered bibliography entries
     return { num: m[1], title: m[2].trim() };
 }
@@ -547,6 +547,193 @@ export function selectTableOfContentsEntries(query: string, map: DocumentMap): s
     const best = scored[0];
     if (best.hits < 2 && best.score < 0.22) return [];
     return scored.filter((item) => item.hits === best.hits && item.score >= best.score * 0.8).map((item) => item.entry);
+}
+
+export type DocumentChunkContentType = 'text' | 'section' | 'table' | 'toc';
+
+/**
+ * Canonical chunk representation built from DocumentMap. This is the bridge
+ * between document structure and persistence/indexing: callers get the text
+ * plus the structural provenance that produced it, without re-implementing
+ * heading/page/table detection in each source manager.
+ */
+export interface DocumentMapChunk {
+    text: string;
+    chunkIndex: number;
+    pageStart?: number;
+    pageEnd?: number;
+    section?: string;
+    heading?: string;
+    contentType: DocumentChunkContentType;
+    startOffset?: number;
+    endOffset?: number;
+    metadata: Record<string, unknown>;
+}
+
+export interface DocumentMapChunkOptions {
+    chunkWords?: number;
+    chunkOverlap?: number;
+    tableRowsPerChunk?: number;
+}
+
+function findSourceOffset(source: string, needle: string, from: number): { start: number; end: number } | null {
+    if (!needle) return null;
+    const start = source.indexOf(needle, Math.max(0, from - 2048));
+    if (start < 0) return null;
+    return { start, end: start + needle.length };
+}
+
+function looksLikeTableChunk(text: string): boolean {
+    const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+    if (lines.length < 3) return false;
+    let rows = 0;
+    for (const line of lines) {
+        if (isProbableTableRow(line)) rows++;
+    }
+    return rows >= 3 && rows / lines.length >= 0.6;
+}
+
+function buildPageBlocks(content: string): Array<{ page: number; text: string }> {
+    const lines = content.split(/\r?\n/);
+    const blocks: Array<{ page: number; lines: string[] }> = [];
+    let currentPage = 1;
+    let current: string[] = [];
+    const flush = () => {
+        const text = current.join('\n').trim();
+        if (text) blocks.push({ page: currentPage, lines: current });
+        current = [];
+    };
+    for (const line of lines) {
+        const marker = line.match(PAGE_MARKER_RE);
+        if (marker) {
+            flush();
+            currentPage = Number(marker[1]);
+            continue;
+        }
+        current.push(line);
+    }
+    flush();
+    return blocks.map(block => ({ page: block.page, text: block.lines.join('\n').trim() }));
+}
+
+/**
+ * Build intelligent, metadata-bearing chunks from one extracted document.
+ *
+ * Structured documents use DocumentMap sections (and the existing table-aware
+ * representation). Documents without detectable sections are still chunked
+ * intelligently, with PDF [Page N] boundaries preserved when available and
+ * sentence/word windows used only inside those boundaries.
+ */
+export function buildDocumentChunks(
+    content: string,
+    options: DocumentMapChunkOptions = {},
+): DocumentMapChunk[] {
+    const source = String(content ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+    if (!source) return [];
+
+    const chunkWords = Math.max(20, options.chunkWords ?? 140);
+    const chunkOverlap = Math.max(0, Math.min(chunkWords - 1, options.chunkOverlap ?? 30));
+    const tableRowsPerChunk = Math.max(1, options.tableRowsPerChunk ?? 10);
+    const map = buildDocumentMap(source);
+    const chunks: DocumentMapChunk[] = [];
+    let chunkIndex = 0;
+    let searchOffset = 0;
+
+    const pushChunk = (
+        text: string,
+        metadata: Omit<DocumentMapChunk, 'text' | 'chunkIndex'>,
+        sourceNeedle?: string,
+    ) => {
+        const clean = text.trim();
+        if (!clean) return;
+        const offset = sourceNeedle ? findSourceOffset(source, sourceNeedle, searchOffset) : null;
+        if (offset) searchOffset = Math.max(searchOffset, offset.end);
+        chunks.push({
+            text: clean,
+            chunkIndex: chunkIndex++,
+            ...(offset ? { startOffset: offset.start, endOffset: offset.end } : {}),
+            ...metadata,
+        });
+    };
+
+    // CSV/TSV is structurally tabular even when it has no headings. Keep the
+    // existing row-aware chunker as the canonical table representation.
+    const tableChunks = tabularChunks(source, tableRowsPerChunk);
+    if (tableChunks) {
+        for (const text of tableChunks) {
+            pushChunk(text, {
+                contentType: 'table',
+                metadata: {
+                    documentMap: true,
+                    table: true,
+                },
+            }, text);
+        }
+        return chunks;
+    }
+
+    if (map.tableOfContents?.entries.length) {
+        const pageRange = map.tableOfContents.pageEnd === map.tableOfContents.pageStart
+            ? `${map.tableOfContents.pageStart}`
+            : `${map.tableOfContents.pageStart}-${map.tableOfContents.pageEnd}`;
+        pushChunk(
+            `[Table of Contents | p${pageRange}]\n${map.tableOfContents.entries.join('\n')}`,
+            {
+                pageStart: map.tableOfContents.pageStart,
+                pageEnd: map.tableOfContents.pageEnd,
+                contentType: 'toc',
+                metadata: { documentMap: true, tableOfContents: true },
+            },
+        );
+    }
+
+    if (map.hasToc) {
+        for (const section of map.sections) {
+            const body = section.body.trim();
+            if (!body) continue;
+            const windows = sentenceAwareWindows(body, chunkWords, chunkOverlap);
+            for (const window of windows) {
+                const heading = section.heading && section.heading !== 'Preamble' ? section.heading : undefined;
+                const tag = section.num
+                    ? `[Section ${section.num} | p${section.pageStart}${section.pageEnd !== section.pageStart ? '-' + section.pageEnd : ''}]`
+                    : `[p${section.pageStart}]`;
+                const text = heading ? `${tag} ${heading}\n${window}` : `${tag}\n${window}`;
+                pushChunk(text, {
+                    pageStart: section.pageStart,
+                    pageEnd: section.pageEnd,
+                    ...(section.num ? { section: section.num } : {}),
+                    ...(heading ? { heading } : {}),
+                    contentType: looksLikeTableChunk(window) ? 'table' : 'section',
+                    metadata: {
+                        documentMap: true,
+                        depth: section.depth,
+                        containsTable: looksLikeTableChunk(window),
+                    },
+                }, window);
+            }
+        }
+        if (chunks.length > 0) return chunks;
+    }
+
+    // Flat documents and PDFs without numbered headings still retain page
+    // boundaries. A single unpaged text file falls through to one global stream.
+    const pages = buildPageBlocks(source);
+    const blocks = pages.length > 0 ? pages : [{ page: 1, text: source }];
+    for (const block of blocks) {
+        if (!block.text.trim()) continue;
+        for (const window of sentenceAwareWindows(block.text, chunkWords, chunkOverlap)) {
+            pushChunk(window, {
+                pageStart: block.page,
+                pageEnd: block.page,
+                contentType: looksLikeTableChunk(window) ? 'table' : 'text',
+                metadata: {
+                    documentMap: true,
+                    containsTable: looksLikeTableChunk(window),
+                },
+            }, window);
+        }
+    }
+    return chunks;
 }
 
 export function sectionAwareChunksFromMap(
