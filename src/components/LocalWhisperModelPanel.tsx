@@ -621,7 +621,11 @@ export function LocalWhisperModelPanel({ onModelConfigChanged }: LocalWhisperMod
                                 key="system"
                                 className="min-w-0"
                                 style={{
-                                    overflow: 'hidden',
+                                    // Keep the column's width animation, but do NOT clip the
+                                    // PremiumSelect dropdown. The dropdown is absolutely positioned
+                                    // below this column, so overflow:hidden makes the System menu
+                                    // open internally but become invisible outside this box.
+                                    overflow: 'visible',
                                     // flexBasis 0 is what makes the split exactly 50/50. The
                                     // sibling is `flex-1` — i.e. `flex: 1 1 0%` — so it sizes
                                     // purely from grow. Leaving this one at the default

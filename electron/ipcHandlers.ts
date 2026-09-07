@@ -73,7 +73,7 @@ function resolveManualChatBasePrompt(
       suppliedTemplate: opts?.suppliedTemplate,
       // This is the TYPED chat panel — the one surface where the user reads
       // the answer instead of speaking it. Attaches the scannable chat layout
-      // (lead sentence → labeled sections → quotable close); every live and
+      // (lead sentence →  labeled sections →  quotable close); every live and
       // spoken surface leaves this unset and keeps the spoken shape.
       chatSurface: true,
     });
@@ -314,7 +314,7 @@ export function initializeIpcHandlers(appState: AppState): void {
   const sanitizeRepairPromptText = (text: string, maxChars: number): string => {
     const normalized = String(text || '')
       .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, ' ')
-      .replace(/[‐‑‒–—−]/g, '-')
+      .replace(/[‐ ‑ ‒ –—− ]/g, '-')
       .split('\n')
       .map((line) => {
         const stripped = line.replace(/^\s*\[(?:[A-Z][A-Z0-9 _-]*|SYSTEM|DEVELOPER|USER|ASSISTANT|ME|INTERVIEWER|RECENT|NEW|IMPORTANT|INSTRUCTION|CONTEXT|TRANSCRIPT|TOOL|PROMPT|HUMAN|AI|BOT|GPT|OVERRIDE)[^\]]*\]\s*:?\s*/i, '');
@@ -591,8 +591,8 @@ export function initializeIpcHandlers(appState: AppState): void {
     },
   );
 
-  // ── Overlay aux-window coordination relays ────────────────────────────────
-  // Overlay renderer → aux windows: UI-state broadcast (expanded/shellWide/
+  // ─ ─  Overlay aux-window coordination relays ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ 
+  // Overlay renderer →  aux windows: UI-state broadcast (expanded/shellWide/
   // theme/opacity/hasContent). Only the overlay window may broadcast.
   safeHandle('overlay-ui-state', async (event, state: Record<string, unknown>) => {
     const overlayWin = appState.getWindowHelper().getOverlayWindow();
@@ -601,7 +601,7 @@ export function initializeIpcHandlers(appState: AppState): void {
     appState.getWindowHelper().setOverlayUiState(state ?? {});
   });
 
-  // Overlay renderer → main: the panel's LIVE right edge (px from the overlay
+  // Overlay renderer →  main: the panel's LIVE right edge (px from the overlay
   // window's left edge), streamed during the width spring so the toggle aux
   // window rides the panel's top-right corner. Only the overlay may send.
   safeHandle('overlay-toggle-anchor', async (event, payload: { panelRight?: number }) => {
@@ -612,7 +612,7 @@ export function initializeIpcHandlers(appState: AppState): void {
     appState.getWindowHelper().setOverlayToggleAnchor(payload.panelRight);
   });
 
-  // Overlay renderer → main: hover hit-test result — false while the pointer
+  // Overlay renderer →  main: hover hit-test result — false while the pointer
   // is over the fixed window's transparent side margins (collapsed state), so
   // those margins become click-through. Only the overlay may send.
   safeHandle('overlay-hover-interactive', async (event, interactive: boolean) => {
@@ -623,7 +623,7 @@ export function initializeIpcHandlers(appState: AppState): void {
   });
 
 
-  // Any Natively window → main: dismiss the overlay dropdowns (settings /
+  // Any Natively window →  main: dismiss the overlay dropdowns (settings /
   // model selector). Fired by the click-catcher window (a click landed
   // OUTSIDE every Natively window), the aux pill/toggle windows, and the
   // overlay renderer's own mousedown handler (with per-kind guards for the
@@ -646,7 +646,7 @@ export function initializeIpcHandlers(appState: AppState): void {
     },
   );
 
-  // Aux windows → overlay renderer: user actions (toggle-width / end-meeting /
+  // Aux windows →  overlay renderer: user actions (toggle-width / end-meeting /
   // toggle-expand). Only the pill/toggle windows may send.
   safeHandle('overlay-ui-action', async (event, action: { type?: string }) => {
     const helper = appState.getWindowHelper();
@@ -659,7 +659,7 @@ export function initializeIpcHandlers(appState: AppState): void {
     helper.forwardOverlayUiAction(action);
   });
 
-  // Pill window → main: drag the welded overlay group by a pointer delta.
+  // Pill window →  main: drag the welded overlay group by a pointer delta.
   // Only the PILL may send (the toggle is not a drag handle). Sender-id
   // validated like every other overlay channel. No-ops unless the group is
   // welded, so the mirroring fallback is unaffected.
@@ -694,7 +694,7 @@ export function initializeIpcHandlers(appState: AppState): void {
   // (Removed) 'animate-overlay-width' — the overlay window is a FIXED WIDTH
   // (WindowHelper.OVERLAY_DEFAULT_WIDTH = 732) and is NEVER width-resized.
   // The expand/contract animation is CSS-only in the renderer (the panel
-  // tweens 600↔732 centered inside the fixed window), so every
+  // tweens 600↔ 732 centered inside the fixed window), so every
   // 'update-content-dimensions-centered' report is height-only — a
   // top-anchored resize that does not move X. No sideways jump, no per-frame
   // transparent-window re-raster. See NativelyInterface.startTransition.
@@ -1073,12 +1073,12 @@ export function initializeIpcHandlers(appState: AppState): void {
             if (skill) {
               // Disabled skills still resolve by name but must NOT inject their
               // instructions into the prompt — the user turned them off in
-              // Settings → Skills. Surface a clear error rather than silently
+              // Settings →  Skills. Surface a clear error rather than silently
               // proceeding (which would invoke the skill anyway).
               if (skill.enabled === false) {
                 event.sender.send(
                   'gemini-stream-error',
-                  `Skill "/${skill.id}" is disabled. Enable it in Settings → Skills.`,
+                  `Skill "/${skill.id}" is disabled. Enable it in Settings →  Skills.`,
                   { streamId: myStreamId },
                 );
                 return null;  // sibling error paths return null; handler is typed `| null`
@@ -1111,7 +1111,7 @@ export function initializeIpcHandlers(appState: AppState): void {
           }
         }
 
-        // ── CONTEXT INTELLIGENCE V3 — wired manual-chat surface ──────────────
+        // ─ ─  CONTEXT INTELLIGENCE V3 — wired manual-chat surface ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ 
         //
         // Deliberately a SHORT-CIRCUIT, not an interleave. The legacy assembly
         // below is ~3,700 lines carrying five independent source decisions; the
@@ -1683,7 +1683,7 @@ export function initializeIpcHandlers(appState: AppState): void {
             });
             finishDebug(finalText, !v3Truncated, v3Truncated ? 'stream_truncated' : null);
 
-            // ── Record the turn (V3 previously recorded NOTHING) ────────────
+            // ─ ─  Record the turn (V3 previously recorded NOTHING) ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ 
             // The short-circuit skipped every store the legacy path writes, so
             // after a V3-answered turn the NEXT turn's follow-up had no
             // antecedent on ANY path — V3's own state, conversation memory,
@@ -1718,7 +1718,7 @@ export function initializeIpcHandlers(appState: AppState): void {
               if (v3Truncated) {
                 console.warn('[IPC] truncated answer — recording the user turn but skipping answer-side history/memory sinks', { streamId: myStreamId });
               }
-              // ── ANSWER-SIDE SINKS (skipped when truncated) ──────────────
+              // ─ ─  ANSWER-SIDE SINKS (skipped when truncated) ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ 
               if (!v3Truncated) {
                 try {
                   const { recordAnswerSummary } = require('./context-intelligence/question/conversation-state-store');
@@ -1849,7 +1849,7 @@ export function initializeIpcHandlers(appState: AppState): void {
             probeProfileReady = profileFactsReady((orchProbe as any)?.activeResume?.structured_data ?? null);
           } catch { /* no profile — assistant reply stands */ }
           const probe = resolveIdentityProbe(message, probeProfileReady);
-          // candidate_fast_path → fall through; the fast-path block below owns it.
+          // candidate_fast_path →  fall through; the fast-path block below owns it.
           if (probe.kind === 'assistant_reply') {
             const identityHit = probe.reply;
             intelligenceManager.addTranscript(
@@ -1933,7 +1933,7 @@ export function initializeIpcHandlers(appState: AppState): void {
 
         // Per-request latency trace (MEASURE_LATENCY=true prints a stage
         // breakdown to the console so we can see exactly where the wall time
-        // goes: pre-work in streamChat → provider first token → stream).
+        // goes: pre-work in streamChat →  provider first token →  stream).
         const chatTrace = new PiLatencyTrace({ source: 'manual' });
         chatTrace.mark('question_submitted');
 
@@ -1993,7 +1993,7 @@ export function initializeIpcHandlers(appState: AppState): void {
         // fast-path gate + profile-evidence gate below both consult:
         //   - `profileAllowed`: may the deterministic profile fast-path run?
         //   - `shouldClarifyInsteadOfProfile`: doc/transcript mode + an explicit
-        //     "my resume/project" ask → emit a source-honest switch line instead
+        //     "my resume/project" ask →  emit a source-honest switch line instead
         //     of leaking the profile OR giving an odd "not in the document".
         // This REPLACES the brittle `answerType !== 'lecture_answer'` fast-path
         // guard that missed the five other document answer shapes (list_answer,
@@ -2123,7 +2123,7 @@ export function initializeIpcHandlers(appState: AppState): void {
           }
         }
 
-        // ── CONTEXT OS (Phase 7, 2026-07-10) ────────────────────────────────
+        // ─ ─  CONTEXT OS (Phase 7, 2026-07-10) ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ 
         // Build the TurnContextContract from the SAME sourceAuthority the
         // legacy arbiter computed, so the two systems agree by construction.
         // Null when Context OS is off for this surface OR the arbiter failed —
@@ -2268,7 +2268,7 @@ export function initializeIpcHandlers(appState: AppState): void {
         //          "dry run this with …") must inherit the PRIOR coding problem + code instead
         //          of being re-planned as a fresh, context-free question.
         // Deterministic, no LLM. The prior-problem recall reads the SAME conversation memory
-        // service the bare-follow-up path uses; gated on conversationMemoryV2 (flag OFF →
+        // service the bare-follow-up path uses; gated on conversationMemoryV2 (flag OFF → 
         // exactly the legacy behavior). All variables default to "no change".
         let explicitCodingContract: ExplicitCodingContract = detectExplicitCodingContract(message);
         let codingPriorProblemBlock = '';
@@ -2372,7 +2372,7 @@ export function initializeIpcHandlers(appState: AppState): void {
           }
         }
 
-        // ── INTELLIGENCE ATTRIBUTION accumulator (task Phase 3) ──────────────────
+        // ─ ─  INTELLIGENCE ATTRIBUTION accumulator (task Phase 3) ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ 
         // One privacy-safe record per answer says which memory/context layers were
         // actually used. Populated as the handler progresses; emitted (recordAttribution)
         // at each exit. Booleans/counts/labels + query HASH only — never raw content.
@@ -2413,7 +2413,7 @@ export function initializeIpcHandlers(appState: AppState): void {
         // record it on the trace, and emit a telemetry marker when it DISAGREES with the
         // live profile-policy routing. This validates the router against the proven path
         // with ZERO behavior change — the prerequisite before ever letting it drive.
-        // Flag OFF → not computed at all.
+        // Flag OFF →  not computed at all.
         try {
           if (isIntelligenceFlagEnabled('contextRouterV2')) {
             const orchRouter = llmHelper.getKnowledgeOrchestrator?.();
@@ -2470,7 +2470,7 @@ export function initializeIpcHandlers(appState: AppState): void {
         // for a bare follow-up with no context, try to recover the prior turn from this
         // session's conversation memory. If found, synthesize a compact context block so
         // the follow-up flows to the LLM (which can resolve "make that shorter" / "why?"
-        // against the real prior Q/A) instead of a dead-end clarification. Flag OFF →
+        // against the real prior Q/A) instead of a dead-end clarification. Flag OFF → 
         // skipped entirely (original clarification behavior preserved byte-for-byte).
         if (!context && !autoContextSnapshot && isBareFollowUp(message)
             && isIntelligenceFlagEnabled('conversationMemoryV2')
@@ -2553,7 +2553,7 @@ export function initializeIpcHandlers(appState: AppState): void {
         // writes the final answer below through the normal streamChat path.
         const isStealthChat = isStealthEvasionQuestion(message);
 
-        // ── CONTEXT OS CLARIFICATION SHORT-CIRCUIT (Phase 4, invariant 14) ──
+        // ─ ─  CONTEXT OS CLARIFICATION SHORT-CIRCUIT (Phase 4, invariant 14) ─ ─ 
         // When the kernel resolves sourceOwner='clarify' (a general/ambiguous
         // mode where more than one source universe could own an ambiguous noun
         // like "project"), the correct behavior is to ASK, not guess. This
@@ -2565,7 +2565,7 @@ export function initializeIpcHandlers(appState: AppState): void {
         //
         // Gated on `contextOsPropertyValidation` (the active-enforcement family
         // flag, default OFF in prod) AND the contract existing AND not a
-        // coding/image/stealth turn. Flag OFF / null contract → legacy behavior
+        // coding/image/stealth turn. Flag OFF / null contract →  legacy behavior
         // (answer generated as before) — additive and reversible.
         if (turnContract
             && turnContract.sourceOwner === 'clarify'
@@ -2680,7 +2680,7 @@ export function initializeIpcHandlers(appState: AppState): void {
         const _ownerEnforcementOff = getSourceOwnerEnforcementStage() === 'off';
         // CONTEXT OS (Phase 7): the TurnContextContract must ALSO grant profile
         // evidence for the fast path to run. Null contract (flag off / kernel
-        // error) → legacy behavior. This can only NARROW the legacy decision —
+        // error) →  legacy behavior. This can only NARROW the legacy decision —
         // never widen it — so wiring it is leak-safe by construction.
         const _contractAllowsProfile = (() => {
           if (!turnContract) return true; // legacy path decides alone
@@ -3003,12 +3003,12 @@ export function initializeIpcHandlers(appState: AppState): void {
         if (isCodingChat) {
           // Coding contract. THREE cases:
           //  (a) explicit format constraint (code_only/complexity_only/dry_run_only/
-          //      explain_only) → MINIMAL contract, NOT the six-section template, so the
+          //      explain_only) →  MINIMAL contract, NOT the six-section template, so the
           //      model outputs only what was asked and repair has nothing to force back
           //      in (bugs #5/#7).
-          //  (b) resolved coding FOLLOW-UP (no explicit constraint) → the standard
+          //  (b) resolved coding FOLLOW-UP (no explicit constraint) →  the standard
           //      six-section contract PLUS the prior problem+code prepended (bug #6).
-          //  (c) plain coding question (no constraint, no follow-up) → the EXACT proven
+          //  (c) plain coding question (no constraint, no follow-up) →  the EXACT proven
           //      path (formatAnswerPlanForPrompt with the full CODING_TEMPLATE) — byte
           //      unchanged from before this fix.
           const planIsCodingType = isCodingAnswerType(answerPlan.answerType);
@@ -3020,12 +3020,12 @@ export function initializeIpcHandlers(appState: AppState): void {
             });
             context = codingPriorProblemBlock ? `${codingContract}\n\n${codingPriorProblemBlock}` : codingContract;
           } else if (planIsCodingType) {
-            // Plain coding question (no constraint) → the EXACT proven path, byte unchanged.
+            // Plain coding question (no constraint) →  the EXACT proven path, byte unchanged.
             const baseContract = formatAnswerPlanForPrompt(answerPlan, isCodeVerificationEnabled());
             context = codingPriorProblemBlock ? `${baseContract}\n\n${codingPriorProblemBlock}` : baseContract;
           } else {
             // A follow-up ("now optimize it") promoted to coding though the plan type is
-            // follow_up/unknown → use the full six-section coding contract (null builder),
+            // follow_up/unknown →  use the full six-section coding contract (null builder),
             // NOT the follow_up template, plus the prior problem.
             const codingContract = buildCodingContractPrompt(null, {
               includeVerification: isCodeVerificationEnabled(),
@@ -3151,7 +3151,7 @@ export function initializeIpcHandlers(appState: AppState): void {
         // Surface cross-meeting long-term memory INTO the live answer — but ONLY for
         // genuinely BACKWARD-LOOKING questions ("what did we discuss last time about X?",
         // "did we cover the pricing objection before?"). isBackwardLookingQuery gates this,
-        // so a normal/coding/identity/sales question NEVER calls recall → ZERO added latency
+        // so a normal/coding/identity/sales question NEVER calls recall →  ZERO added latency
         // on the vast majority of answers. Hard 800ms timeout (AbortController+Promise.race
         // in the adapter): on timeout/empty/error it returns [] and the answer proceeds
         // WITHOUT memory — never blocks, never throws. Skipped for coding/safety answers.
@@ -3189,7 +3189,7 @@ export function initializeIpcHandlers(appState: AppState): void {
           ? (manualOwnership.owner === 'mixed' || manualOwnership.owner === 'transcript')
           : true;
         // CONTEXT OS (Phase 7): the contract's memoryReadPolicy must also allow
-        // Hindsight. Null contract → legacy decision alone. Narrowing only.
+        // Hindsight. Null contract →  legacy decision alone. Narrowing only.
         const _contractAllowsHindsight = turnContract ? turnContract.memoryReadPolicy.allowHindsight : true;
         if (!isCodingChat && !isContractEnforced
             && _contractAllowsHindsight
@@ -3264,7 +3264,7 @@ export function initializeIpcHandlers(appState: AppState): void {
         // a document-grounded custom mode, so we must treat the turn AS
         // doc-grounded (block profile cards) rather than let `undefined !== true`
         // pass the guard and leak profile PII into a possibly-doc-grounded answer.
-        // We know the mode is doc-grounded, OR we don't know the mode at all →
+        // We know the mode is doc-grounded, OR we don't know the mode at all → 
         // either way, docGroundedActive is true and the retriever's gate 4 fires.
         const docGroundedOrUnknown = manualActiveMode == null
           || manualActiveMode.documentGroundedCustomModeActive === true;
@@ -3281,7 +3281,7 @@ export function initializeIpcHandlers(appState: AppState): void {
         const ownershipAllowsProfileEvidence = (manualOwnership ? manualOwnership.profileAllowed : true)
           && _contractAllowsProfile;
 
-        // ── CONTEXT OS (2026-07-17): TurnEvidenceCoordinator multi-family pack ──
+        // ─ ─  CONTEXT OS (2026-07-17): TurnEvidenceCoordinator multi-family pack ─ ─ 
         // Extends the H1 typed-EvidencePack path — previously built ONLY for a
         // document-grounded custom mode (see `manualContextOsGeneration` below,
         // `documentGroundedCustomModeActive === true`) — to EVERY manual-chat
@@ -3687,7 +3687,7 @@ export function initializeIpcHandlers(appState: AppState): void {
           // the first "## " heading is confirmed (never code-first), then passes
           // every token through. This fixes the regression where coding chat
           // buffered the whole response and the user waited the full generation
-          // time with no visible progress. validate→repair below is a SAFETY NET:
+          // time with no visible progress. validate→ repair below is a SAFETY NET:
           // if repair changed the answer, we send the corrected final text on
           // 'gemini-stream-done' so the renderer replaces the row in place.
           const codingGate = isCodingChat ? new CodingStreamGate() : null;
@@ -3781,7 +3781,7 @@ export function initializeIpcHandlers(appState: AppState): void {
           // the far longer local first-useful budget — otherwise every cold
           // local generation aborted to zero tokens and the user saw the canned
           // fallback line below. Codex CLI shares the cold-load profile
-          // (subprocess spawn → codex CLI loads the model → first delta).
+          // (subprocess spawn →  codex CLI loads the model →  first delta).
           const usingLocalLlm = llmHelper.isUsingOllama() || llmHelper.isUsingCodexCli();
           // F-301: on the natively-api route the server rotates providers at
           // 10s; give it room to rescue the turn instead of aborting at 7s.
@@ -4087,7 +4087,7 @@ export function initializeIpcHandlers(appState: AppState): void {
               // identity / refusal / leak checks AND flags FABRICATED metrics
               // ("25% retention") or companies not present in the grounded facts.
               // Evidence = the profile facts the model was grounded in. Deterministic,
-              // log-only on this hot path (no re-generation → no added latency); the
+              // log-only on this hot path (no re-generation →  no added latency); the
               // violation CODES are logged, never raw profile content.
               const evidence = `${JSON.stringify(activeResume || {})}\n${JSON.stringify(activeJD || {})}`;
               const profileValidation = validateProfileEvidence({
@@ -4115,7 +4115,7 @@ export function initializeIpcHandlers(appState: AppState): void {
               // no repair, no strip, delivered to the user verbatim). On such a
               // violation we do ONE bounded regeneration grounded in the candidate
               // facts and hand the renderer a corrective finalText (in-place replace
-              // via gemini-stream-done). Only fires on a real detected violation →
+              // via gemini-stream-done). Only fires on a real detected violation → 
               // zero happy-path latency. Sourced from profileValidation.violations
               // (validateProfileEvidence), which already composes the base
               // validateProfileOutput checks — so this is now the single
@@ -4215,7 +4215,7 @@ export function initializeIpcHandlers(appState: AppState): void {
           // or reference the profile/JD/salary — flash-lite intermittently appends a
           // stray mention. Detect deterministically and STRIP the offending prose
           // sentence (code blocks preserved). Self-gated by the validator (only fires
-          // for forbidden types) → zero happy-path cost on profile answers. The user
+          // for forbidden types) →  zero happy-path cost on profile answers. The user
           // can opt in ("use my Natively project"). Runs for coding AND non-coding
           // forbidden types (previously coding-only).
           if (answerPlan.profileContextPolicy === 'forbidden') {
@@ -4260,7 +4260,7 @@ export function initializeIpcHandlers(appState: AppState): void {
           // an interview/looking-for-work mode that gets MISCLASSIFIED to a non-candidate
           // answerType (e.g. general_meeting_answer) would skip the assistant-meta strip and
           // could leak "I'm Natively". The mode-based guard is independent of answerType, so
-          // it widens the trigger to catch that gap. Flag OFF → original answerType-only trigger.
+          // it widens the trigger to catch that gap. Flag OFF →  original answerType-only trigger.
           let _perspectiveExpectsCandidate = false;
           try {
             if (isIntelligenceFlagEnabled('profileTreeV2')) {
@@ -4280,7 +4280,7 @@ export function initializeIpcHandlers(appState: AppState): void {
               // answer. Use `isCodingChat` (set true at line 1258 and again at 1312 for
               // follow-ups promoted from follow_up_answer / unknown_answer) so covered:
               //   - all native coding planAnswer types (isCodingAnswerType)
-              //   - follow-up → coding promoted turns (isCodingContinuation)
+              //   - follow-up →  coding promoted turns (isCodingContinuation)
               // Also skip for system_design_answer / debugging_question_answer which hit
               // the sanitizer via `_perspectiveExpectsCandidate` in candidate-voice modes.
               const isNonCandidateContent =
@@ -4350,7 +4350,7 @@ export function initializeIpcHandlers(appState: AppState): void {
             }
           }
 
-          // ── ASSISTANT-VOICE IDENTITY-MISFIRE GUARD (Groq-scout E2E sprint 2026-06-14) ──
+          // ─ ─  ASSISTANT-VOICE IDENTITY-MISFIRE GUARD (Groq-scout E2E sprint 2026-06-14) ─ ─ 
           // The meeting/lecture/sales/general/follow-up surfaces speak in the
           // ASSISTANT's voice, so they bypass the candidate sanitizer above. Smaller
           // models (e.g. Groq llama-4-scout) over-apply the prompt's "if asked who you
@@ -4385,7 +4385,7 @@ export function initializeIpcHandlers(appState: AppState): void {
             }
           }
 
-          // ── HUMAN-LIKENESS detection (task Phase 12) ──────────────────────────────
+          // ─ ─  HUMAN-LIKENESS detection (task Phase 12) ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ 
           // For spoken candidate/sales answers, flag corporate/LinkedIn filler that
           // survived the prompt directive. Log-only (no rewrite — rewriting risks the
           // grounding); the directive does the real work up front. The matched phrases
@@ -4400,7 +4400,7 @@ export function initializeIpcHandlers(appState: AppState): void {
             }
           } catch { /* detection never affects the answer */ }
 
-          // ── FINAL ANSWER POLISH + DIVERSITY GUARD (manual regression 2026-06-12) ──
+          // ─ ─  FINAL ANSWER POLISH + DIVERSITY GUARD (manual regression 2026-06-12) ─ ─ 
           // 1. Artifact cleanup: orphan "*" bullet lines, dangling markers, blank-
           //    line runs. Cheap regex, code blocks preserved.
           // 2. Identity guard at the RENDER boundary: a candidate-voice answer that
@@ -4511,7 +4511,7 @@ export function initializeIpcHandlers(appState: AppState): void {
             }
           }
 
-          // ── DOCUMENT-GROUNDED GROUNDEDNESS / GREETING VALIDATOR ───────────────
+          // ─ ─  DOCUMENT-GROUNDED GROUNDEDNESS / GREETING VALIDATOR ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ 
           // One-shot observability: when the gate fires (or doesn't) on a doc-
           // grounded turn, log the [SOURCE-GUARD] decision so post-mortem traces
           // can prove which guards were active. Cheap (single console.log per turn)
@@ -4705,7 +4705,7 @@ export function initializeIpcHandlers(appState: AppState): void {
               // the retrieved excerpts? This is an actionable signal — it means the
               // model read the context and still refused to synthesize from it, which
               // is fixable by re-prompting with a stronger synthesis instruction.
-              // We gate on ≥2 unique terms to avoid triggering on coincidental
+              // We gate on ≥ 2 unique terms to avoid triggering on coincidental
               // single-word matches (e.g. the chunk says "the" and so does the Q).
               //
               // SELF-TRIGGER GUARD (OKF Phase 0, 2026-07-01): the system's OWN safe
@@ -4940,7 +4940,7 @@ export function initializeIpcHandlers(appState: AppState): void {
               // some of them (so it IS a numeric/factual answer on-topic) but omits
               // OTHERS that are present in the block. Re-ask shows the block and
               // asks for all values — it can only surface IN-BLOCK values, so it
-              // never fabricates. Tightly gated: needs a numeric answer + ≥2 extra
+              // never fabricates. Tightly gated: needs a numeric answer + ≥ 2 extra
               // distinct in-block values missing, and only for questions that ask
               // for a set/multiple values.
               let incompleteMissing: string[] = [];
@@ -4980,11 +4980,11 @@ export function initializeIpcHandlers(appState: AppState): void {
                 isIncomplete = detect.incomplete || subQDetect.incomplete;
               } catch { incompleteMissing = []; incompleteSubQuestions = []; isIncomplete = false; }
 
-              // ── CONTEXT OS property-aware validation (Phase 7, 2026-07-10) ──
+              // ─ ─  CONTEXT OS property-aware validation (Phase 7, 2026-07-10) ─ ─ 
               // A CONFIDENT answer to a property question (funding / cost /
               // controller / phases / …) whose retrieved evidence lacks that
               // property's vocabulary is unsupported: topic overlap is not
-              // proof (collaboration ≠ funding). Ship the honest refusal
+              // proof (collaboration ≠  funding). Ship the honest refusal
               // instead. Gated on the turn contract existing; an honest
               // refusal answer is never flagged (it makes no property claim).
               // This check can only DOWNGRADE a confident-but-unsupported
@@ -5210,7 +5210,7 @@ export function initializeIpcHandlers(appState: AppState): void {
                   try {
                     incompleteRegenFabricates = completenessRegenFabricates(regenTrim, docContextBlock);
                     // Accept the completeness re-ask ONLY if it actually recovered
-                    // ≥1 of the flagged missing values AND did not shed numeric
+                    // ≥ 1 of the flagged missing values AND did not shed numeric
                     // coverage the original already had (root-cause fix,
                     // 2026-07-23: a regen that "recovers" one flagged value while
                     // silently dropping several OTHER values the original stated
@@ -5244,7 +5244,7 @@ export function initializeIpcHandlers(appState: AppState): void {
                 // regen's job is to IMPROVE it, not replace it with something
                 // thinner. A regen that is drastically shorter than the original
                 // it's replacing is very unlikely to be "more complete" and is the
-                // exact shape of the observed 959→182 char downgrade. This floor
+                // exact shape of the observed 959→ 182 char downgrade. This floor
                 // does NOT apply to greeting/empty/exact_repeat, where the
                 // "original" has no useful content to protect and the regen's whole
                 // purpose is to replace it with something that has content at all.
@@ -5336,7 +5336,7 @@ export function initializeIpcHandlers(appState: AppState): void {
                   piTelemetry.emit('pi_doc_grounded_false_refusal_kept_original', {});
                   console.warn('[DocGrounded] false-refusal regen did not cleanly improve on a substantial original — keeping original answer', { chars: trimmed.length });
                 } else {
-                  // Retry didn't help → ship a SAFE failure line (NOT a greeting),
+                  // Retry didn't help →  ship a SAFE failure line (NOT a greeting),
                   // referencing the uploaded material (not "the conversation"), and
                   // BLOCK it from SessionTracker so it cannot poison the next turn.
                   const safe = "I couldn't find that in the uploaded material. Try rephrasing, or ask about a specific section of the document.";
@@ -5615,7 +5615,7 @@ export function initializeIpcHandlers(appState: AppState): void {
 
             // VERIFIED CODE EXECUTION (background, strictly additive). For coding
             // chat answers, run the code against test cases AFTER it's shown —
-            // never awaited, so first answer has zero added latency. Emits a ✓
+            // never awaited, so first answer has zero added latency. Emits a ✓ 
             // badge on pass or a corrected message on a re-verified fix.
             if (isCodingChat && fullResponse.trim().length > 0 && isCodeVerificationEnabled()
                 && explicitContractProducesCode(explicitCodingContract)) {
@@ -5983,7 +5983,7 @@ export function initializeIpcHandlers(appState: AppState): void {
 
   safeHandle('get-code-verification', async () => {
     // Default OFF: code verification is currently disabled. Only true when the
-    // user has explicitly opted in via Settings → General or env override.
+    // user has explicitly opted in via Settings →  General or env override.
     const v = SettingsManager.getInstance().get('codeVerificationEnabled');
     return v === true;
   });
@@ -6374,7 +6374,7 @@ export function initializeIpcHandlers(appState: AppState): void {
     }
   });
 
-  // ── Context Intelligence debug logging (Developer settings) ───────────────
+  // ─ ─  Context Intelligence debug logging (Developer settings) ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ 
   // All paths are resolved MAIN-side from the bound log directory — the
   // renderer never supplies a path, so there is nothing to contain/validate.
   safeHandle('context-debug:get-config', async () => {
@@ -7417,7 +7417,7 @@ export function initializeIpcHandlers(appState: AppState): void {
     }
   });
 
-  // ── Application License Management ──────────────────────────────────────
+  // ─ ─  Application License Management ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ 
   // Replaces Natively API licensing with application-owned license system
 
   safeHandle('license:activate', async (_, licenseKey: string) => {
@@ -7514,7 +7514,7 @@ export function initializeIpcHandlers(appState: AppState): void {
     }
   });
 
-  // ── Usage cache (60-second TTL, keyed by API key) ──────────────────────────
+  // ─ ─  Usage cache (60-second TTL, keyed by API key) ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ 
   const _usageCache = new Map<string, { data: any; ts: number }>();
   const USAGE_CACHE_TTL_MS = 60_000;
   const _pricingCache = new Map<string, { data: any; ts: number }>();
@@ -7522,7 +7522,7 @@ export function initializeIpcHandlers(appState: AppState): void {
 
   // Natively API handlers removed - Natively is completely disabled in this build
 
-  // ── Free Trial IPC ───────────────────────────────────────────────────────────
+  // ─ ─  Free Trial IPC ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ 
 
   // Start or resume a free trial. Fetches HWID, calls server, persists token locally.
   safeHandle('trial:start', async () => {
@@ -8313,7 +8313,7 @@ export function initializeIpcHandlers(appState: AppState): void {
   // write ACTUALLY reached disk — we branch on that real result, NOT on a capability
   // probe like isPersistenceAvailable() (which is almost always true and cannot see a
   // disk-full / EACCES / read-only write failure). Branching on the real write result
-  // is what closes the "false Saved → key gone on restart" bug class for good. Only
+  // is what closes the "false Saved →  key gone on restart" bug class for good. Only
   // flagged when a non-empty key was provided (clearing has nothing to persist).
   const sttPersistError =
     'Could not save your API key to disk — it will work this session but will not survive a restart. Check that the app has permission to write its data folder.';
@@ -8624,9 +8624,9 @@ export function initializeIpcHandlers(appState: AppState): void {
           // With a valid key, Soniox accepts the config and then silently waits for audio —
           // it never sends a response message. With an invalid key it immediately sends an
           // error message and closes. So the strategy is:
-          //   • If we receive an error message → fail
-          //   • If the connection errors at the WS level → fail
-          //   • If 2.5 s pass after sending the config with no error → success
+          //   • If we receive an error message →  fail
+          //   • If the connection errors at the WS level →  fail
+          //   • If 2.5 s pass after sending the config with no error →  success
           const WebSocket = require('ws');
           return await new Promise<{ success: boolean; error?: string }>((resolve) => {
             let resolved = false;
@@ -8962,6 +8962,7 @@ export function initializeIpcHandlers(appState: AppState): void {
             // never received, which silently reverted on the next launch.
             return { success: false, error: 'settings_store_degraded' };
           }
+        if (appState.getIsMeetingActive()) await appState.reconfigureSttProvider();
         return { success: true };
       } catch (e: any) {
         return { success: false, error: e.message };
@@ -9407,7 +9408,7 @@ export function initializeIpcHandlers(appState: AppState): void {
   safeHandle('codex-cli:login', async (_, config?: any) => runCodexAuthAction('login', config));
   safeHandle('codex-cli:doctor', async (_, config?: any) => runCodexAuthAction('doctor', config));
 
-  // ── ChatGPT OAuth (new — replaces `codex login` CLI subprocess) ──────────
+  // ─ ─  ChatGPT OAuth (new — replaces `codex login` CLI subprocess) ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ 
   // The renderer calls codex:start-login, which kicks off the PKCE flow,
   // opens the system browser, and waits for the loopback callback. When
   // the user completes (or denies) the auth in the browser, the
@@ -9493,7 +9494,7 @@ export function initializeIpcHandlers(appState: AppState): void {
     try {
       const tokens = await codexOAuth.refreshTokens();
       if (!tokens) {
-        return { success: false, error: 'Codex session expired. Please sign in again from Settings → AI Providers.' };
+        return { success: false, error: 'Codex session expired. Please sign in again from Settings →  AI Providers.' };
       }
       return { success: true, expiresAt: tokens.expiresAt, email: tokens.email };
     } catch (error: any) {
@@ -9594,7 +9595,7 @@ export function initializeIpcHandlers(appState: AppState): void {
   // ROUND 3 FIX (#4): click-outside close for ModelSelector. With panel-
   // nonactivating + becomesKeyOnlyIfNeeded, the on('blur') auto-close in
   // ModelSelectorWindowHelper fires unreliably (panel may never become key
-  // → never receives blur). The overlay's renderer fires this IPC on every
+  // →  never receives blur). The overlay's renderer fires this IPC on every
   // mousedown that isn't on the toggle button itself; if the model selector
   // is open, we close it. No-op when closed (toggleWindow handled the open).
   safeHandle('model-selector:close-if-open', () => {
@@ -9724,13 +9725,13 @@ export function initializeIpcHandlers(appState: AppState): void {
   // SearchOrchestrator.globalSearch (the spec's fusion formula). Local-first: results
   // come from the local DB; when Hindsight is configured (Phase D) cross-meeting
   // long-term memories are ALSO merged in as memory-source candidates (see below).
-  // Single-user desktop DB → all candidates share the one local user, so the isolation
+  // Single-user desktop DB →  all candidates share the one local user, so the isolation
   // invariant (user/org filter before ranking) holds trivially.
   // Returns [] when the flag is off so the renderer keeps its current behavior.
   safeHandle('search:global-meetings', async (_event, { query, filters }: { query: string; filters?: any }) => {
     try {
       if (!isIntelligenceFlagEnabled('globalSearchV2')) return { enabled: false, results: [] };
-      // Explicit renderer→main input validation (security review 2026-06-13 LOW): reject
+      // Explicit renderer→ main input validation (security review 2026-06-13 LOW): reject
       // non-string query / non-object filters rather than relying on coercion + catch.
       if (typeof query !== 'string') return { enabled: true, results: [] };
       if (filters !== undefined && (typeof filters !== 'object' || filters === null || Array.isArray(filters))) filters = {};
@@ -9986,9 +9987,9 @@ export function initializeIpcHandlers(appState: AppState): void {
     // package.json appId if app.getAppPath() inspection somehow fails.
     let bundleId: string;
     try {
-      // app.isPackaged → packaged Info.plist CFBundleIdentifier
+      // app.isPackaged →  packaged Info.plist CFBundleIdentifier
       //                  (== package.json build.appId for electron-builder)
-      // !app.isPackaged → 'com.github.Electron' (the dev Electron binary's
+      // !app.isPackaged →  'com.github.Electron' (the dev Electron binary's
       //                   bundle id; TCC entries land here in dev mode)
       bundleId = app.isPackaged ? 'com.electron.meeting-notes' : 'com.github.Electron';
     } catch {
@@ -10060,7 +10061,7 @@ export function initializeIpcHandlers(appState: AppState): void {
       const allowedWebUrl = parsed.protocol === 'https:';
       // x-apple.systempreferences is a macOS-only URI scheme. Allowing it on
       // Windows let renderer regressions hand Windows shell an unknown
-      // protocol → Microsoft Store popup (issue #252). Gate the allowlist on
+      // protocol →  Microsoft Store popup (issue #252). Gate the allowlist on
       // the actual platform so the IPC layer is the last line of defense.
       const allowedSystemSettingsUrl =
         parsed.protocol === 'x-apple.systempreferences:' && process.platform === 'darwin';
@@ -10083,7 +10084,7 @@ export function initializeIpcHandlers(appState: AppState): void {
   // ==========================================
 
   // MODE 1: Assist (Passive observation)
-  // ── Usage-ledger feature instrumentation (phase 4) ─────────────────────────
+  // ─ ─  Usage-ledger feature instrumentation (phase 4) ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ 
   //
   // `runTracked` emits feature_started and exactly one terminal event. The
   // feature name comes from the ACTIVE MODE and is only a NAMED feature when
@@ -10721,8 +10722,8 @@ export function initializeIpcHandlers(appState: AppState): void {
   });
 
   // Phase 3 — Dynamic Actions IPC. Accept/dismiss/list. The action emission
-  // direction is push-only (intelligence-dynamic-action channel from main →
-  // renderer); these handlers are the renderer → main control plane.
+  // direction is push-only (intelligence-dynamic-action channel from main → 
+  // renderer); these handlers are the renderer →  main control plane.
   safeHandle('dynamic-action:accept', async (_, actionId: string) => {
     try {
       if (typeof actionId !== 'string' || !actionId) {
@@ -10936,7 +10937,7 @@ export function initializeIpcHandlers(appState: AppState): void {
       // Prompt System v2 (flag promptSystemV2): one provider-neutral email
       // contract replaces the Gemini/Groq prompt pair. The transport shape is
       // unchanged (instructions concatenated into the user message with
-      // skipSystemPrompt=true). Flag off → legacy constants, unchanged.
+      // skipSystemPrompt=true). Flag off →  legacy constants, unchanged.
       let v2EmailPrompt: string | null = null;
       try {
         const { resolveV2SystemPrompt } = require('./llm/promptSystemV2');
@@ -11527,7 +11528,7 @@ export function initializeIpcHandlers(appState: AppState): void {
         return null;
       }
       const dossier = orchestrator.getCompanyResearchEngine().getCachedDossier(company);
-      console.log(`[CompanyIntel-hydrate] getCachedDossier("${company}") → ${dossier ? `${dossier.hiring_strategy?.length || 0}b hiring + ${dossier.culture_ratings?.overall || 'n/a'}/5 culture` : 'null'}`);
+      console.log(`[CompanyIntel-hydrate] getCachedDossier("${company}") →  ${dossier ? `${dossier.hiring_strategy?.length || 0}b hiring + ${dossier.culture_ratings?.overall || 'n/a'}/5 culture` : 'null'}`);
       return dossier;
     } catch (error: any) {
       console.error('[IPC] profile:get-company-dossier error:', error);
@@ -11734,7 +11735,7 @@ export function initializeIpcHandlers(appState: AppState): void {
       }
       const engine = orchestrator.getCompanyResearchEngine();
 
-      // Wire search provider: Tavily (user key) → Natively API (fallback) → none (LLM-only).
+      // Wire search provider: Tavily (user key) →  Natively API (fallback) →  none (LLM-only).
       // Shared cascade with the AOT pipeline (see resolveCompanySearchProvider) so the
       // manual and automatic paths cannot drift. Null clears any stale provider left
       // from a session where keys were since removed.
@@ -12253,7 +12254,7 @@ export function initializeIpcHandlers(appState: AppState): void {
     appState.getWindowHelper().setLauncherOpacityPreview(!!active);
   });
 
-  // ── Permissions ──────────────────────────────────────────────
+  // ─ ─  Permissions ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ 
   safeHandle('permissions:check', async () => {
     if (process.platform === 'darwin') {
       const mic = systemPreferences.getMediaAccessStatus('microphone');
@@ -12535,7 +12536,7 @@ export function initializeIpcHandlers(appState: AppState): void {
     }
   });
 
-  // ── CONTEXT INTELLIGENCE V3 — the rollout opt-in (§3 Stage 1) ─────────────
+  // ─ ─  CONTEXT INTELLIGENCE V3 — the rollout opt-in (§3 Stage 1) ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ 
   //
   // Originally the Stage 1 "internal users, opt-in" switch. DEFAULT_ENABLED
   // flipped to true on 2026-07-30 (flag.ts is the source of truth); this now
@@ -12572,7 +12573,7 @@ export function initializeIpcHandlers(appState: AppState): void {
     }
   });
 
-  // ── CONTEXT INTELLIGENCE V3 — rollout telemetry (§4/§5, Phase 10) ─────────
+  // ─ ─  CONTEXT INTELLIGENCE V3 — rollout telemetry (§4/§5, Phase 10) ─ ─ ─ ─ ─ ─ ─ ─ ─ 
   //
   // Read-only. Counters, enum tallies, ids and durations — never evidence text
   // (the trace is redacted at construction and this module only counts).
@@ -12589,7 +12590,7 @@ export function initializeIpcHandlers(appState: AppState): void {
     }
   });
 
-  // ── CONTEXT INTELLIGENCE V3 — the Answer policy control (§6, Phase 7) ─────
+  // ─ ─  CONTEXT INTELLIGENCE V3 — the Answer policy control (§6, Phase 7) ─ ─ ─ ─ ─ 
   //
   // One GET carrying every decision the renderer needs — whether V3 is on,
   // whether the control binds to anything in this mode, the resolved value and
@@ -12854,7 +12855,7 @@ export function initializeIpcHandlers(appState: AppState): void {
     }
   });
 
-  // ── OKF Knowledge Packs (Phase 5 UI) ────────────────────────────
+  // ─ ─  OKF Knowledge Packs (Phase 5 UI) ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ 
   // All handlers are no-ops (empty result) when okfKnowledgeUi is off, so
   // the renderer can safely call them unconditionally — the UI itself is
   // gated behind the flag and simply won't render if these return nothing.
@@ -12972,7 +12973,7 @@ export function initializeIpcHandlers(appState: AppState): void {
     }
   });
 
-  // ── OKF Knowledge Card edit/approval (Phase 6) ──────────────────
+  // ─ ─  OKF Knowledge Card edit/approval (Phase 6) ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ 
   // All handlers require both Pro AND okfUserEditableCards — the flag is
   // the feature gate, isProOrTrialActive is the existing paywall each
   // reference-file-touching handler already applies.
@@ -13045,7 +13046,7 @@ export function initializeIpcHandlers(appState: AppState): void {
     }
   });
 
-  // ── Note Sections ──────────────────────────────────────────────
+  // ─ ─  Note Sections ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ 
 
   safeHandle('modes:get-note-sections', async (_, modeId: string) => {
     try {
@@ -13119,7 +13120,7 @@ export function initializeIpcHandlers(appState: AppState): void {
   // or a phone connects/disconnects. Idempotent — multiple windows can listen.
   //
   // WINDOWS LEAK HARDENING (2026-07-11): the launcher renderer only consumes the
-  // boolean flags of PhoneMirrorInfo (extensionConnected → auto-dismiss the
+  // boolean flags of PhoneMirrorInfo (extensionConnected →  auto-dismiss the
   // browser-extension onboarding toaster). It does NOT need the heavy fields
   // (qrDataUrl base64 PNG, phone/ext tokens, url). Sending the full payload to
   // the launcher on every status change — and re-sending identical payloads when
@@ -13355,8 +13356,8 @@ export function initializeIpcHandlers(appState: AppState): void {
   });
 
   // Open the 60s one-click pairing window for the companion browser extension.
-  // The user clicks "Connect browser extension" in Settings → this arms the
-  // /pair endpoint → the extension's "Connect to Natively" button fetches the
+  // The user clicks "Connect browser extension" in Settings →  this arms the
+  // /pair endpoint →  the extension's "Connect to Natively" button fetches the
   // token. Requires Phone Mirror to be running (the /pair route lives on its
   // HTTP server).
   safeHandle('phone-mirror:arm-extension', async () => {
@@ -13456,7 +13457,7 @@ export function initializeIpcHandlers(appState: AppState): void {
     }
   });
 
-  // ── Smart Browser Context v2 — settings get/set ────────────────────────
+  // ─ ─  Smart Browser Context v2 — settings get/set ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ 
   // Manual capture is always on (no flag). These drive the AUTO behaviour. The
   // resolved getter applies the documented defaults in one place (SettingsManager).
   safeHandle('browser-context:get-settings', async () => {
@@ -13802,7 +13803,7 @@ export function initializeIpcHandlers(appState: AppState): void {
         }
       }
     } else if (cmd.type === 'screenshot') {
-      // Stealth screenshot: capture on PC → add to screenshot queue → ack to phone.
+      // Stealth screenshot: capture on PC →  add to screenshot queue →  ack to phone.
       // The image is NOT sent to the phone — it stays on the desktop for AI use.
       // The phone simply acts as a remote shutter button.
       try {
@@ -13819,7 +13820,7 @@ export function initializeIpcHandlers(appState: AppState): void {
   });
 
   // ============================================================
-  // E2E TEST HARNESS IPC (gated behind NATIVELY_E2E=1) ─────────
+  // E2E TEST HARNESS IPC (gated behind NATIVELY_E2E=1) ─ ─ ─ ─ ─ ─ ─ ─ ─ 
   // ============================================================
   // These handlers exist ONLY to let the Modes-Manager E2E harness drive the
   // REAL pipeline without native side-channels that can't run headlessly:
@@ -14263,7 +14264,7 @@ export function initializeIpcHandlers(appState: AppState): void {
         try { im.on?.('clarify_ready', onClarify as any); } catch {}
         try { im.on?.('recap_ready', onRecap as any); } catch {}
         try { im.on?.('follow_up_questions', onFollowUps as any); } catch {}
-        // Drive the real pipeline. handleSuggestionTrigger → runWhatShouldISay.
+        // Drive the real pipeline. handleSuggestionTrigger →  runWhatShouldISay.
         Promise.resolve(
           im.handleSuggestionTrigger({
             context: builtContext,
