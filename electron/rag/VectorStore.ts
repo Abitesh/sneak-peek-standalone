@@ -206,6 +206,50 @@ return this.searchSimilarJS(queryEmbedding, meetingId, limit, minSimilarity, spa
 return this.searchSimilarJS(queryEmbedding, meetingId, limit, minSimilarity, spaceKey);
 }
 /**
+ * Search meeting transcript chunks through the shared FTS5 index.
+ * The lexical score is normalized by rank so it can be fused with the
+ * semantic cosine score without depending on SQLite BM25 magnitude.
+ */
+async searchLexical(
+query: string,
+options: { meetingId?: string; limit?: number } = {},
+): Promise<(ScoredChunk & { lexicalScore: number; bm25Score: number })[]> {
+const q = String(query ?? '').trim();
+if (!q) return [];
+const { meetingId, limit = 100 } = options;
+const tokens = q
+.toLowerCase()
+.replace(/[^\p{L}\p{N}]+/gu, ' ')
+.split(/\s+/)
+.filter((token) => token.length > 1)
+.slice(0, 32);
+if (!tokens.length) return [];
+const matchQuery = tokens.map((token) => `"${token.replace(/"/g, '""')}"`).join(' OR ');
+let sql = `
+SELECT c.*, bm25(chunks_fts) AS bm25_score
+FROM chunks_fts
+JOIN chunks c ON c.id = chunks_fts.chunk_id
+WHERE chunks_fts MATCH ?
+`;
+const params: any[] = [matchQuery];
+if (meetingId) { sql += ' AND c.meeting_id = ?'; params.push(meetingId); }
+sql += ' ORDER BY bm25_score ASC LIMIT ?';
+params.push(Math.max(1, Math.min(1000, limit)));
+try {
+const rows = this.db.prepare(sql).all(...params) as any[];
+if (!rows.length) return [];
+return rows.map((row, index) => ({
+...this.rowToChunk(row),
+lexicalScore: 1 - (index / Math.max(1, rows.length)),
+bm25Score: Number(row.bm25_score),
+}));
+} catch (error) {
+console.warn('[VectorStore] Meeting FTS search failed:', error);
+return [];
+}
+}
+
+/**
 * Native vec0 search — runs directly on the shared connection.
 */
 private searchSimilarNative(

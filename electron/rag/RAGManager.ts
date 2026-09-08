@@ -96,6 +96,8 @@ export interface RAGSearchOptions {
     meetingId?: string;
     modeId?: string;
     topK?: number;
+    /** Maximum candidates considered per retrieval source before final fusion. */
+    candidatePoolSize?: number;
     tokenBudget?: number;
     allowRerank?: boolean;
     forceDocumentGrounding?: boolean;
@@ -273,6 +275,7 @@ export class RAGManager {
 
         const source = options.source ?? 'all';
         const topK = Math.max(1, Math.min(50, options.topK ?? 8));
+        const candidatePoolSize = Math.max(topK, Math.min(100, options.candidatePoolSize ?? 100));
         const tokenBudget = Math.max(1, options.tokenBudget ?? 1800);
         const results: RagSearchResult[] = [];
         const { modesManager, personalKnowledge } = this.getSourceManagers();
@@ -282,6 +285,7 @@ export class RAGManager {
                 const context = await this.retriever.retrieve(normalizedQuery, {
                     ...(options.meetingId ? { meetingId: options.meetingId } : {}),
                     topK,
+                    candidatePoolSize,
                     maxTokens: tokenBudget,
                 });
 
@@ -339,7 +343,7 @@ export class RAGManager {
                 if (activeMode && files.length) {
                     const context = await modesManager.retrieveHybridRaw(activeMode, files, {
                         query: normalizedQuery,
-                        topK,
+                        topK: candidatePoolSize,
                         tokenBudget,
                         ...(options.allowRerank !== undefined ? { allowRerank: options.allowRerank } : {}),
                         ...(options.forceDocumentGrounding !== undefined ? { forceDocumentGrounding: options.forceDocumentGrounding } : {}),
@@ -406,9 +410,9 @@ export class RAGManager {
 
         if ((source === 'personal' || source === 'all') && personalKnowledge) {
             try {
-                const items = await (personalKnowledge.searchRelevantAsync?.(normalizedQuery, topK)
-                    ?? Promise.resolve(personalKnowledge.searchRelevant?.(normalizedQuery, topK)
-                        ?? personalKnowledge.search?.(normalizedQuery, topK)
+                const items = await (personalKnowledge.searchRelevantAsync?.(normalizedQuery, candidatePoolSize)
+                    ?? Promise.resolve(personalKnowledge.searchRelevant?.(normalizedQuery, candidatePoolSize)
+                        ?? personalKnowledge.search?.(normalizedQuery, candidatePoolSize)
                         ?? []));
 
                 const documentCache = new Map<string, RagDocument>();
@@ -460,7 +464,11 @@ export class RAGManager {
             }
         }
 
-        return results;
+        // Final common-layer fusion boundary: each source contributes up to the
+        // candidate pool, then the canonical result score is used to produce the
+        // bounded set that can be handed to downstream context/LLM consumers.
+        results.sort((a, b) => b.score - a.score);
+        return results.slice(0, topK);
     }
 
     /** Build the canonical document object for a meeting from the existing meetings row. */

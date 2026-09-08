@@ -1761,6 +1761,44 @@ this.ensurePersonalVecTableForDim(dim);
 this.db.pragma('user_version = 33');
 }
 
+// Version 33 → 34: add a shared FTS5 index for meeting transcript chunks.
+// This is the lexical arm of the universal meeting hybrid retriever. The
+// existing Personal File FTS5 index remains separate because its storage
+// schema and lifecycle are independent.
+if (version < 34) {
+console.log('[DatabaseManager] Applying migration v33 → v34: meeting chunk FTS5 index');
+this.db.exec(`
+CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts
+USING fts5(chunk_id UNINDEXED, meeting_id UNINDEXED, speaker, text);
+
+CREATE TRIGGER IF NOT EXISTS chunks_fts_ai
+AFTER INSERT ON chunks
+BEGIN
+INSERT INTO chunks_fts(chunk_id, meeting_id, speaker, text)
+VALUES (NEW.id, NEW.meeting_id, COALESCE(NEW.speaker, ''), NEW.cleaned_text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS chunks_fts_ad
+AFTER DELETE ON chunks
+BEGIN
+DELETE FROM chunks_fts WHERE chunk_id = OLD.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS chunks_fts_au
+AFTER UPDATE OF meeting_id, speaker, cleaned_text ON chunks
+BEGIN
+DELETE FROM chunks_fts WHERE chunk_id = OLD.id;
+INSERT INTO chunks_fts(chunk_id, meeting_id, speaker, text)
+VALUES (NEW.id, NEW.meeting_id, COALESCE(NEW.speaker, ''), NEW.cleaned_text);
+END;
+
+DELETE FROM chunks_fts;
+INSERT INTO chunks_fts(chunk_id, meeting_id, speaker, text)
+SELECT id, meeting_id, COALESCE(speaker, ''), cleaned_text FROM chunks;
+`);
+this.db.pragma('user_version = 34');
+}
+
 console.log('[DatabaseManager] Migrations completed.');
 }
 // ============================================
