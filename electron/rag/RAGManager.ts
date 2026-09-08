@@ -98,6 +98,8 @@ export interface RAGSearchOptions {
     topK?: number;
     /** Maximum candidates considered per retrieval source before final fusion. */
     candidatePoolSize?: number;
+    /** Candidates sent to the local cross-encoder before final top-K. */
+    rerankCandidatePoolSize?: number;
     tokenBudget?: number;
     allowRerank?: boolean;
     forceDocumentGrounding?: boolean;
@@ -275,7 +277,11 @@ export class RAGManager {
 
         const source = options.source ?? 'all';
         const topK = Math.max(1, Math.min(50, options.topK ?? 8));
-        const candidatePoolSize = Math.max(topK, Math.min(100, options.candidatePoolSize ?? 100));
+        const candidatePoolSize = Math.max(topK, Math.min(1000, options.candidatePoolSize ?? 100));
+        const rerankCandidatePoolSize = Math.max(
+            topK,
+            Math.min(candidatePoolSize, Math.min(1000, options.rerankCandidatePoolSize ?? candidatePoolSize)),
+        );
         const tokenBudget = Math.max(1, options.tokenBudget ?? 1800);
         const results: RagSearchResult[] = [];
         const { modesManager, personalKnowledge } = this.getSourceManagers();
@@ -284,9 +290,15 @@ export class RAGManager {
             try {
                 const context = await this.retriever.retrieve(normalizedQuery, {
                     ...(options.meetingId ? { meetingId: options.meetingId } : {}),
-                    topK,
+                    // Change 7: preserve the full hybrid candidate pool for the
+                    // common BGE reranker. RAGManager owns the final top-K boundary
+                    // on this unified path, so the source retriever must not narrow
+                    // the meeting results first.
+                    topK: candidatePoolSize,
                     candidatePoolSize,
                     maxTokens: tokenBudget,
+                    deferFinalSelection: true,
+                    allowRerank: false,
                 });
 
                 const documentCache = new Map<string, RagDocument>();
@@ -345,7 +357,9 @@ export class RAGManager {
                         query: normalizedQuery,
                         topK: candidatePoolSize,
                         tokenBudget,
-                        ...(options.allowRerank !== undefined ? { allowRerank: options.allowRerank } : {}),
+                        // Change 7: the unified manager owns the common BGE rerank
+                        // stage, so do not rerank Mode candidates a second time here.
+                        allowRerank: false,
                         ...(options.forceDocumentGrounding !== undefined ? { forceDocumentGrounding: options.forceDocumentGrounding } : {}),
                     });
 
@@ -464,11 +478,91 @@ export class RAGManager {
             }
         }
 
-        // Final common-layer fusion boundary: each source contributes up to the
-        // candidate pool, then the canonical result score is used to produce the
-        // bounded set that can be handed to downstream context/LLM consumers.
+        // Final common-layer fusion boundary: source adapters provide candidates,
+        // then the shared BGE reranker applies the final relevance ordering before
+        // the public top-K boundary.
+        if (options.allowRerank !== false) {
+            const reranked = await this.rerankCanonicalResults(
+                normalizedQuery,
+                results,
+                rerankCandidatePoolSize,
+            );
+            results.splice(0, results.length, ...reranked);
+        }
         results.sort((a, b) => b.score - a.score);
         return results.slice(0, topK);
+    }
+
+    /**
+     * Apply the shared local BGE cross-encoder to canonical results that reach
+     * the unified manager. Source-specific retrieval remains responsible for
+     * candidate generation; this is the common final relevance stage.
+     *
+     * The existing LocalReranker owns the ONNX worker/lifecycle. We batch at six
+     * passages to preserve the native-memory safety already used by ModeHybridRetriever.
+     * Any failure leaves the pre-rerank result ordering untouched.
+     */
+    private async rerankCanonicalResults(
+        query: string,
+        results: RagSearchResult[],
+        candidatePoolSize: number,
+    ): Promise<RagSearchResult[]> {
+        if (results.length < 2) return results;
+
+        let enabled = false;
+        try {
+            const { isRagLocalRerankEnabled } = require('../intelligence/intelligenceFlags') as typeof import('../intelligence/intelligenceFlags');
+            enabled = isRagLocalRerankEnabled();
+        } catch {
+            return results;
+        }
+        if (!enabled) return results;
+
+        try {
+            const { getLocalReranker } = require('./LocalReranker') as typeof import('./LocalReranker');
+            const reranker = getLocalReranker() as {
+                rerank: (q: string, passages: string[]) => Promise<Array<{ index: number; score: number }> | null>;
+            };
+
+            const pool = results.slice(0, Math.min(candidatePoolSize, results.length));
+            const reranked: Array<{ result: RagSearchResult; score: number }> = [];
+            const batchSize = 6;
+
+            for (let start = 0; start < pool.length; start += batchSize) {
+                const batch = pool.slice(start, start + batchSize);
+                const scores = await reranker.rerank(query, batch.map(result => result.chunk.text));
+                if (!scores || scores.length < batch.length) {
+                    throw new Error('local reranker returned incomplete scores');
+                }
+                for (const item of scores) {
+                    const index = Number(item.index);
+                    if (!Number.isInteger(index) || index < 0 || index >= batch.length) continue;
+                    const rawScore = Number(item.score);
+                    if (!Number.isFinite(rawScore)) continue;
+                    reranked.push({ result: batch[index], score: rawScore });
+                }
+            }
+
+            if (reranked.length !== pool.length) return results;
+
+            const byId = new Map(
+                reranked.map(item => [item.result.chunk.id, { ...item.result, rerankScore: item.score }]),
+            );
+            const ranked = results.map(result => {
+                const rerankedResult = byId.get(result.chunk.id);
+                if (!rerankedResult) return result;
+                const normalized = 1 / (1 + Math.exp(-rerankedResult.rerankScore!));
+                return {
+                    ...rerankedResult,
+                    score: normalized,
+                };
+            });
+            ranked.sort((a, b) => b.score - a.score);
+            return ranked;
+        } catch (error) {
+            console.warn('[RAGManager] Local rerank failed; keeping unified retrieval order:', error);
+            return results;
+        }
     }
 
     /** Build the canonical document object for a meeting from the existing meetings row. */

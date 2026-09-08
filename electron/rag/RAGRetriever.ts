@@ -4,6 +4,19 @@ import { formatChunkForContext } from './SemanticChunker';
 // Phase 3 (semantic-retrieval repair, 2026-08-13): minSimilarity resolved per
 // embedding space (legacy 0.25 for every space until telemetry calibrates).
 import { resolveMinSimilarity } from '../llm/semanticAdmissionGate';
+
+interface LocalRerankerLike {
+    rerank(query: string, passages: string[]): Promise<Array<{ index: number; score: number }> | null>;
+}
+
+function isLocalRerankEnabled(): boolean {
+    try {
+        const { isRagLocalRerankEnabled } = require('../intelligence/intelligenceFlags') as typeof import('../intelligence/intelligenceFlags');
+        return isRagLocalRerankEnabled();
+    } catch {
+        return false;
+    }
+}
 /**
 * Query intent types for biasing retrieval strategy
 * Detected via regex patterns, not LLM
@@ -19,6 +32,10 @@ meetingId?: string; // For meeting-scoped queries
 maxTokens?: number; // Context token budget (default: 1500)
 topK?: number; // Final context count (default: 8)
 candidatePoolSize?: number; // Candidates per retrieval arm before hybrid fusion (default: 100)
+rerankCandidatePoolSize?: number; // Candidates sent to the local cross-encoder (default: candidatePoolSize)
+/** When true, return the hybrid candidate pool without final top-K/token-budget selection. */
+deferFinalSelection?: boolean;
+allowRerank?: boolean; // Enable local BGE cross-encoder reranking when the feature flag is on
 recencyWeight?: number; // 0-1, how much to weight recent (default: 0.3)
 intent?: QueryIntent; // Override detected intent
 }
@@ -57,6 +74,9 @@ meetingId,
 maxTokens = 1500,
 topK = 8,
 candidatePoolSize = 100,
+rerankCandidatePoolSize,
+deferFinalSelection = false,
+allowRerank = true,
 recencyWeight = 0.3,
 intent: overrideIntent
 } = options;
@@ -128,7 +148,62 @@ bm25Score: lexicalChunk?.bm25Score,
 // context assembly. This keeps the LLM-facing set small without throwing away
 // lexical-only or semantic-only hits that the other arm discovered.
 fused.sort((a, b) => b.similarity - a.similarity);
-const candidates = fused.slice(0, poolSize);
+let candidates: ScoredChunk[] = fused.slice(0, poolSize);
+
+        // Stage 3: local BGE cross-encoder reranking. The existing LocalReranker
+        // owns ONNX lifecycle/worker isolation; this layer only supplies the
+        // bounded hybrid candidate pool and preserves the baseline on failure.
+        if (allowRerank && isLocalRerankEnabled() && candidates.length > 1) {
+            try {
+                const { getLocalReranker } = require('./LocalReranker') as typeof import('./LocalReranker');
+                const reranker = getLocalReranker() as unknown as LocalRerankerLike;
+                const requestedPool = rerankCandidatePoolSize ?? poolSize;
+                const rerankPoolSize = Math.max(topK, Math.min(poolSize, Math.min(1000, requestedPool)));
+                const rerankPool = candidates.slice(0, rerankPoolSize);
+                const reranked: Array<ScoredChunk & { rerankScore?: number }> = [];
+                const batchSize = 6;
+
+                for (let start = 0; start < rerankPool.length; start += batchSize) {
+                    const batch = rerankPool.slice(start, start + batchSize);
+                    const scores = await reranker.rerank(query, batch.map(chunk => chunk.text));
+                    if (!scores || scores.length < batch.length) {
+                        throw new Error('local reranker returned incomplete scores');
+                    }
+                    for (const item of scores) {
+                        const localIndex = Number(item.index);
+                        if (!Number.isInteger(localIndex) || localIndex < 0 || localIndex >= batch.length) continue;
+                        reranked.push({
+                            ...batch[localIndex],
+                            rerankScore: Number(item.score),
+                        });
+                    }
+                }
+
+                if (reranked.length === rerankPool.length) {
+                    const byId = new Map(reranked.map(chunk => [String(chunk.id), chunk]));
+                    candidates = candidates.map(chunk => byId.get(String(chunk.id)) ?? chunk);
+                    candidates.sort((a, b) => {
+                        const ar = Number((a as ScoredChunk & { rerankScore?: number }).rerankScore);
+                        const br = Number((b as ScoredChunk & { rerankScore?: number }).rerankScore);
+                        if (Number.isFinite(br) && Number.isFinite(ar) && br !== ar) return br - ar;
+                        return b.similarity - a.similarity;
+                    });
+                }
+            } catch (error) {
+                console.warn('[RAGRetriever] Local rerank failed; keeping hybrid retrieval order:', error);
+            }
+        }
+
+if (deferFinalSelection) {
+    const candidateChunks = candidates as ScoredChunk[];
+    return {
+        chunks: candidateChunks,
+        formattedContext: '',
+        totalTokens: 0,
+        meetingIds: [...new Set(candidateChunks.map(c => c.meetingId))],
+        intent,
+    };
+}
 
 const now = Date.now();
 const ranked = candidates.map(chunk => ({
@@ -264,7 +339,14 @@ const ageHours = ageMs / (1000 * 60 * 60);
 const recencyScore = Math.exp(-ageHours / 168); // 168 hours = 7 days
 // Combined score
 const relevanceWeight = 1 - recencyWeight;
-return (relevanceWeight * chunk.similarity) + (recencyWeight * recencyScore);
+const rerankScore = Number((chunk as ScoredChunk & { rerankScore?: number }).rerankScore);
+    const relevanceScore = Number.isFinite(rerankScore) ? rerankScore : chunk.similarity;
+    // BGE logits are not on the same calibrated scale as cosine similarity.
+    // Normalize only their relative ordering for the recency blend.
+    const normalizedRelevance = Number.isFinite(rerankScore)
+        ? 1 / (1 + Math.exp(-rerankScore))
+        : relevanceScore;
+    return (relevanceWeight * normalizedRelevance) + (recencyWeight * recencyScore);
 }
 /**
 * Detect query intent for biasing retrieval strategy
