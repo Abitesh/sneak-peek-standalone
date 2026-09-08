@@ -12,6 +12,7 @@ import { RAGRetriever } from './RAGRetriever';
 import { LiveRAGIndexer } from './LiveRAGIndexer';
 import { buildRAGPrompt, NO_CONTEXT_FALLBACK, NO_GLOBAL_CONTEXT_FALLBACK } from './prompts';
 import type { ProviderDataScopePolicy } from '../llm/ProviderRouter';
+import { RagQueryPlanner, type RagQueryPlan } from './RagQueryPlanner';
 
 interface ModesManagerLike {
     getActiveModeInfo(): { id?: string } | null;
@@ -93,6 +94,8 @@ export type UnifiedRAGResult = RagSearchResult;
 
 export interface RAGSearchOptions {
     source?: RagSourceType | 'all';
+    /** Conversation session used only for retrieval-query rewriting. */
+    sessionId?: string;
     meetingId?: string;
     modeId?: string;
     topK?: number;
@@ -186,6 +189,7 @@ export class RAGManager {
     private retriever: RAGRetriever;
     private llmHelper: LLMHelper | null = null;
     private liveIndexer: LiveRAGIndexer;
+    private queryPlanner: RagQueryPlanner;
 
     /**
      * Change 1: source coordination lives here, while each source keeps ownership
@@ -244,6 +248,7 @@ export class RAGManager {
         this.embeddingPipeline = new EmbeddingPipeline(config.db, this.vectorStore);
         this.retriever = new RAGRetriever(this.vectorStore, this.embeddingPipeline);
         this.liveIndexer = new LiveRAGIndexer(this.vectorStore, this.embeddingPipeline);
+        this.queryPlanner = new RagQueryPlanner();
 
         this.embeddingPipeline.initialize({
             openaiKey: config.openaiKey,
@@ -272,8 +277,15 @@ export class RAGManager {
      * provides; missing provenance remains undefined rather than fabricated.
      */
     async search(query: string, options: RAGSearchOptions = {}): Promise<RagSearchResult[]> {
-        const normalizedQuery = String(query ?? '').trim();
-        if (!normalizedQuery) return [];
+        const originalQuery = String(query ?? '').trim();
+        if (!originalQuery) return [];
+
+        // Change 8: query planning is an explicit retrieval-stage concern. The
+        // original user question remains untouched for answer generation; only
+        // retrieval receives the rewritten query. Without a sessionId the planner
+        // is a safe pass-through, so existing callers retain their behavior.
+        const queryPlan: RagQueryPlan = this.queryPlanner.plan(originalQuery, options.sessionId);
+        const normalizedQuery = queryPlan.retrievalQuery;
 
         const source = options.source ?? 'all';
         const topK = Math.max(1, Math.min(50, options.topK ?? 8));
@@ -672,6 +684,14 @@ export class RAGManager {
         if (!heading) return undefined;
         const match = heading.match(/^((?:\d+)(?:\.\d+){0,2})\s+/);
         return match?.[1];
+    }
+
+    /**
+     * Change 8: expose the query-planning result for diagnostics/tests while
+     * keeping originalQuery separate from the retrieval-only rewrite.
+     */
+    planQuery(query: string, sessionId?: string): RagQueryPlan {
+        return this.queryPlanner.plan(String(query ?? '').trim(), sessionId);
     }
 
     /**
