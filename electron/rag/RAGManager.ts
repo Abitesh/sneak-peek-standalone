@@ -35,6 +35,8 @@ interface PersonalKnowledgeLike {
     searchRelevantAsync(query: string, limit?: number): Promise<any[]>;
     searchRelevant?(query: string, limit?: number): any[];
     search?(query: string, limit?: number): any[];
+    setEmbeddingServices?(embeddingPipeline: EmbeddingPipeline, vectorStore: VectorStore): void;
+    reindexEmbeddings?(): Promise<void>;
 }
 
 /**
@@ -187,6 +189,15 @@ export class RAGManager {
      * so RAGManager remains safe to construct during AppState startup and does not
      * introduce an eager circular dependency with main.ts/services.
      */
+    private configurePersonalKnowledge(personalKnowledge?: PersonalKnowledgeLike | null): void {
+        try {
+            const manager = personalKnowledge ?? (require('../personalKnowledge').getPersonalKnowledgeManager() as PersonalKnowledgeLike);
+            manager.setEmbeddingServices?.(this.embeddingPipeline, this.vectorStore);
+        } catch (error) {
+            console.warn('[RAGManager] Personal embedding services unavailable:', error);
+        }
+    }
+
     private getSourceManagers(): { modesManager: ModesManagerLike | null; personalKnowledge: PersonalKnowledgeLike | null } {
         let modesManager: ModesManagerLike | null = null;
         let personalKnowledge: PersonalKnowledgeLike | null = null;
@@ -199,6 +210,7 @@ export class RAGManager {
         try {
             const { getPersonalKnowledgeManager } = require('../personalKnowledge');
             personalKnowledge = getPersonalKnowledgeManager() as PersonalKnowledgeLike;
+            this.configurePersonalKnowledge(personalKnowledge);
         } catch (error) {
             console.warn('[RAGManager] Personal source unavailable:', error);
         }
@@ -237,6 +249,7 @@ export class RAGManager {
             providerDataScopes: config.providerDataScopes,
             explicitKeyManagement: config.explicitKeyManagement,
         }).then(() => {
+            this.configurePersonalKnowledge();
             // Backfill provider metadata for meetings that were embedded before the
             // embedding_provider column was written (or where the write failed silently).
             this._backfillEmbeddingProviderMetadata();
@@ -425,12 +438,20 @@ export class RAGManager {
                             chunkIndex: Number.isFinite(chunkIndex) ? chunkIndex : 0,
                             ...(Number.isFinite(startOffset) ? { startOffset } : {}),
                             ...(Number.isFinite(endOffset) ? { endOffset } : {}),
+                            ...(item.pageStart !== undefined ? { pageStart: Number(item.pageStart) } : {}),
+                            ...(item.pageEnd !== undefined ? { pageEnd: Number(item.pageEnd) } : {}),
+                            ...(item.section ? { section: String(item.section) } : {}),
+                            ...(item.heading ? { heading: String(item.heading) } : {}),
                             metadata: {
                                 sourceType: 'personal',
+                                contentType: item.contentType,
+                                ...(item.metadata && typeof item.metadata === 'object' ? item.metadata : {}),
+                                ...(item.embeddingSpace ? { embeddingSpace: item.embeddingSpace } : {}),
                             },
                         },
                         score: Number.isFinite(score) ? score : 0,
-                        lexicalScore: Number.isFinite(score) ? score : undefined,
+                        semanticScore: Number.isFinite(Number(item.semanticScore)) ? Number(item.semanticScore) : undefined,
+                        lexicalScore: Number.isFinite(Number(item.lexicalScore)) ? Number(item.lexicalScore) : undefined,
                         source: document,
                     });
                 }

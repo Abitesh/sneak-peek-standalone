@@ -15,6 +15,8 @@ import crypto from 'crypto';
 import Database from 'better-sqlite3';
 import { extractSafeDocumentText } from '../services/SafeDocumentTextExtractor';
 import { buildDocumentChunks, type DocumentMapChunk } from '../services/modes/DocumentMap';
+import type { EmbeddingPipeline } from '../rag/EmbeddingPipeline';
+import { VectorStore } from '../rag/VectorStore';
 export type PersonalFileType = 'resume' | 'job_description' | 'general';
 const PERSONAL_FILE_TYPES: ReadonlySet<string> = new Set(['resume', 'job_description', 'general']);
 export interface PersonalFileRecord {
@@ -35,9 +37,9 @@ extractedPageCount?: number;
 * 'done': chunked and searchable via FTS5.
 * 'lexical_only': extraction produced unreadable binary markers (raw PDF/
 * DOCX bytes) that repairUnreadableIndexes has not yet fixed — searchable,
-* but only over garbage text until the next repair pass succeeds. There is
-* no vector-embedding tier for personal files by design (file header); this
-* status reports the honest quality of the ONE (lexical) index that exists.
+* but only over garbage text until the next repair pass succeeds.
+* Embedding readiness is tracked separately on each chunk and may lag the
+* lexical index while the background embedding pass is running.
 */
 indexStatus: 'indexing' | 'done' | 'lexical_only';
 }
@@ -55,6 +57,8 @@ section?: string;
 heading?: string;
 contentType?: string;
 metadata?: Record<string, unknown>;
+semanticScore?: number;
+embeddingSpace?: string;
 }
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
 const MAX_EXTRACTED_CHARS = 1_500_000;
@@ -201,6 +205,9 @@ function chunkDocument(text: string): Array<{
 export class PersonalKnowledgeManager {
 private static instance: PersonalKnowledgeManager | null = null;
 private db: Database.Database;
+private embeddingPipeline: EmbeddingPipeline | null = null;
+private vectorStore: VectorStore | null = null;
+private embeddingBackfillInFlight: Promise<void> | null = null;
 private readonly storageRoot: string;
 private readonly repairedFileIds = new Set<string>();
 private constructor(db: Database.Database) {
@@ -243,6 +250,10 @@ chunk_index INTEGER NOT NULL,
 text TEXT NOT NULL,
 start_char INTEGER NOT NULL,
 end_char INTEGER NOT NULL,
+embedding BLOB,
+embedding_provider TEXT,
+embedding_dimensions INTEGER,
+embedding_space TEXT,
 FOREIGN KEY(file_id) REFERENCES personal_files(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_personal_file_chunks_file
@@ -297,6 +308,98 @@ private ensureDocumentMetadataColumns(): void {
     addChunkColumn('heading', 'TEXT');
     addChunkColumn('content_type', "TEXT NOT NULL DEFAULT 'text'");
     addChunkColumn('metadata_json', "TEXT NOT NULL DEFAULT '{}'");
+    addChunkColumn('embedding', 'BLOB');
+    addChunkColumn('embedding_provider', 'TEXT');
+    addChunkColumn('embedding_dimensions', 'INTEGER');
+    addChunkColumn('embedding_space', 'TEXT');
+}
+
+/**
+ * Attach the app's shared embedding pipeline/vector store. RAGManager calls
+ * this once the central RAG services exist; direct construction remains valid.
+ */
+setEmbeddingServices(embeddingPipeline: EmbeddingPipeline, vectorStore: VectorStore): void {
+if (this.embeddingPipeline === embeddingPipeline && this.vectorStore === vectorStore) return;
+this.embeddingPipeline = embeddingPipeline;
+this.vectorStore = vectorStore;
+void this.reindexEmbeddings().catch((error) => {
+console.warn('[PersonalKnowledgeManager] Background embedding backfill failed', {
+error: error instanceof Error ? error.message : String(error),
+});
+});
+}
+
+/**
+ * Backfill missing vectors and rebuild vectors whose embedding space no longer
+ * matches the active provider/model. This keeps semantic search space-safe.
+ */
+async reindexEmbeddings(): Promise<void> {
+if (!this.embeddingPipeline || !this.vectorStore) return;
+if (this.embeddingBackfillInFlight) return this.embeddingBackfillInFlight;
+this.embeddingBackfillInFlight = (async () => {
+await this.embeddingPipeline!.waitForReady(15000);
+const activeSpace = this.embeddingPipeline!.getActiveSpaceKey();
+if (!activeSpace) return;
+const rows = this.db.prepare(`
+SELECT DISTINCT file_id
+FROM personal_file_chunks
+WHERE embedding IS NULL OR embedding_space IS NULL OR embedding_space != ?
+ORDER BY file_id
+`).all(activeSpace) as Array<{ file_id: string }>;
+for (const row of rows) await this.embedFile(row.file_id);
+})().finally(() => { this.embeddingBackfillInFlight = null; });
+return this.embeddingBackfillInFlight;
+}
+
+private async embedFile(fileId: string): Promise<void> {
+if (!this.embeddingPipeline || !this.vectorStore) return;
+await this.embeddingPipeline.waitForReady(15000);
+const rows = this.db.prepare(`
+SELECT id, text
+FROM personal_file_chunks
+WHERE file_id = ?
+ORDER BY chunk_index ASC
+`).all(fileId) as Array<{ id: string; text: string }>;
+if (!rows.length) return;
+try {
+const result = await this.embeddingPipeline.getEmbeddingsWithFallback(rows.map((row) => row.text));
+if (result.embeddings.length !== rows.length) throw new Error(`Embedding count mismatch for personal file ${fileId}`);
+const provider = result.provider ?? this.embeddingPipeline.getActiveProviderName();
+const dimensions = result.dimensions ?? result.embeddings[0]?.length;
+const persist = this.db.transaction(() => {
+rows.forEach((row, index) => {
+this.vectorStore!.storePersonalEmbedding(
+row.id,
+result.embeddings[index],
+result.space,
+provider,
+dimensions,
+);
+});
+});
+persist();
+console.log('[PersonalKnowledgeManager] Embedded personal file', {
+fileId,
+chunkCount: rows.length,
+provider,
+dimensions,
+embeddingSpace: result.space,
+});
+} catch (error) {
+console.warn('[PersonalKnowledgeManager] Personal embedding pass failed; lexical search remains available', {
+fileId,
+error: error instanceof Error ? error.message : String(error),
+});
+}
+}
+
+private async embedFileInBackground(fileId: string): Promise<void> {
+try { await this.embedFile(fileId); } catch (error) {
+console.warn('[PersonalKnowledgeManager] Background personal embedding failed', {
+fileId,
+error: error instanceof Error ? error.message : String(error),
+});
+}
 }
 
 async ingestFile(filePath: string, fileType: PersonalFileType = 'general'): Promise<PersonalFileRecord> {
@@ -341,8 +444,8 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 const insertChunk = this.db.prepare(`
 INSERT INTO personal_file_chunks
-(id, file_id, chunk_index, text, start_char, end_char, page_start, page_end, section, heading, content_type, metadata_json)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+(id, file_id, chunk_index, text, start_char, end_char, page_start, page_end, section, heading, content_type, metadata_json, embedding, embedding_provider, embedding_dimensions, embedding_space)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL)
 `);
 const tx = this.db.transaction(() => {
 insertFile.run(
@@ -393,7 +496,9 @@ const winner = this.db.prepare(
 if (winner?.id) return this.getFile(winner.id)!;
 throw error;
 }
-return this.getFile(id)!;
+const record = this.getFile(id)!;
+void this.embedFileInBackground(id);
+return record;
 }
 private repairStoredPaths(): void {
 try {
@@ -478,6 +583,7 @@ const rows = this.db.prepare(`SELECT id, file_type FROM personal_files`).all() a
 return new Map(rows.map((r) => [r.id, (PERSONAL_FILE_TYPES.has(r.file_type) ? r.file_type : 'general') as PersonalFileType]));
 }
 deleteFile(id: string): boolean {
+if (this.vectorStore) this.vectorStore.deletePersonalEmbeddingsForFile(id);
 const result = this.db.transaction(() => {
 // FTS trigger needs the chunk rows to exist while it fires.
 this.db.prepare(`DELETE FROM personal_file_chunks WHERE file_id = ?`).run(id);
@@ -520,6 +626,7 @@ pc.section,
 pc.heading,
 pc.content_type,
 pc.metadata_json,
+pc.embedding_space,
 bm25(personal_file_chunks_fts) AS bm25_score
 FROM personal_file_chunks_fts f
 JOIN personal_file_chunks pc ON pc.id = f.chunk_id
@@ -543,6 +650,8 @@ section: row.section,
 heading: row.heading,
 contentType: row.content_type,
 metadata: this.parseChunkMetadata(row.metadata_json),
+semanticScore: undefined,
+embeddingSpace: row.embedding_space ?? undefined,
 });
 }
 } catch {
@@ -555,7 +664,7 @@ metadata: this.parseChunkMetadata(row.metadata_json),
 if (candidates.length < safeLimit) {
 const rows = this.db.prepare(`
 SELECT pc.id, pc.file_id, pf.file_name, pc.text, pc.start_char, pc.end_char,
-       pc.page_start, pc.page_end, pc.section, pc.heading, pc.content_type, pc.metadata_json
+       pc.page_start, pc.page_end, pc.section, pc.heading, pc.content_type, pc.metadata_json, pc.embedding_space
 FROM personal_file_chunks pc
 JOIN personal_files pf ON pf.id = pc.file_id
 `).all() as any[];
@@ -576,6 +685,8 @@ section: row.section,
 heading: row.heading,
 contentType: row.content_type,
 metadata: this.parseChunkMetadata(row.metadata_json),
+semanticScore: undefined,
+embeddingSpace: row.embedding_space ?? undefined,
 });
 }
 }
@@ -593,6 +704,60 @@ return [...byChunk.values()]
 * requests are resolved from persisted file/chunk order; semantic requests
 * use the existing FTS/lexical index with a small concept-expansion set.
 */
+private async searchSemantic(query: string, limit = MAX_RESULTS): Promise<PersonalFileSearchResult[]> {
+if (!this.embeddingPipeline || !this.vectorStore) return [];
+try {
+await this.embeddingPipeline.waitForReady(15000);
+const embedded = await this.embeddingPipeline.getEmbeddingsWithFallback([query]);
+const queryEmbedding = embedded.embeddings[0];
+if (!queryEmbedding) return [];
+const hits = await this.vectorStore.searchSimilarPersonal(queryEmbedding, {
+limit: Math.max(limit * 3, 12),
+minSimilarity: 0.25,
+spaceKey: embedded.space,
+});
+if (!hits.length) return [];
+const placeholders = hits.map(() => '?').join(',');
+const rows = this.db.prepare(`
+SELECT pc.id, pc.file_id, pf.file_name, pc.text, pc.chunk_index, pc.start_char, pc.end_char,
+pc.page_start, pc.page_end, pc.section, pc.heading, pc.content_type, pc.metadata_json, pc.embedding_space
+FROM personal_file_chunks pc
+JOIN personal_files pf ON pf.id = pc.file_id
+WHERE pc.id IN (${placeholders})
+`).all(...hits.map((hit) => hit.chunkId)) as any[];
+const byId = new Map<string, any>();
+for (const row of rows) byId.set(String(row.id), row);
+const results: PersonalFileSearchResult[] = [];
+for (const hit of hits) {
+const row = byId.get(String(hit.chunkId));
+if (!row) continue;
+results.push({
+fileId: row.file_id,
+fileName: row.file_name,
+chunkId: row.id,
+text: row.text,
+score: hit.similarity,
+startChar: row.start_char,
+endChar: row.end_char,
+pageStart: row.page_start,
+pageEnd: row.page_end,
+section: row.section,
+heading: row.heading,
+contentType: row.content_type,
+metadata: this.parseChunkMetadata(row.metadata_json),
+semanticScore: hit.similarity,
+embeddingSpace: row.embedding_space ?? embedded.space,
+});
+}
+return results;
+} catch (error) {
+console.warn('[PersonalKnowledgeManager] Semantic personal-file search unavailable; using lexical search', {
+error: error instanceof Error ? error.message : String(error),
+});
+return [];
+}
+}
+
 searchRelevant(query: string, limit = MAX_RESULTS): PersonalFileSearchResult[] {
 const q = String(query ?? '').trim();
 if (!q) return [];
@@ -614,7 +779,7 @@ const chosen: PersonalFileSearchResult[] = [];
 for (const file of targetFiles) {
 const chunks = this.db.prepare(`
 SELECT pc.id, pc.file_id, pf.file_name, pc.text, pc.chunk_index, pc.start_char, pc.end_char,
-       pc.page_start, pc.page_end, pc.section, pc.heading, pc.content_type, pc.metadata_json
+       pc.page_start, pc.page_end, pc.section, pc.heading, pc.content_type, pc.metadata_json, pc.embedding_space
 FROM personal_file_chunks pc JOIN personal_files pf ON pf.id = pc.file_id
 WHERE pc.file_id = ? ORDER BY pc.chunk_index ASC
 `).all(file.id) as any[];
@@ -640,6 +805,8 @@ chosen.push({
     heading: row.heading,
     contentType: row.content_type,
     metadata: this.parseChunkMetadata(row.metadata_json),
+semanticScore: undefined,
+embeddingSpace: row.embedding_space ?? undefined,
 });
 }
 if (chosen.length >= Math.max(1, count)) break;
@@ -659,7 +826,31 @@ return [...merged.values()].sort((a, b) => b.score - a.score).slice(0, Math.max(
 async searchRelevantAsync(query: string, limit = MAX_RESULTS): Promise<PersonalFileSearchResult[]> {
 await this.repairLegacyChunking();
 await this.repairUnreadableIndexes();
-return this.searchRelevant(query, limit);
+const lexical = this.searchRelevant(query, limit * 2);
+const semantic = await this.searchSemantic(String(query ?? '').trim(), limit * 2);
+if (!semantic.length) return lexical.slice(0, Math.max(1, Math.min(MAX_RESULTS, limit)));
+
+const merged = new Map<string, PersonalFileSearchResult>();
+for (const result of lexical) {
+merged.set(result.chunkId, {
+...result,
+score: Math.min(1, Math.max(0, result.score)) * 0.4,
+});
+}
+for (const result of semantic) {
+const previous = merged.get(result.chunkId);
+const lexicalScore = previous?.score ?? 0;
+const semanticScore = result.semanticScore ?? result.score;
+merged.set(result.chunkId, {
+...(previous ?? result),
+...result,
+score: semanticScore * 0.6 + lexicalScore,
+semanticScore,
+});
+}
+return [...merged.values()]
+.sort((a, b) => b.score - a.score)
+.slice(0, Math.max(1, Math.min(MAX_RESULTS, limit)));
 }
 
 private async repairLegacyChunking(): Promise<{ repaired: number; errors: number }> {
@@ -685,11 +876,12 @@ if (text.length > MAX_EXTRACTED_CHARS) text = text.slice(0, MAX_EXTRACTED_CHARS)
 const chunks = chunkDocument(text);
 const insert = this.db.prepare(`
 INSERT INTO personal_file_chunks
-(id, file_id, chunk_index, text, start_char, end_char, page_start, page_end, section, heading, content_type, metadata_json)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+(id, file_id, chunk_index, text, start_char, end_char, page_start, page_end, section, heading, content_type, metadata_json, embedding, embedding_provider, embedding_dimensions, embedding_space)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL)
 `);
 const pageCount = Number((extracted as any).pageCount) || null;
 const extractedPageCount = Number((extracted as any).extractedPageCount) || pageCount || null;
+if (this.vectorStore) this.vectorStore.deletePersonalEmbeddingsForFile(row.id);
 this.db.transaction(() => {
 this.db.prepare('DELETE FROM personal_file_chunks WHERE file_id = ?').run(row.id);
 chunks.forEach((chunk, index) => insert.run(
@@ -708,6 +900,7 @@ SET page_count = ?, extracted_page_count = ?, updated_at = ?
 WHERE id = ?
 `).run(pageCount, extractedPageCount, new Date().toISOString(), row.id);
 })();
+void this.embedFileInBackground(row.id);
 result.repaired++;
 console.log('[PersonalKnowledgeManager] migrated legacy document chunking', {
 fileId: row.id,
@@ -748,9 +941,10 @@ if (!text) continue;
 const chunks = chunkDocument(text);
 const insert = this.db.prepare(`
 INSERT INTO personal_file_chunks
-(id, file_id, chunk_index, text, start_char, end_char, page_start, page_end, section, heading, content_type, metadata_json)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+(id, file_id, chunk_index, text, start_char, end_char, page_start, page_end, section, heading, content_type, metadata_json, embedding, embedding_provider, embedding_dimensions, embedding_space)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL)
 `);
+if (this.vectorStore) this.vectorStore.deletePersonalEmbeddingsForFile(row.id);
 this.db.transaction(() => {
 this.db.prepare('DELETE FROM personal_file_chunks WHERE file_id = ?').run(row.id);
 chunks.forEach((chunk, index) => insert.run(
@@ -774,6 +968,7 @@ new Date().toISOString(),
 row.id,
 );
 })();
+void this.embedFileInBackground(row.id);
 console.log('[PersonalKnowledgeManager] repaired unreadable derived index', {
 fileId: row.id,
 fileName: row.file_name,
