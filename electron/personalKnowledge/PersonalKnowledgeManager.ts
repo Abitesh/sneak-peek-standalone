@@ -158,43 +158,46 @@ start = Math.max(end - CHUNK_OVERLAP_CHARS, start + 1);
 }
 return chunks;
 }
+
 function chunkDocument(text: string): Array<{
-text: string;
-startChar: number;
-endChar: number;
-pageStart?: number;
-pageEnd?: number;
-section?: string;
-heading?: string;
-contentType?: string;
-metadata: Record<string, unknown>;
+    text: string;
+    startChar: number;
+    endChar: number;
+    pageStart?: number;
+    pageEnd?: number;
+    section?: string;
+    heading?: string;
+    contentType?: string;
+    metadata: Record<string, unknown>;
 }> {
-try {
-const chunks = buildDocumentChunks(text, {
-chunkWords: DOCUMENT_CHUNK_WORDS,
-chunkOverlap: DOCUMENT_CHUNK_OVERLAP,
-});
-return chunks.map((chunk: DocumentMapChunk) => ({
-text: chunk.text,
-startChar: chunk.startOffset ?? 0,
-endChar: chunk.endOffset ?? (chunk.startOffset ?? 0) + chunk.text.length,
-pageStart: chunk.pageStart,
-pageEnd: chunk.pageEnd,
-section: chunk.section,
-heading: chunk.heading,
-contentType: chunk.contentType,
-metadata: chunk.metadata ?? {},
-}));
-} catch (error) {
-console.warn('[PersonalKnowledgeManager] DocumentMap chunking failed; using legacy chunker', {
-error: error instanceof Error ? error.message : String(error),
-});
-return chunkText(text).map((chunk) => ({
-...chunk,
-metadata: { documentMap: false, fallback: 'legacy_chunkText' },
-}));
+    try {
+        const chunks = buildDocumentChunks(text, {
+            chunkWords: DOCUMENT_CHUNK_WORDS,
+            chunkOverlap: DOCUMENT_CHUNK_OVERLAP,
+        });
+
+        return chunks.map((chunk: DocumentMapChunk) => ({
+            text: chunk.text,
+            startChar: chunk.startOffset ?? 0,
+            endChar: chunk.endOffset ?? (chunk.startOffset ?? 0) + chunk.text.length,
+            pageStart: chunk.pageStart,
+            pageEnd: chunk.pageEnd,
+            section: chunk.section,
+            heading: chunk.heading,
+            contentType: chunk.contentType,
+            metadata: chunk.metadata ?? {},
+        }));
+    } catch (error) {
+        console.warn('[PersonalKnowledgeManager] DocumentMap chunking failed; using legacy chunker', {
+            error: error instanceof Error ? error.message : String(error),
+        });
+        return chunkText(text).map((chunk) => ({
+            ...chunk,
+            metadata: { documentMap: false, fallback: 'legacy_chunkText' },
+        }));
+    }
 }
-}
+
 export class PersonalKnowledgeManager {
 private static instance: PersonalKnowledgeManager | null = null;
 private db: Database.Database;
@@ -271,28 +274,31 @@ if (!columns.some((c) => c.name === 'file_type')) {
 this.db.exec(`ALTER TABLE personal_files ADD COLUMN file_type TEXT NOT NULL DEFAULT 'general'`);
 }
 }
+
 private ensureDocumentMetadataColumns(): void {
-const fileColumns = this.db.prepare(`PRAGMA table_info(personal_files)`).all() as Array<{ name: string }>;
-const addFileColumn = (name: string, sqlType: string): void => {
-if (!fileColumns.some((c) => c.name === name)) {
-this.db.exec(`ALTER TABLE personal_files ADD COLUMN ${name} ${sqlType}`);
+    const fileColumns = this.db.prepare(`PRAGMA table_info(personal_files)`).all() as Array<{ name: string }>;
+    const addFileColumn = (name: string, sqlType: string): void => {
+        if (!fileColumns.some((c) => c.name === name)) {
+            this.db.exec(`ALTER TABLE personal_files ADD COLUMN ${name} ${sqlType}`);
+        }
+    };
+    addFileColumn('page_count', 'INTEGER');
+    addFileColumn('extracted_page_count', 'INTEGER');
+
+    const chunkColumns = this.db.prepare(`PRAGMA table_info(personal_file_chunks)`).all() as Array<{ name: string }>;
+    const addChunkColumn = (name: string, definition: string): void => {
+        if (!chunkColumns.some((c) => c.name === name)) {
+            this.db.exec(`ALTER TABLE personal_file_chunks ADD COLUMN ${name} ${definition}`);
+        }
+    };
+    addChunkColumn('page_start', 'INTEGER');
+    addChunkColumn('page_end', 'INTEGER');
+    addChunkColumn('section', 'TEXT');
+    addChunkColumn('heading', 'TEXT');
+    addChunkColumn('content_type', "TEXT NOT NULL DEFAULT 'text'");
+    addChunkColumn('metadata_json', "TEXT NOT NULL DEFAULT '{}'");
 }
-};
-addFileColumn('page_count', 'INTEGER');
-addFileColumn('extracted_page_count', 'INTEGER');
-const chunkColumns = this.db.prepare(`PRAGMA table_info(personal_file_chunks)`).all() as Array<{ name: string }>;
-const addChunkColumn = (name: string, definition: string): void => {
-if (!chunkColumns.some((c) => c.name === name)) {
-this.db.exec(`ALTER TABLE personal_file_chunks ADD COLUMN ${name} ${definition}`);
-}
-};
-addChunkColumn('page_start', 'INTEGER');
-addChunkColumn('page_end', 'INTEGER');
-addChunkColumn('section', 'TEXT');
-addChunkColumn('heading', 'TEXT');
-addChunkColumn('content_type', "TEXT NOT NULL DEFAULT 'text'");
-addChunkColumn('metadata_json', "TEXT NOT NULL DEFAULT '{}'");
-}
+
 async ingestFile(filePath: string, fileType: PersonalFileType = 'general'): Promise<PersonalFileRecord> {
 const resolved = path.resolve(filePath);
 const stat = await fs.promises.lstat(resolved);
@@ -480,14 +486,15 @@ return this.db.prepare(`DELETE FROM personal_files WHERE id = ?`).run(id);
 return result.changes > 0;
 }
 private parseChunkMetadata(value: unknown): Record<string, unknown> {
-if (!value) return {};
-try {
-const parsed = JSON.parse(String(value));
-return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
-} catch {
-return {};
+    if (!value) return {};
+    try {
+        const parsed = JSON.parse(String(value));
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+        return {};
+    }
 }
-}
+
 search(query: string, limit = MAX_RESULTS): PersonalFileSearchResult[] {
 const q = query.trim();
 if (!q) return [];
@@ -548,7 +555,7 @@ metadata: this.parseChunkMetadata(row.metadata_json),
 if (candidates.length < safeLimit) {
 const rows = this.db.prepare(`
 SELECT pc.id, pc.file_id, pf.file_name, pc.text, pc.start_char, pc.end_char,
-pc.page_start, pc.page_end, pc.section, pc.heading, pc.content_type, pc.metadata_json
+       pc.page_start, pc.page_end, pc.section, pc.heading, pc.content_type, pc.metadata_json
 FROM personal_file_chunks pc
 JOIN personal_files pf ON pf.id = pc.file_id
 `).all() as any[];
@@ -607,7 +614,7 @@ const chosen: PersonalFileSearchResult[] = [];
 for (const file of targetFiles) {
 const chunks = this.db.prepare(`
 SELECT pc.id, pc.file_id, pf.file_name, pc.text, pc.chunk_index, pc.start_char, pc.end_char,
-pc.page_start, pc.page_end, pc.section, pc.heading, pc.content_type, pc.metadata_json
+       pc.page_start, pc.page_end, pc.section, pc.heading, pc.content_type, pc.metadata_json
 FROM personal_file_chunks pc JOIN personal_files pf ON pf.id = pc.file_id
 WHERE pc.file_id = ? ORDER BY pc.chunk_index ASC
 `).all(file.id) as any[];
@@ -620,19 +627,19 @@ const source = numbered.length ? numbered : (questionChunks.length ? questionChu
 const start = ordinal && !numbered.length ? Math.max(0, Number(ordinal[1]) - 1) : 0;
 for (const row of source.slice(start, start + Math.max(1, count))) {
 chosen.push({
-fileId: row.file_id,
-fileName: row.file_name,
-chunkId: row.id,
-text: row.text,
-score: 1,
-startChar: row.start_char,
-endChar: row.end_char,
-pageStart: row.page_start,
-pageEnd: row.page_end,
-section: row.section,
-heading: row.heading,
-contentType: row.content_type,
-metadata: this.parseChunkMetadata(row.metadata_json),
+    fileId: row.file_id,
+    fileName: row.file_name,
+    chunkId: row.id,
+    text: row.text,
+    score: 1,
+    startChar: row.start_char,
+    endChar: row.end_char,
+    pageStart: row.page_start,
+    pageEnd: row.page_end,
+    section: row.section,
+    heading: row.heading,
+    contentType: row.content_type,
+    metadata: this.parseChunkMetadata(row.metadata_json),
 });
 }
 if (chosen.length >= Math.max(1, count)) break;
@@ -654,6 +661,7 @@ await this.repairLegacyChunking();
 await this.repairUnreadableIndexes();
 return this.searchRelevant(query, limit);
 }
+
 private async repairLegacyChunking(): Promise<{ repaired: number; errors: number }> {
 const result = { repaired: 0, errors: 0 };
 const rows = this.db.prepare(`
@@ -665,6 +673,7 @@ WHERE pc.file_id = pf.id
 AND (pc.metadata_json IS NULL OR pc.metadata_json = '{}')
 )
 `).all() as Array<{ id: string; file_path: string; file_name: string }>;
+
 for (const row of rows) {
 if (this.repairedFileIds.has(`legacy:${row.id}`)) continue;
 this.repairedFileIds.add(`legacy:${row.id}`);
