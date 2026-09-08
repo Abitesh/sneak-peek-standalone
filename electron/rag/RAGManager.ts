@@ -13,6 +13,8 @@ import { LiveRAGIndexer } from './LiveRAGIndexer';
 import { buildRAGPrompt, NO_CONTEXT_FALLBACK, NO_GLOBAL_CONTEXT_FALLBACK } from './prompts';
 import type { ProviderDataScopePolicy } from '../llm/ProviderRouter';
 import { RagQueryPlanner, type RagQueryPlan } from './RagQueryPlanner';
+import { ConversationMemoryService } from '../intelligence/ConversationMemoryService';
+import type { RAGConversationTurn } from './RAGRetriever';
 
 interface ModesManagerLike {
     getActiveModeInfo(): { id?: string } | null;
@@ -94,8 +96,10 @@ export type UnifiedRAGResult = RagSearchResult;
 
 export interface RAGSearchOptions {
     source?: RagSourceType | 'all';
-    /** Conversation session used only for retrieval-query rewriting. */
+    /** Conversation session used for retrieval-query rewriting and retrieval context. */
     sessionId?: string;
+    /** Explicit prior turns for retrieval. When omitted, the shared manual memory is used. */
+    conversation?: readonly RAGConversationTurn[];
     meetingId?: string;
     modeId?: string;
     topK?: number;
@@ -276,6 +280,28 @@ export class RAGManager {
      * Each adapter preserves only metadata that the existing source actually
      * provides; missing provenance remains undefined rather than fabricated.
      */
+    private getConversationForRetrieval(
+        sessionId?: string,
+        conversation?: readonly RAGConversationTurn[],
+    ): readonly RAGConversationTurn[] | undefined {
+        if (conversation?.length) return conversation.slice(-8);
+        if (!sessionId) return undefined;
+        try {
+            const memory = ConversationMemoryService.getShared();
+            const turns = memory?.getRecentTurns(sessionId, 8) ?? [];
+            if (!turns.length) return undefined;
+            return turns.map(turn => ({
+                userMessage: turn.userMessage,
+                assistantAnswer: turn.assistantAnswer,
+                mode: turn.mode,
+                timestamp: turn.timestamp,
+            }));
+        } catch (error) {
+            console.warn('[RAGManager] Conversation context unavailable; continuing without it:', error);
+            return undefined;
+        }
+    }
+
     async search(query: string, options: RAGSearchOptions = {}): Promise<RagSearchResult[]> {
         const originalQuery = String(query ?? '').trim();
         if (!originalQuery) return [];
@@ -286,6 +312,7 @@ export class RAGManager {
         // is a safe pass-through, so existing callers retain their behavior.
         const queryPlan: RagQueryPlan = this.queryPlanner.plan(originalQuery, options.sessionId);
         const normalizedQuery = queryPlan.retrievalQuery;
+        const conversation = this.getConversationForRetrieval(options.sessionId, options.conversation);
 
         const source = options.source ?? 'all';
         const topK = Math.max(1, Math.min(50, options.topK ?? 8));
@@ -302,6 +329,7 @@ export class RAGManager {
             try {
                 const context = await this.retriever.retrieve(normalizedQuery, {
                     ...(options.meetingId ? { meetingId: options.meetingId } : {}),
+                    ...(conversation ? { conversation } : {}),
                     // Change 7: preserve the full hybrid candidate pool for the
                     // common BGE reranker. RAGManager owns the final top-K boundary
                     // on this unified path, so the source retriever must not narrow

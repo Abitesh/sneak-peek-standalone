@@ -5,6 +5,13 @@ import { formatChunkForContext } from './SemanticChunker';
 // embedding space (legacy 0.25 for every space until telemetry calibrates).
 import { resolveMinSimilarity } from '../llm/semanticAdmissionGate';
 
+export interface RAGConversationTurn {
+    userMessage: string;
+    assistantAnswer?: string;
+    mode?: string;
+    timestamp?: number;
+}
+
 interface LocalRerankerLike {
     rerank(query: string, passages: string[]): Promise<Array<{ index: number; score: number }> | null>;
 }
@@ -29,6 +36,8 @@ export type QueryIntent =
 | 'open_question'; // Default fallback
 export interface RetrievalOptions {
 meetingId?: string; // For meeting-scoped queries
+/** Prior conversation turns used only to improve retrieval relevance. */
+conversation?: readonly RAGConversationTurn[];
 maxTokens?: number; // Context token budget (default: 1500)
 topK?: number; // Final context count (default: 8)
 candidatePoolSize?: number; // Candidates per retrieval arm before hybrid fusion (default: 100)
@@ -81,6 +90,8 @@ recencyWeight = 0.3,
 intent: overrideIntent
 } = options;
 const intent = overrideIntent || this.detectIntent(query);
+const retrievalQuery = this.buildConversationAwareQuery(query, options.conversation);
+const semanticQuery = retrievalQuery;
 const poolSize = Math.max(topK, Math.min(1000, candidatePoolSize));
 
 // Universal meeting retrieval: build independent lexical + semantic candidate
@@ -93,7 +104,7 @@ limit: poolSize,
 
 let queryEmbedding: number[] | null = null;
 try {
-queryEmbedding = await this.embeddingPipeline.getEmbeddingForQuery(query);
+queryEmbedding = await this.embeddingPipeline.getEmbeddingForQuery(semanticQuery);
 } catch (error) {
 console.warn('[RAGRetriever] Query embedding failed; using lexical-only retrieval:', error);
 }
@@ -165,7 +176,7 @@ let candidates: ScoredChunk[] = fused.slice(0, poolSize);
 
                 for (let start = 0; start < rerankPool.length; start += batchSize) {
                     const batch = rerankPool.slice(start, start + batchSize);
-                    const scores = await reranker.rerank(query, batch.map(chunk => chunk.text));
+                    const scores = await reranker.rerank(semanticQuery, batch.map(chunk => chunk.text));
                     if (!scores || scores.length < batch.length) {
                         throw new Error('local reranker returned incomplete scores');
                     }
@@ -236,6 +247,34 @@ intent
 };
 }
 /**
+ * Build a bounded retrieval query from the current query plus recent conversation.
+ * The lexical arm keeps the current query unchanged; the semantic/reranker arms
+ * receive this enriched form so prior turns can resolve references without
+ * replacing the user's current question.
+ */
+private buildConversationAwareQuery(
+    query: string,
+    conversation?: readonly RAGConversationTurn[],
+): string {
+    const current = String(query ?? '').trim();
+    if (!conversation?.length) return current;
+
+    const turns = conversation
+        .filter(turn => String(turn?.userMessage ?? '').trim())
+        .slice(-6);
+    if (!turns.length) return current;
+
+    const parts: string[] = [`CURRENT RETRIEVAL QUESTION:\n${current}`];
+    for (const turn of turns) {
+        const user = String(turn.userMessage ?? '').replace(/\s+/g, ' ').trim().slice(0, 500);
+        const answer = String(turn.assistantAnswer ?? '').replace(/\s+/g, ' ').trim().slice(0, 700);
+        if (!user) continue;
+        parts.push(`PREVIOUS TURN:\nUser: ${user}${answer ? `\nAssistant: ${answer}` : ''}`);
+    }
+    return parts.join('\n\n').slice(0, 5000);
+}
+
+/**
 * Retrieve with summaries for global search
 * Combines chunk search with meeting summary search
 */
@@ -251,10 +290,11 @@ intent: overrideIntent
 } = options;
 // Detect query intent
 const intent = overrideIntent || this.detectIntent(query);
+const semanticQuery = this.buildConversationAwareQuery(query, options.conversation);
 // Embed query
 let queryEmbedding: number[];
 try {
-queryEmbedding = await this.embeddingPipeline.getEmbeddingForQuery(query);
+queryEmbedding = await this.embeddingPipeline.getEmbeddingForQuery(semanticQuery);
 } catch (error) {
 console.error('[RAGRetriever] Failed to embed query:', error);
 return {

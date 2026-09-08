@@ -61,10 +61,21 @@ function summarize(userMessage: string, assistantAnswer: string): string {
  * recall is async via an optional long-term provider (default Noop → empty). Never throws.
  */
 export class ConversationMemoryService {
+  private static shared: ConversationMemoryService | null = null;
   private bySession = new Map<string, StoredTurn[]>();
   private seq = 0;
 
-  constructor(private longTerm?: LongTermRecallProvider | null) {}
+  constructor(private longTerm?: LongTermRecallProvider | null) {
+    // The manual IPC layer constructs the application's primary memory service.
+    // Register that instance once so retrieval can consume the same history rather
+    // than creating a second disconnected in-memory conversation store.
+    if (!ConversationMemoryService.shared) ConversationMemoryService.shared = this;
+  }
+
+  /** Return the process-wide conversation service when one has been constructed. */
+  static getShared(): ConversationMemoryService | null {
+    return ConversationMemoryService.shared;
+  }
 
   /** Record a delivered turn. Bounded per session. */
   record(turn: ConversationTurn): StoredTurn {
@@ -113,8 +124,6 @@ export class ConversationMemoryService {
     const arr = this.bySession.get(sessionId) || [];
     for (let i = arr.length - 1; i >= 0; i--) {
       const a = arr[i].assistantAnswer || '';
-      // A coding turn = the assistant answer has a fenced code block, OR the turn was
-      // explicitly tagged as coding via contextSourcesUsed (the caller may set this).
       if (/```[\s\S]*```/.test(a) || (arr[i].contextSourcesUsed || []).includes('coding')) {
         return arr[i];
       }
@@ -135,7 +144,6 @@ export class ConversationMemoryService {
       const terms = new Set(matched.filter((t) => t.length > 2 && !STOP.has(t)));
       let best: StoredTurn | null = null;
       let bestScore = 0;
-      // Walk most-recent first so ties favor recency.
       for (let i = arr.length - 1; i >= 0; i--) {
         const t = arr[i];
         const hay = `${t.userMessage} ${t.assistantAnswer}`.toLowerCase();
@@ -144,14 +152,6 @@ export class ConversationMemoryService {
         for (const term of terms) if (hay.includes(term)) score += 1;
         if (score > bestScore) { bestScore = score; best = t; }
       }
-      // Bare follow-up with no token overlap → most recent turn. Bare follow-ups are
-      // content-free BY CONSTRUCTION (callers gate on isBareFollowUp), so when there's
-      // no topical overlap the right resolution is simply "the last thing we discussed".
-      // The fragment set covers demonstratives ("that/it/this") AND the common
-      // continuation/clarification verbs ("why/how/go on/expand/more/elaborate/…") that
-      // carry no topic — previously these returned null and dead-ended (test-engineer
-      // Phase 11). Kept self-safe with a short-length guard so a stray long string can't
-      // trip it even if a caller forgets the isBareFollowUp gate.
       const fu = (followUp || '').trim();
       const RECENCY_FALLBACK_RE = /\b(that|it|this|those|and|also|what about|continue|carry on|keep going|go on|previous|earlier|last|why|how|so|then|more|expand|elaborate|deeper|detail|tell me more|go deeper|explain)\b/i;
       if (!best && fu.split(/\s+/).length <= 6 && RECENCY_FALLBACK_RE.test(fu)) {
@@ -188,25 +188,7 @@ export class ConversationMemoryService {
     try { this.bySession.delete(sessionId); } catch { /* ignore */ }
   }
 
-  /**
-   * Clear EVERY session's memory (answer-pipeline-rebuild Phase 3, 2026-07-28).
-   * Mode switching is a global operation (ModesManager is a singleton; a mode
-   * change affects every window), but conversation turns are recorded per
-   * sessionId (senderId) with no registry of which sessionIds are currently
-   * live from the mode-switch call site — so a targeted clearSession(id)
-   * isn't reachable there. Mirrors the existing BUG-MODE-BLEEDING fix
-   * (IntelligenceManager.clearSessionContext(), also a global clear on mode
-   * switch) for the same bug class: without this, resolveSameSession/
-   * getLastAssistantAnswer/getLastCodingTurn recall the most recent turn
-   * regardless of which mode recorded it — a bare or refinement follow-up
-   * ("why?", "make that shorter") asked in a NEW mode after switching away
-   * from a document-grounded mode would re-inject that mode's prior answer
-   * (and whatever reference-file/profile content it contained) into a mode
-   * with no authorization to see it. The per-turn `mode` field is recorded
-   * but never read back, so filtering by mode at read time was the other
-   * option; a full clear on switch was chosen to exactly mirror the already-
-   * accepted IntelligenceManager precedent for this identical bug class.
-   */
+  /** Clear EVERY session's memory. */
   clearAllSessions(): void {
     try { this.bySession.clear(); } catch { /* ignore */ }
   }
