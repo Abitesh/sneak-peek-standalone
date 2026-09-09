@@ -22,6 +22,20 @@ export interface RenderedEvidenceManifest {
   evidenceFamilies: RenderedEvidenceFamily[];
   countsByKind: Record<string, number>;
   countsByFamily: Record<RenderedEvidenceFamily, number>;
+  /** Provenance snapshot for the exact evidence items serialized into the prompt. */
+  evidenceProvenance: Record<string, {
+    sourceId: string;
+    documentId?: string;
+    documentName?: string;
+    chunkId?: string;
+    pageStart?: number;
+    pageEnd?: number;
+    section?: string;
+    heading?: string;
+    sourceType?: string;
+    retrievalScore?: number;
+    rerankScore?: number;
+  }>;
 }
 
 export const RENDERED_EVIDENCE_FAMILIES: RenderedEvidenceFamily[] = [
@@ -55,12 +69,26 @@ export function buildRenderedEvidenceManifest(pack: Pick<EvidencePack, 'packId' 
   ) as Record<RenderedEvidenceFamily, number>;
   const countsByKind: Record<string, number> = {};
   const evidenceIds: string[] = [];
+  const evidenceProvenance: RenderedEvidenceManifest['evidenceProvenance'] = {};
   const seenIds = new Set<string>();
 
   for (const item of pack.items) {
     if (item.authority !== 'evidence' || seenIds.has(item.evidenceId)) continue;
     seenIds.add(item.evidenceId);
     evidenceIds.push(item.evidenceId);
+    evidenceProvenance[item.evidenceId] = {
+      sourceId: item.sourceId,
+      ...(item.documentId !== undefined ? { documentId: item.documentId } : {}),
+      ...(item.documentName !== undefined ? { documentName: item.documentName } : {}),
+      ...(item.chunkId !== undefined ? { chunkId: item.chunkId } : {}),
+      ...(item.pageStart !== undefined ? { pageStart: item.pageStart } : {}),
+      ...(item.pageEnd !== undefined ? { pageEnd: item.pageEnd } : {}),
+      ...(item.section !== undefined ? { section: item.section } : {}),
+      ...(item.heading !== undefined ? { heading: item.heading } : {}),
+      ...(item.sourceType !== undefined ? { sourceType: item.sourceType } : {}),
+      ...(item.retrievalScore !== undefined ? { retrievalScore: item.retrievalScore } : {}),
+      ...(item.rerankScore !== undefined ? { rerankScore: item.rerankScore } : {}),
+    };
     countsByKind[item.sourceKind] = (countsByKind[item.sourceKind] ?? 0) + 1;
     const family = familyForRenderedSourceKind(item.sourceKind);
     if (family) countsByFamily[family] += 1;
@@ -74,6 +102,7 @@ export function buildRenderedEvidenceManifest(pack: Pick<EvidencePack, 'packId' 
     evidenceFamilies: RENDERED_EVIDENCE_FAMILIES.filter((family) => countsByFamily[family] > 0),
     countsByKind,
     countsByFamily,
+    evidenceProvenance,
   };
 }
 
