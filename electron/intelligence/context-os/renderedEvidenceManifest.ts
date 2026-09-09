@@ -5,6 +5,7 @@
 
 import type { TurnEvidenceKind } from '../../llm/turnSourceDecision';
 import type { EvidenceItem, EvidencePack } from './evidencePack';
+import type { RagCitation } from '../../rag/RagCitation';
 
 export type RenderedEvidenceFamily =
   | 'reference_files'
@@ -23,6 +24,7 @@ export interface RenderedEvidenceManifest {
   countsByKind: Record<string, number>;
   countsByFamily: Record<RenderedEvidenceFamily, number>;
   /** Provenance snapshot for the exact evidence items serialized into the prompt. */
+  evidenceCitations: Record<string, RagCitation>;
   evidenceProvenance: Record<string, {
     sourceId: string;
     documentId?: string;
@@ -69,6 +71,7 @@ export function buildRenderedEvidenceManifest(pack: Pick<EvidencePack, 'packId' 
   ) as Record<RenderedEvidenceFamily, number>;
   const countsByKind: Record<string, number> = {};
   const evidenceIds: string[] = [];
+  const evidenceCitations: RenderedEvidenceManifest['evidenceCitations'] = {};
   const evidenceProvenance: RenderedEvidenceManifest['evidenceProvenance'] = {};
   const seenIds = new Set<string>();
 
@@ -76,6 +79,7 @@ export function buildRenderedEvidenceManifest(pack: Pick<EvidencePack, 'packId' 
     if (item.authority !== 'evidence' || seenIds.has(item.evidenceId)) continue;
     seenIds.add(item.evidenceId);
     evidenceIds.push(item.evidenceId);
+    if (item.citation) evidenceCitations[item.citation.citationId] = item.citation;
     evidenceProvenance[item.evidenceId] = {
       sourceId: item.sourceId,
       ...(item.documentId !== undefined ? { documentId: item.documentId } : {}),
@@ -102,6 +106,7 @@ export function buildRenderedEvidenceManifest(pack: Pick<EvidencePack, 'packId' 
     evidenceFamilies: RENDERED_EVIDENCE_FAMILIES.filter((family) => countsByFamily[family] > 0),
     countsByKind,
     countsByFamily,
+    evidenceCitations,
     evidenceProvenance,
   };
 }

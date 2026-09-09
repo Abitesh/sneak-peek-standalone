@@ -18,6 +18,7 @@ SourceOwner,
 TrustLevel,
 } from './types';
 import type { EvidenceSufficiency } from './evidenceSufficiency';
+import type { RagCitation } from '../../rag/RagCitation';
 export interface EvidencePointer {
 page?: number;
 section?: string;
@@ -31,6 +32,8 @@ speaker?: string;
 }
 export interface EvidenceItem {
 evidenceId: string;
+/** Canonical RAG citation retained through EvidencePack and rendering. */
+citation?: RagCitation;
 /** Canonical RAG provenance retained through EvidencePack and rendering. */
 sourceType?: 'meeting' | 'mode' | 'personal';
 documentId?: string;

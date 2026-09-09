@@ -49,6 +49,7 @@ TurnContextContract,
 import { allowsEvidence, allowsRetrieval } from './types';
 import type { EvidenceItem, EvidencePack, RejectedEvidenceItem } from './evidencePack';
 import { textCanProveProperty } from './requestedProperty';
+import { buildRagCitation } from '../../rag/RagCitation';
 // Type-only (erased at runtime). The DI ports below described a structural
 // SUBSET of the pack, but what actually flows through them at runtime is a
 // real KnowledgePack: getPackForFile() returns KnowledgePack | null and the
@@ -390,6 +391,14 @@ const canProve = textCanProveProperty(s.card.body, requestedProperty)
 && matchesRequestedField(question, s.card.body, requestedProperty);
 return {
 evidenceId: `${turnId}:okf:${i}`,
+citation: buildRagCitation({
+  citationId: `cite_${turnId}_okf_${i}`.replace(/[^A-Za-z0-9_-]/g, '_'),
+  documentId: s.fileId,
+  documentName: s.card.title,
+  chunkId: `${s.fileId}:card:${i}`,
+  section: s.card.sourceSections?.[0],
+  sourceType: 'mode',
+}),
 sourceKind: 'okf_document_card' as const,
 sourceId: s.fileId,
 sourceOwner: 'reference_files' as const,
@@ -556,6 +565,16 @@ const canProve = textCanProveProperty(c.text, requestedProperty)
 && matchesRequestedField(question, c.text, requestedProperty);
 return {
 evidenceId: `${turnId}:hybrid:${i}`,
+citation: buildRagCitation({
+  citationId: `cite_${turnId}_hybrid_${i}`.replace(/[^A-Za-z0-9_-]/g, '_'),
+  documentId: c.documentId ?? c.sourceId,
+  documentName: c.documentName ?? c.fileName,
+  chunkId: c.chunkId ?? `${c.sourceId}:${c.chunkIndex}`,
+  pageStart: c.pageStart,
+  pageEnd: c.pageEnd,
+  section: c.section,
+  sourceType: 'mode',
+}),
 sourceKind: 'mode_reference_chunk' as const,
 sourceId: c.sourceId,
 sourceOwner: 'reference_files' as const,
