@@ -16,45 +16,45 @@ import type { FinalPromptEvidenceValidation } from './finalPromptValidation';
 import type { RenderedEvidenceManifest } from './renderedEvidenceManifest';
 import { parseModeSnippets } from './EvidenceOrchestrator';
 import { textCanProveProperty } from './requestedProperty';
-import { renderContractForPrompt, renderEvidenceUseRule, renderEvidencePackWithManifest } from './promptRenderer';
+import { renderContractForPrompt, renderEvidenceUseRule, renderCitationUseRule, renderEvidencePackWithManifest } from './promptRenderer';
 
 export interface ContextOsModeSnapshot {
-  modeId: string | null;
-  modeName: string | null;
-  sourceAuthority: string;
+ modeId: string | null;
+ modeName: string | null;
+ sourceAuthority: string;
 }
 
 export interface ContextOsGenerationContext {
-  contract: TurnContextContract;
-  /** Immutable user question. Provider packets must never be reused as this value. */
-  turnQuestion?: string;
-  /** The pack governing THIS generation. May be built lazily from the retrieved block. */
-  evidencePack: EvidencePack | null;
-  modeSnapshot: ContextOsModeSnapshot;
-  /** Whether the typed pack should REPLACE the legacy factual block in the prompt. */
-  govern: boolean;
-  /**
-   * Canonical per-turn source policy. Surfaced to the final-prompt validator
-   * so a required evidence family that's missing from the rendered prompt
-   * fails closed at the last provider boundary, not at retrieval time.
-   */
-  turnSourceDecision?: TurnSourceDecision | null;
-  /** Manifest emitted by the same operation that renders factual XML. */
-  renderedEvidenceManifest?: RenderedEvidenceManifest;
-  /** Written only at the final prompt boundary; reused by E2E/audit callers. */
-  finalPromptValidation?: FinalPromptEvidenceValidation;
-  /**
-   * Root-cause fix (2026-07-23): the RAW retrieved-context block
-   * (`<active_mode_retrieved_context>` string, or the typed pack rendered to
-   * its legacy XML shape) that the generation call actually used, written
-   * unconditionally by _streamChatInner regardless of whether a typed pack
-   * governs this turn. Callers that need the retrieved block for a post-
-   * stream validator (e.g. ipcHandlers.ts's doc-grounded gate) should prefer
-   * this over re-retrieving independently — a second retrieval uses
-   * different query expansion / budget params and can validate the answer
-   * against evidence it was never actually grounded in.
-   */
-  retrievedBlockRaw?: string;
+ contract: TurnContextContract;
+ /** Immutable user question. Provider packets must never be reused as this value. */
+ turnQuestion?: string;
+ /** The pack governing THIS generation. May be built lazily from the retrieved block. */
+ evidencePack: EvidencePack | null;
+ modeSnapshot: ContextOsModeSnapshot;
+ /** Whether the typed pack should REPLACE the legacy factual block in the prompt. */
+ govern: boolean;
+ /**
+ * Canonical per-turn source policy. Surfaced to the final-prompt validator
+ * so a required evidence family that's missing from the rendered prompt
+ * fails closed at the last provider boundary, not at retrieval time.
+ */
+ turnSourceDecision?: TurnSourceDecision | null;
+ /** Manifest emitted by the same operation that renders factual XML. */
+ renderedEvidenceManifest?: RenderedEvidenceManifest;
+ /** Written only at the final prompt boundary; reused by E2E/audit callers. */
+ finalPromptValidation?: FinalPromptEvidenceValidation;
+ /**
+ * Root-cause fix (2026-07-23): the RAW retrieved-context block
+ * (`<active_mode_retrieved_context>` string, or the typed pack rendered to
+ * its legacy XML shape) that the generation call actually used, written
+ * unconditionally by _streamChatInner regardless of whether a typed pack
+ * governs this turn. Callers that need the retrieved block for a post-
+ * stream validator (e.g. ipcHandlers.ts's doc-grounded gate) should prefer
+ * this over re-retrieving independently — a second retrieval uses
+ * different query expansion / budget params and can validate the answer
+ * against evidence it was never actually grounded in.
+ */
+ retrievedBlockRaw?: string;
 }
 
 /**
@@ -66,58 +66,58 @@ export interface ContextOsGenerationContext {
  * capability gates upstream and never enter this pack.
  */
 export function buildDocumentEvidencePackFromBlock(
-  contract: TurnContextContract,
-  rawEvidenceBlock: string,
+ contract: TurnContextContract,
+ rawEvidenceBlock: string,
 ): EvidencePack {
-  const snippets = parseModeSnippets(rawEvidenceBlock);
-  const texts = snippets.length > 0 ? snippets : [];
-  const items = (texts.length > 0
-    ? texts.map((s, i) => ({ text: s.text, sourceId: s.sourceId, fileName: s.fileName, chunkIndex: s.chunkIndex, ftsScore: s.ftsScore, vectorScore: s.vectorScore, score: s.score, idx: i }))
-    : (rawEvidenceBlock.trim() ? [{ text: rawEvidenceBlock, sourceId: undefined, fileName: undefined, chunkIndex: undefined, ftsScore: undefined, vectorScore: undefined, score: undefined, idx: 0 }] : [])
-  ).map((s) => {
-    const canProve = textCanProveProperty(s.text, contract.requestedProperty);
-    return {
-      evidenceId: `${contract.turnId}:doc:${s.idx}`,
-      sourceKind: 'mode_reference_chunk' as const,
-      sourceId: s.sourceId ?? contract.activeModeId ?? 'active-mode',
-      sourceOwner: 'reference_files' as const,
-      authority: 'evidence' as const,
-      trustLevel: 'user_uploaded',
-      text: s.text,
-      pointer: {
-        fileId: s.sourceId,
-        chunkId: (s.sourceId != null && s.chunkIndex != null) ? `${s.sourceId}:${s.chunkIndex}` : undefined,
-        section: s.fileName,
-      },
-      supports: { property: canProve ? contract.requestedProperty : 'unknown' as const },
-      score: { lexical: s.ftsScore, vector: s.vectorScore, propertyMatch: canProve ? 1 : 0, final: s.score ?? 0.5 },
-      reasonIncluded: 'document evidence (typed pack governs prompt)',
-    };
-  });
+ const snippets = parseModeSnippets(rawEvidenceBlock);
+ const texts = snippets.length > 0 ? snippets : [];
+ const items = (texts.length > 0
+ ? texts.map((s, i) => ({ text: s.text, sourceId: s.sourceId, fileName: s.fileName, chunkIndex: s.chunkIndex, ftsScore: s.ftsScore, vectorScore: s.vectorScore, score: s.score, idx: i }))
+ : (rawEvidenceBlock.trim() ? [{ text: rawEvidenceBlock, sourceId: undefined, fileName: undefined, chunkIndex: undefined, ftsScore: undefined, vectorScore: undefined, score: undefined, idx: 0 }] : [])
+ ).map((s) => {
+ const canProve = textCanProveProperty(s.text, contract.requestedProperty);
+ return {
+ evidenceId: `${contract.turnId}:doc:${s.idx}`,
+ sourceKind: 'mode_reference_chunk' as const,
+ sourceId: s.sourceId ?? contract.activeModeId ?? 'active-mode',
+ sourceOwner: 'reference_files' as const,
+ authority: 'evidence' as const,
+ trustLevel: 'user_uploaded',
+ text: s.text,
+ pointer: {
+ fileId: s.sourceId,
+ chunkId: (s.sourceId != null && s.chunkIndex != null) ? `${s.sourceId}:${s.chunkIndex}` : undefined,
+ section: s.fileName,
+ },
+ supports: { property: canProve ? contract.requestedProperty : 'unknown' as const },
+ score: { lexical: s.ftsScore, vector: s.vectorScore, propertyMatch: canProve ? 1 : 0, final: s.score ?? 0.5 },
+ reasonIncluded: 'document evidence (typed pack governs prompt)',
+ };
+ });
 
-  const factual = items;
-  const propertySatisfied = contract.requestedProperty === 'unknown'
-    ? factual.length > 0
-    : factual.some((i) => i.supports.property === contract.requestedProperty);
+ const factual = items;
+ const propertySatisfied = contract.requestedProperty === 'unknown'
+ ? factual.length > 0
+ : factual.some((i) => i.supports.property === contract.requestedProperty);
 
-  return {
-    packId: `${contract.turnId}:pack:1`,
-    version: 1,
-    turnId: contract.turnId,
-    sourceOwner: contract.sourceOwner,
-    requestedProperty: contract.requestedProperty,
-    items,
-    rejected: [],
-    coverage: {
-      hasDirectEvidence: factual.length > 0,
-      propertySatisfied,
-      entityMatched: factual.length > 0,
-      sourceOwnerSatisfied: factual.every((i) => i.sourceOwner === contract.sourceOwner),
-      confidence: factual.length > 0 ? Math.max(...factual.map((i) => i.score.final)) : 0,
-    },
-    conflicts: [],
-    answerPolicy: factual.length === 0 ? 'refuse_insufficient_evidence' : propertySatisfied ? 'answer' : 'answer_with_uncertainty',
-  };
+ return {
+ packId: `${contract.turnId}:pack:1`,
+ version: 1,
+ turnId: contract.turnId,
+ sourceOwner: contract.sourceOwner,
+ requestedProperty: contract.requestedProperty,
+ items,
+ rejected: [],
+ coverage: {
+ hasDirectEvidence: factual.length > 0,
+ propertySatisfied,
+ entityMatched: factual.length > 0,
+ sourceOwnerSatisfied: factual.every((i) => i.sourceOwner === contract.sourceOwner),
+ confidence: factual.length > 0 ? Math.max(...factual.map((i) => i.score.final)) : 0,
+ },
+ conflicts: [],
+ answerPolicy: factual.length === 0 ? 'refuse_insufficient_evidence' : propertySatisfied ? 'answer' : 'answer_with_uncertainty',
+ };
 }
 
 /**
@@ -126,12 +126,14 @@ export function buildDocumentEvidencePackFromBlock(
  * Returns '' when there are no evidence items (caller then fails safe).
  */
 export function renderGoverningFactualBlock(ctx: ContextOsGenerationContext): string {
-  if (!ctx.evidencePack || ctx.evidencePack.items.length === 0) return '';
-  const rendered = renderEvidencePackWithManifest(ctx.evidencePack);
-  ctx.renderedEvidenceManifest = rendered.manifest;
-  return [
-    renderContractForPrompt(ctx.contract),
-    renderEvidenceUseRule(ctx.contract, ctx.evidencePack.answerPolicy),
-    rendered.prompt,
-  ].join('\n\n');
+ if (!ctx.evidencePack || ctx.evidencePack.items.length === 0) return '';
+ const rendered = renderEvidencePackWithManifest(ctx.evidencePack);
+ ctx.renderedEvidenceManifest = rendered.manifest;
+ const citationRule = renderCitationUseRule(rendered.manifest);
+ return [
+ renderContractForPrompt(ctx.contract),
+ renderEvidenceUseRule(ctx.contract, ctx.evidencePack.answerPolicy),
+ ...(citationRule ? [citationRule] : []),
+ rendered.prompt,
+ ].join('\n\n');
 }
