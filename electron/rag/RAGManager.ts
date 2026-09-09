@@ -12,7 +12,7 @@ import { RAGRetriever } from './RAGRetriever';
 import { LiveRAGIndexer } from './LiveRAGIndexer';
 import { buildRAGPrompt, NO_CONTEXT_FALLBACK, NO_GLOBAL_CONTEXT_FALLBACK } from './prompts';
 import type { ProviderDataScopePolicy } from '../llm/ProviderRouter';
-import { RagQueryPlanner, type RagQueryPlan } from './RagQueryPlanner';
+import { RagQueryPlanner, type RagQueryPlan, type RagQueryPlanningContext, type RagSourceSelection } from './RagQueryPlanner';
 import { ConversationMemoryService } from '../intelligence/ConversationMemoryService';
 import type { RAGConversationTurn } from './RAGRetriever';
 
@@ -100,6 +100,8 @@ export interface RAGSearchOptions {
     sessionId?: string;
     /** Explicit prior turns for retrieval. When omitted, the shared manual memory is used. */
     conversation?: readonly RAGConversationTurn[];
+    /** Explicit source-selection override. When omitted, RagQueryPlanner chooses sources. */
+    selectedSources?: readonly RagSourceSelection[];
     meetingId?: string;
     modeId?: string;
     topK?: number;
@@ -308,13 +310,42 @@ export class RAGManager {
 
         // Change 8: query planning is an explicit retrieval-stage concern. The
         // original user question remains untouched for answer generation; only
-        // retrieval receives the rewritten query. Without a sessionId the planner
-        // is a safe pass-through, so existing callers retain their behavior.
-        const queryPlan: RagQueryPlan = this.queryPlanner.plan(originalQuery, options.sessionId);
+        // retrieval receives the rewritten query.
+        // Change 10: the same planner now chooses the source families to consult.
+        const { modesManager, personalKnowledge } = this.getSourceManagers();
+        const activeModeInfo = modesManager?.getActiveModeInfo?.() ?? null;
+        const planningContext: RagQueryPlanningContext = {
+            hasModeReferenceFiles: Boolean(modesManager && (options.modeId || activeModeInfo?.id)),
+            hasPersonalFiles: Boolean(personalKnowledge),
+            // Meeting retrieval can search globally when no meetingId is supplied, so
+            // keep the meeting source available to the planner. The final query's
+            // intent still decides whether it is actually selected.
+            hasMeeting: true,
+        };
+        const queryPlan: RagQueryPlan = this.queryPlanner.plan(
+            originalQuery,
+            options.sessionId,
+            planningContext,
+        );
         const normalizedQuery = queryPlan.retrievalQuery;
-        const conversation = this.getConversationForRetrieval(options.sessionId, options.conversation);
 
-        const source = options.source ?? 'all';
+        const legacySourceSelection: RagSourceSelection[] | undefined = options.source
+            ? options.source === 'meeting'
+                ? ['meeting']
+                : options.source === 'mode'
+                    ? ['mode-reference']
+                    : options.source === 'personal'
+                        ? ['personal-files']
+                        : ['meeting', 'mode-reference', 'personal-files']
+            : undefined;
+        const selectedSources = options.selectedSources?.length
+            ? [...new Set(options.selectedSources)]
+            : (legacySourceSelection ?? queryPlan.sources);
+        const sourceSet = new Set<RagSourceSelection>(selectedSources);
+        const conversation = sourceSet.has('conversation')
+            ? this.getConversationForRetrieval(options.sessionId, options.conversation)
+            : undefined;
+
         const topK = Math.max(1, Math.min(50, options.topK ?? 8));
         const candidatePoolSize = Math.max(topK, Math.min(1000, options.candidatePoolSize ?? 100));
         const rerankCandidatePoolSize = Math.max(
@@ -323,9 +354,8 @@ export class RAGManager {
         );
         const tokenBudget = Math.max(1, options.tokenBudget ?? 1800);
         const results: RagSearchResult[] = [];
-        const { modesManager, personalKnowledge } = this.getSourceManagers();
 
-        if (source === 'meeting' || source === 'all') {
+        if (sourceSet.has('meeting')) {
             try {
                 const context = await this.retriever.retrieve(normalizedQuery, {
                     ...(options.meetingId ? { meetingId: options.meetingId } : {}),
@@ -383,7 +413,7 @@ export class RAGManager {
             }
         }
 
-        if ((source === 'mode' || source === 'all') && modesManager) {
+        if (sourceSet.has('mode-reference') && modesManager) {
             try {
                 const modeInfo = modesManager.getActiveModeInfo() ?? null;
                 const modeId = options.modeId ?? modeInfo?.id;
@@ -462,7 +492,7 @@ export class RAGManager {
             }
         }
 
-        if ((source === 'personal' || source === 'all') && personalKnowledge) {
+        if (sourceSet.has('personal-files') && personalKnowledge) {
             try {
                 const items = await (personalKnowledge.searchRelevantAsync?.(normalizedQuery, candidatePoolSize)
                     ?? Promise.resolve(personalKnowledge.searchRelevant?.(normalizedQuery, candidatePoolSize)
@@ -718,8 +748,12 @@ export class RAGManager {
      * Change 8: expose the query-planning result for diagnostics/tests while
      * keeping originalQuery separate from the retrieval-only rewrite.
      */
-    planQuery(query: string, sessionId?: string): RagQueryPlan {
-        return this.queryPlanner.plan(String(query ?? '').trim(), sessionId);
+    planQuery(
+        query: string,
+        sessionId?: string,
+        context: RagQueryPlanningContext = {},
+    ): RagQueryPlan {
+        return this.queryPlanner.plan(String(query ?? '').trim(), sessionId, context);
     }
 
     /**

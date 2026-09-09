@@ -8,7 +8,7 @@
 //
 // This replaces an earlier design that offloaded search to a worker_threads
 // Worker with its own read-only connection. That added an entire class of
-// silent-hang failure modes — a worker whose module-level require() throws
+// silent-hang failure modes  a worker whose module-level require() throws
 // before its message handler registers drops every message forever with no
 // error and no timeout; a worker wedged inside a synchronous native call
 // can't be interrupted by anything, not even its own deadman-switch timer,
@@ -16,8 +16,8 @@
 // round-trip, not the worker's internal state. For the corpus sizes this app
 // actually deals with (a handful of embedded chunks per meeting, low
 // thousands of chunks total even for a heavy user), a worker thread buys no
-// measurable performance benefit — better-sqlite3 calls here are single
-// indexed lookups or small full-table scans, not seconds-long computation —
+// measurable performance benefit  better-sqlite3 calls here are single
+// indexed lookups or small full-table scans, not seconds-long computation 
 // so the added surface area was pure risk for no upside. If a future corpus
 // size genuinely needs main-thread relief, offload the WHOLE synchronous
 // call (not a hand-split protocol) via Electron's utilityProcess or a
@@ -47,7 +47,7 @@ constructor(db: Database.Database, _dbPath: string, _extPath: string) {
 // dbPath/extPath are retained in the constructor signature for
 // backward compatibility with every existing call site (RAGManager,
 // ModeContextRetriever, and the real-SQLite test suite all construct
-// VectorStore this way) — they were only ever needed by the worker
+// VectorStore this way)  they were only ever needed by the worker
 // thread to open its OWN connection and load its OWN copy of the
 // extension. This class now uses the caller's connection directly,
 // which already has the extension loaded by DatabaseManager at
@@ -67,10 +67,10 @@ this.useNativeVec = this.detectVecSupport();
 *
 * We check the handle's own `open` flag rather than asking DatabaseManager,
 * because this class's correctness depends on the connection it was
-* actually given — a caller may legitimately construct it over a different
+* actually given  a caller may legitimately construct it over a different
 * connection (ModeContextRetriever and the real-SQLite tests both do).
 *
-* DEFENSE IN DEPTH ONLY — this never reopens anything. It exists so the
+* DEFENSE IN DEPTH ONLY  this never reopens anything. It exists so the
 * shutdown window degrades into one logged no-op instead of a raw driver
 * exception escaping an internal abstraction.
 */
@@ -97,7 +97,7 @@ return false;
 /**
 * Retained for API compatibility with the previous worker-thread design
 * (RAGManager.dispose() calls this on app quit). There is no worker to
-* terminate anymore — this is a no-op that resolves immediately.
+* terminate anymore  this is a no-op that resolves immediately.
 */
 async destroy(): Promise<void> {
 // Intentionally empty.
@@ -172,7 +172,7 @@ return rows.map(r => this.rowToChunk(r));
 }
 /**
 * Search for similar chunks using native sqlite-vec or JS fallback.
-* Fully synchronous under the hood (better-sqlite3 has no async API) —
+* Fully synchronous under the hood (better-sqlite3 has no async API) 
 * wrapped in `async` only to keep the call signature unchanged for
 * every existing caller.
 */
@@ -192,7 +192,7 @@ const { meetingId, limit = 8, minSimilarity = 0.25, spaceKey } = options;
 // On the live query path spaceKey is always defined (provider.space is a
 // non-empty readonly string); this guards future callers.
 if (!spaceKey) {
-console.warn('[VectorStore] searchSimilar called without an active spaceKey — returning empty (refusing to search across embedding spaces).');
+console.warn('[VectorStore] searchSimilar called without an active spaceKey  returning empty (refusing to search across embedding spaces).');
 return [];
 }
 if (this.useNativeVec) {
@@ -240,6 +240,7 @@ const rows = this.db.prepare(sql).all(...params) as any[];
 if (!rows.length) return [];
 return rows.map((row, index) => ({
 ...this.rowToChunk(row),
+similarity: 0,
 lexicalScore: 1 - (index / Math.max(1, rows.length)),
 bm25Score: Number(row.bm25_score),
 }));
@@ -250,7 +251,7 @@ return [];
 }
 
 /**
-* Native vec0 search — runs directly on the shared connection.
+* Native vec0 search  runs directly on the shared connection.
 */
 private searchSimilarNative(
 queryEmbedding: number[],
@@ -276,7 +277,7 @@ if (meetingId) { q += ' AND c.meeting_id = ?'; params.push(meetingId); }
 // Filter by composite embedding SPACE, not provider name. v1 and v2 Gemini
 // are both provider='gemini' @ 768d, so a provider filter would leak v1
 // vectors into v2 queries. A NULL space (not yet stamped / mid-reindex) is
-// intentionally excluded → "empty, not wrong".
+// intentionally excluded  "empty, not wrong".
 if (spaceKey) { q += ' AND m.embedding_space = ?'; params.push(spaceKey); }
 const chunkRows = this.db.prepare(q).all(...params) as any[];
 const chunkMap = new Map<number, any>();
@@ -293,7 +294,7 @@ scored.push({ ...this.rowToChunk(c), similarity });
 return scored.slice(0, limit);
 }
 /**
-* Pure-JS cosine similarity fallback — computed synchronously in-process.
+* Pure-JS cosine similarity fallback  computed synchronously in-process.
 */
 private searchSimilarJS(
 queryEmbedding: number[],
@@ -314,10 +315,10 @@ query += ' AND c.meeting_id = ?';
 params.push(meetingId);
 }
 // Filter by composite embedding SPACE, not provider name. The byteLength check
-// below only excludes DIFFERENT-dimension vectors — it cannot tell v1 768d from
+// below only excludes DIFFERENT-dimension vectors  it cannot tell v1 768d from
 // v2 768d (same dims, incompatible space). Without this, v1 vectors would be
 // cosine-compared against v2 queries. NULL space (not yet stamped / mid-reindex)
-// is intentionally excluded → "empty, not wrong".
+// is intentionally excluded  "empty, not wrong".
 if (spaceKey) {
 query += ' AND m.embedding_space = ?';
 params.push(spaceKey);
@@ -478,7 +479,7 @@ console.warn(`[VectorStore] Failed to clear personal embeddings for file ${fileI
 deleteChunksForMeeting(meetingId: string): void {
 if (!this.isDatabaseUsable()) {
 console.warn(
-`[VectorStore] deleteChunksForMeeting(${meetingId}): database is closed — skipping. ` +
+`[VectorStore] deleteChunksForMeeting(${meetingId}): database is closed  skipping. ` +
 'Expected during fatal shutdown; the rows are removed by ON DELETE CASCADE ' +
 'or the next launch\'s cleanup.'
 );
@@ -523,17 +524,17 @@ return row.count > 0;
 *
 * This is a one-time migration for meetings that were embedded before the
 * provider metadata write was introduced (or if the write silently failed).
-* It is safe to call on every startup — it only touches rows where
+* It is safe to call on every startup  it only touches rows where
 * embedding_provider IS NULL and the meeting has at least one embedded chunk.
 *
 * @param providerName The active embedding provider name (e.g. "local", "openai")
 * @param dimensions The provider's embedding dimensions (e.g. 384, 1536)
 *
 * IMPORTANT: This deliberately does NOT stamp `embedding_space`. We cannot
-* prove a NULL-provider row's vectors were produced by the *current* model —
+* prove a NULL-provider row's vectors were produced by the *current* model 
 * after a model upgrade they may be in an OLD, incompatible space (e.g. v1
 * 768d while active is v2 768d). Stamping the active space here would mislabel
-* them as compatible and they'd never be re-indexed → silent garbage similarity.
+* them as compatible and they'd never be re-indexed  silent garbage similarity.
 * Instead we leave `embedding_space` NULL; the auto-reindex sweep treats
 * NULL-space-with-embeddings rows as unknown-space and safely re-embeds them.
 */
@@ -596,7 +597,7 @@ console.warn('[VectorStore] Failed to insert into vec_summaries dim table:', e);
 /**
 * Stamp a meeting's embedding space/provider/dims if not already set.
 * Called by the live indexer right after storing an embedding so that
-* in-session meetings are correctly labeled with the ACTIVE space — which
+* in-session meetings are correctly labeled with the ACTIVE space  which
 * makes them searchable in-session (search filters on space) and keeps them
 * out of the "unknown-space" re-index sweep. Idempotent; only sets when NULL.
 */
@@ -605,12 +606,12 @@ console.warn('[VectorStore] Failed to insert into vec_summaries dim table:', e);
 * promotion (F-415).
 *
 * stampMeetingSpaceIfUnset is a no-op once the column is set, so the live
-* indexer — which stamps on its FIRST successful tick — could never record
+* indexer  which stamps on its FIRST successful tick  could never record
 * a later fallback. The meeting then claimed the old space while newer
 * chunks were in the new one, and the query-time space filter excluded the
 * meeting entirely: zero live-RAG results exactly when the cloud provider
 * is down and the fallback exists to help. The queued path handles this via
-* activateMeetingFallback → clearEmbeddingsForMeeting; the live path had no
+* activateMeetingFallback  clearEmbeddingsForMeeting; the live path had no
 * equivalent.
 *
 * Only rewrites when the space actually CHANGED, so the common case stays a
@@ -626,12 +627,12 @@ if (!row || row.s == null || row.s === space) return false;
 // stale-space vectors against new-space queries, and a different-
 // dimension one produced hidden orphans (the re-index sweep's
 // `embedding_space IS NOT NULL AND != ?` is false once re-stamped).
-// The queued path has always cleared before switching providers —
-// EmbeddingPipeline.activateMeetingFallback → clearEmbeddingsForMeeting.
+// The queued path has always cleared before switching providers 
+// EmbeddingPipeline.activateMeetingFallback  clearEmbeddingsForMeeting.
 //
 // Both halves are ONE unit: clearEmbeddingsForMeeting() nulls
 // embedding_space on its way through, so failing between it and the
-// UPDATE would leave some dims cleared and no stamp at all — worse than
+// UPDATE would leave some dims cleared and no stamp at all  worse than
 // the state this method was called to repair.
 this.db.transaction(() => {
 this.clearEmbeddingsForMeeting(meetingId);
@@ -643,7 +644,7 @@ console.warn(`[VectorStore] Meeting ${meetingId} embedding space changed ${row.s
 return true;
 } catch (e) {
 // Rolled back: the meeting still claims the OLD space and still has its
-// old-space vectors — consistent, and the pre-R-21 behaviour.
+// old-space vectors  consistent, and the pre-R-21 behaviour.
 console.warn(`[VectorStore] restampMeetingSpaceOnChange(${meetingId}) failed and was rolled back:`, e);
 return false;
 }
@@ -654,7 +655,7 @@ this.db.prepare(
 'UPDATE meetings SET embedding_provider = ?, embedding_dimensions = ?, embedding_space = ? WHERE id = ? AND embedding_space IS NULL'
 ).run(providerName, dimensions, space, meetingId);
 } catch (e) {
-// Non-fatal — re-index sweep will catch an unstamped meeting later.
+// Non-fatal  re-index sweep will catch an unstamped meeting later.
 }
 }
 /**
@@ -666,10 +667,10 @@ queryEmbedding: number[],
 limit: number = 5,
 spaceKey?: string
 ): Promise<{ meetingId: string; summaryText: string; similarity: number }[]> {
-// Same hard invariant as searchSimilar: no active space → return nothing
+// Same hard invariant as searchSimilar: no active space  return nothing
 // rather than leaking every space (see searchSimilar for rationale).
 if (!spaceKey) {
-console.warn('[VectorStore] searchSummaries called without an active spaceKey — returning empty.');
+console.warn('[VectorStore] searchSummaries called without an active spaceKey  returning empty.');
 return [];
 }
 if (this.useNativeVec) {
@@ -683,7 +684,7 @@ return this.searchSummariesJS(queryEmbedding, limit, spaceKey);
 return this.searchSummariesJS(queryEmbedding, limit, spaceKey);
 }
 /**
-* Native vec0 summary search — runs directly on the shared connection.
+* Native vec0 summary search  runs directly on the shared connection.
 */
 private searchSummariesNative(
 queryEmbedding: number[],
@@ -717,7 +718,7 @@ results.push({ meetingId: s.meeting_id, summaryText: s.summary_text, similarity:
 return results.slice(0, limit);
 }
 /**
-* JS fallback summary search — computed synchronously in-process.
+* JS fallback summary search  computed synchronously in-process.
 */
 private searchSummariesJS(
 queryEmbedding: number[],
@@ -726,7 +727,7 @@ spaceKey?: string
 ): { meetingId: string; summaryText: string; similarity: number }[] {
 // Filter by composite embedding SPACE, not provider name (see searchSimilarJS).
 // The byte-length dimension check below cannot distinguish v1 768d from v2 768d.
-// NULL space is intentionally excluded → "empty, not wrong".
+// NULL space is intentionally excluded  "empty, not wrong".
 let query = `
 SELECT s.*
 FROM chunk_summaries s
@@ -760,25 +761,25 @@ return results.slice(0, limit);
 *
 * Two populations qualify:
 * 1. KNOWN-INCOMPATIBLE: embedding_space is set and differs from active
-* (e.g. gemini-embedding-001 768d while active is gemini-embedding-2 768d —
+* (e.g. gemini-embedding-001 768d while active is gemini-embedding-2 768d 
 * same name/dims, different space; the whole reason space keys on the
 * composite `${name}:${model}:${dims}`, see embeddingSpace.ts).
 * 2. UNKNOWN-SPACE-WITH-EMBEDDINGS: embedding_space IS NULL but the meeting
 * has stored embeddings (legacy rows, or pre-metadata embeds). We cannot
 * prove these are in the active space, so they MUST be re-embedded rather
-* than trusted — trusting them is exactly the silent-garbage hazard.
+* than trusted  trusting them is exactly the silent-garbage hazard.
 */
 /**
 * Shared WHERE body identifying meetings that need re-embedding for the active
-* space. Two populations: (1) KNOWN-INCOMPATIBLE — embedding_space set and !=
+* space. Two populations: (1) KNOWN-INCOMPATIBLE  embedding_space set and !=
 * active (e.g. gemini-embedding-001 768d vs active -2 768d; the whole reason
 * space keys on the composite `${name}:${model}:${dims}`). (2) UNKNOWN-SPACE-
-* WITH-EMBEDDINGS — embedding_space NULL but the meeting has stored vectors
+* WITH-EMBEDDINGS  embedding_space NULL but the meeting has stored vectors
 * (legacy / pre-metadata); we can't prove they're in the active space so they
 * MUST be re-embedded, not trusted.
 *
 * SINGLE SOURCE so getIncompatibleSpaceCount (the trigger) and
-* getMeetingIdsNeedingReindex (the worklist) can NEVER drift — a mismatch would
+* getMeetingIdsNeedingReindex (the worklist) can NEVER drift  a mismatch would
 * make the count say "N to reindex" while a different set actually gets requeued.
 * The bound parameter is `activeSpace` (the `!= ?` placeholder).
 */
@@ -800,7 +801,7 @@ return row.count || 0;
 }
 /**
 * Return meeting ids that need re-embedding for the active space, most-recent
-* first. SELECTION ONLY — does not mutate. Uses the SAME REINDEX_PREDICATE as
+* first. SELECTION ONLY  does not mutate. Uses the SAME REINDEX_PREDICATE as
 * getIncompatibleSpaceCount so the trigger and the worklist can't diverge.
 */
 getMeetingIdsNeedingReindex(activeSpace: string): string[] {
@@ -813,7 +814,7 @@ return rows.map(r => r.id);
 * Delete embeddings for meetings whose space differs from the active one,
 * to prep for the re-indexer. Returns affected meeting ids, most-recent-first.
 *
-* NOTE: bulk variant — prefer the per-meeting clearEmbeddingsForMeeting() inside
+* NOTE: bulk variant  prefer the per-meeting clearEmbeddingsForMeeting() inside
 * the re-index loop for crash-resumability. Retained for the manual IPC path.
 */
 deleteEmbeddingsForSpace(activeSpace: string): string[] {
@@ -854,14 +855,14 @@ return meetingIds;
 }
 /**
 * Clear embeddings for a single meeting without deleting chunks.
-* Used when falling back to a different provider mid-stream — the chunks
+* Used when falling back to a different provider mid-stream  the chunks
 * are kept but their embedding BLOBs, vec0 rows, and provider metadata
 * are wiped so the new provider can embed them cleanly.
 */
 clearEmbeddingsForMeeting(meetingId: string): void {
 if (!this.isDatabaseUsable()) {
 console.warn(
-`[VectorStore] clearEmbeddingsForMeeting(${meetingId}): database is closed — skipping. ` +
+`[VectorStore] clearEmbeddingsForMeeting(${meetingId}): database is closed  skipping. ` +
 'Expected during fatal shutdown; the embeddings are re-derived on the next launch.'
 );
 return;
@@ -945,3 +946,4 @@ const magnitude = Math.sqrt(normQ) * Math.sqrt(normB);
 return magnitude === 0 ? 0 : dot / magnitude;
 }
 }
+
