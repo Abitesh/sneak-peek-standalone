@@ -911,6 +911,116 @@ const pageContextChipLabel = (pc: {
 
 const subtleSurfaceClass = 'overlay-subtle-surface';
 
+const CitationMarkerContext = React.createContext<CitationMarkerMap | undefined>(undefined);
+
+const CitationBadge = ({
+  marker,
+  record,
+}: {
+  marker: string;
+  record: CitationMarkerRecord;
+}) => {
+  const [open, setOpen] = React.useState(false);
+  const citation = record.citation;
+  const displayNumber = marker.startsWith('S') ? marker.slice(1) : marker;
+
+  const location = [
+    citation.pageStart !== undefined
+      ? citation.pageEnd !== undefined && citation.pageEnd !== citation.pageStart
+        ? `Pages ${citation.pageStart}–${citation.pageEnd}`
+        : `Page ${citation.pageStart}`
+      : undefined,
+    citation.section?.trim() || undefined,
+  ].filter(Boolean).join(' · ');
+
+  return (
+    <span className="relative inline-flex align-baseline mx-[1px]">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        aria-label={`Source ${displayNumber}: ${citation.documentName}`}
+        title={`${citation.documentName}${location ? ` · ${location}` : ''}`}
+        className="inline-flex items-center justify-center min-w-[18px] h-[17px] px-1 align-baseline rounded-[5px] text-[10px] leading-none font-semibold font-mono overlay-text-interactive border border-current/15 bg-black/[0.04] dark:bg-white/[0.06] hover:bg-black/[0.09] dark:hover:bg-white/[0.11] hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-accent-primary/60 transition-colors"
+      >
+        [{displayNumber}]
+      </button>
+
+      {open && (
+        <span
+          role="dialog"
+          className="absolute left-0 top-full z-50 mt-1.5 w-[min(300px,calc(100vw-32px))] rounded-lg border border-black/10 dark:border-white/10 bg-bg-card shadow-xl px-3 py-2 text-left normal-case font-normal"
+        >
+          <span className="block text-[11px] font-semibold leading-snug overlay-text-primary break-words">
+            {citation.documentName}
+          </span>
+          {location && (
+            <span className="block mt-0.5 text-[10px] leading-snug overlay-text-muted">
+              {location}
+            </span>
+          )}
+          <span className="block mt-1.5 text-[9px] leading-snug overlay-text-muted">
+            Source {displayNumber}
+          </span>
+        </span>
+      )}
+    </span>
+  );
+};
+
+const CitationAwareText = ({ children }: { children?: React.ReactNode }) => {
+  const markers = React.useContext(CitationMarkerContext);
+  if (!markers || markers === undefined) {
+    return <>{children}</>;
+  }
+
+  const value = Array.isArray(children)
+    ? children.map((child) => (typeof child === 'string' ? child : '')).join('')
+    : typeof children === 'string'
+      ? children
+      : '';
+
+  if (!value) return <>{children}</>;
+
+  const markerPattern = /(\[S[A-Za-z0-9_-]+\])/g;
+  const parts = value.split(markerPattern);
+
+  return (
+    <>
+      {parts.map((part, index) => {
+        const match = part.match(/^\[(S[A-Za-z0-9_-]+)\]$/);
+        if (!match) return <React.Fragment key={index}>{part}</React.Fragment>;
+
+        const record = markers[match[1]];
+        if (!record) {
+          // Never turn an unknown/model-invented marker into a citation UI.
+          return <React.Fragment key={index}>{part}</React.Fragment>;
+        }
+
+        return (
+          <CitationBadge
+            key={`${record.marker}-${record.evidenceId}-${index}`}
+            marker={record.marker}
+            record={record}
+          />
+        );
+      })}
+    </>
+  );
+};
+
+const CitationMarkerProvider = ({
+  markers,
+  children,
+}: {
+  markers?: CitationMarkerMap;
+  children: React.ReactNode;
+}) => (
+  <CitationMarkerContext.Provider value={markers}>
+    {children}
+  </CitationMarkerContext.Provider>
+);
+
 const MessageRow = React.memo(
   function MessageRow({
     msg,
@@ -1070,7 +1180,9 @@ const MessageRow = React.memo(
                 <span>{t('Corrected answer')}{msg.correctionNote ? ` — ${msg.correctionNote}` : ''}</span>
               </div>
             )}
-            {renderMessageText(msg)}
+            <CitationMarkerProvider markers={msg.citationMarkers}>
+              {renderMessageText(msg)}
+            </CitationMarkerProvider>
             {/* Verified badge: the code in this message passed executed tests. */}
             {msg.role === 'system' && msg.codeVerified && (
               <div className="flex items-center gap-1 mt-1.5 text-[10px] font-medium text-green-500" title={`Ran ${msg.codeVerified.total} test case(s) successfully`}>
@@ -1918,6 +2030,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
   const mdComponents = useMemo(
     () => ({
       standard: {
+        text: CitationAwareText,
         p: ({ node, ...props }: any) => (
           <p className="mb-[2.5px] last:mb-0 leading-[1.45] text-[14px] whitespace-pre-wrap" {...props} />
         ),
@@ -1976,6 +2089,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
         ),
       },
       codeText: {
+        text: CitationAwareText,
         p: ({ node, ...props }: any) => (
           <p className="mb-[2.5px] last:mb-0 leading-[1.45] whitespace-pre-wrap text-[14px]" {...props} />
         ),
@@ -2023,6 +2137,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
         ),
       },
       whatToAnswerText: {
+        text: CitationAwareText,
         p: ({ node, ...props }: any) => <p className="mb-[2.5px] last:mb-0 leading-[1.45] text-[14px] whitespace-pre-wrap" {...props} />,
         strong: ({ node, ...props }: any) => (
           <strong
@@ -2045,6 +2160,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
         li: ({ node, ...props }: any) => <li className="pl-1 mb-[2.5px] last:mb-0 leading-[1.45] text-[14px]" {...props} />,
       },
       recapText: {
+        text: CitationAwareText,
         p: ({ node, ...props }: any) => <p className="mb-[2.5px] last:mb-0 leading-[1.45] text-[14px] whitespace-pre-wrap" {...props} />,
         strong: ({ node, ...props }: any) => (
           <strong
@@ -2056,6 +2172,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
         li: ({ node, ...props }: any) => <li className="pl-1 mb-[2.5px] last:mb-0 leading-[1.45] text-[14px]" {...props} />,
       },
       followUpQuestionsText: {
+        text: CitationAwareText,
         p: ({ node, ...props }: any) => <p className="mb-[2.5px] last:mb-0 leading-[1.45] text-[14px] whitespace-pre-wrap" {...props} />,
         strong: ({ node, ...props }: any) => (
           <strong
@@ -2068,6 +2185,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
         li: ({ node, ...props }: any) => <li className="pl-1 mb-[2.5px] last:mb-0 leading-[1.45] text-[14px]" {...props} />,
       },
       shortenText: {
+        text: CitationAwareText,
         p: ({ node, ...props }: any) => <p className="mb-[2.5px] last:mb-0 leading-[1.45] text-[14px] whitespace-pre-wrap" {...props} />,
         strong: ({ node, ...props }: any) => (
           <strong
