@@ -50,6 +50,7 @@ import { allowsEvidence, allowsRetrieval } from './types';
 import type { EvidenceItem, EvidencePack, RejectedEvidenceItem } from './evidencePack';
 import { textCanProveProperty } from './requestedProperty';
 import { buildRagCitation } from '../../rag/RagCitation';
+import { evaluateRagRelevanceGate } from '../../rag/RagRelevanceGate';
 // Type-only (erased at runtime). The DI ports below described a structural
 // SUBSET of the pack, but what actually flows through them at runtime is a
 // real KnowledgePack: getPackForFile() returns KnowledgePack | null and the
@@ -63,7 +64,6 @@ import type { OkfRetrieveOptions, ScoredCard } from '../../services/knowledge/Ok
 import type { QuestionClassification } from '../../services/knowledge/QuestionClassifier';
 import {
 deriveEvidenceSufficiency,
-MIN_ANSWER_CONFIDENCE,
 selectSmallestSufficientEvidence,
 supportsEntity,
 type EvidenceSufficiency,
@@ -71,7 +71,6 @@ type EvidenceSufficiency,
 import {
 isOkfKnowledgePacksEnabled,
 isOkfHybridRetrievalEnabled,
-isRagConfidenceGateEnabled,
 isRagLocalRerankEnabled,
 isRagSpeculativeRerankEnabled,
 } from '../intelligenceFlags';
@@ -116,6 +115,8 @@ relaxed?: boolean;
 /** When resolving a repair pack, the parent pack this one supersedes. */
 parentPackId?: string;
 packVersion?: number;
+/** Existing conflict state, when an upstream resolver supplies it. */
+conflicts?: EvidencePack['conflicts'];
 }
 // Minimal interfaces for the retrievers this module depends on — kept
 // decoupled from the concrete ModesManager/KnowledgeManager classes so the
@@ -180,8 +181,7 @@ options?: OkfRetrieveOptions,
 ) => ScoredCard[];
 }
 // ── Confidence floor for "is this pack good enough to answer from" ─────────
-// `MIN_ANSWER_CONFIDENCE` comes from evidenceSufficiency so hybrid gating and
-// final pre-dispatch policy cannot silently diverge.
+// The final relevance decision is centralized in RagRelevanceGate.
 const OKF_CARD_HIGH_CONFIDENCE_SCORE = 0.55;
 // Generic English function words that carry no topical signal in a question.
 // Deliberately small — only words that appear in nearly every question phrasing.
@@ -392,12 +392,12 @@ const canProve = textCanProveProperty(s.card.body, requestedProperty)
 return {
 evidenceId: `${turnId}:okf:${i}`,
 citation: buildRagCitation({
-  citationId: `cite_${turnId}_okf_${i}`.replace(/[^A-Za-z0-9_-]/g, '_'),
-  documentId: s.fileId,
-  documentName: s.card.title,
-  chunkId: `${s.fileId}:card:${i}`,
-  section: s.card.sourceSections?.[0],
-  sourceType: 'mode',
+citationId: `cite_${turnId}_okf_${i}`.replace(/[^A-Za-z0-9_-]/g, '_'),
+documentId: s.fileId,
+documentName: s.card.title,
+chunkId: `${s.fileId}:card:${i}`,
+section: s.card.sourceSections?.[0],
+sourceType: 'mode',
 }),
 sourceKind: 'okf_document_card' as const,
 sourceId: s.fileId,
@@ -489,6 +489,18 @@ return entities.some((entity) => supportsEntity(it, entity));
 if (!covered) return null;
 }
 }
+// OKF is a structured-card adapter. Its existing 0.55 score is an
+// adapter-level candidate-admission threshold; once a candidate set is
+// accepted by that adapter, the same canonical post-retrieval sufficiency
+// gate used by hybrid RAG makes the final evidence decision.
+const relevanceDecision = evaluateRagRelevanceGate({
+items,
+requestedProperty,
+targetEntities: classification.targetEntities,
+isSynthesis: classification.isSynthesis,
+conflicts: request.conflicts,
+});
+if (!relevanceDecision.passed) return null;
 const strategy: EvidenceResolutionStrategy = requestedProperty === 'unknown' ? 'okf_exact' : 'okf_property';
 const pack = this.finalizePack(request, items, [], strategy);
 return {
@@ -541,23 +553,40 @@ provesRequestedProperty: textCanProveProperty(chunk.text, requestedProperty),
 });
 } catch (error: any) {
 markH4ResolverStage('hybrid_error', { message: error?.message || String(error) });
+const classification = this.deps.classifyQuestion(question);
+const relevanceDecision = evaluateRagRelevanceGate({
+items: [],
+requestedProperty,
+targetEntities: classification.targetEntities,
+isSynthesis: classification.isSynthesis,
+conflicts: request.conflicts,
+resolverUnavailable: true,
+});
 return {
 pack: this.emptyPack(request, 'insufficient'),
 strategy: 'insufficient',
 attemptedSources: [],
 retrievedSources: [],
 rejectedSources: [],
-confidence: 0,
+confidence: relevanceDecision.confidence,
 };
 }
 if (!result.chunks || result.chunks.length === 0) {
+const classification = this.deps.classifyQuestion(question);
+const relevanceDecision = evaluateRagRelevanceGate({
+items: [],
+requestedProperty,
+targetEntities: classification.targetEntities,
+isSynthesis: classification.isSynthesis,
+conflicts: request.conflicts,
+});
 return {
 pack: this.emptyPack(request, 'insufficient'),
 strategy: 'insufficient',
 attemptedSources: [],
 retrievedSources: [],
 rejectedSources: [],
-confidence: 0,
+confidence: relevanceDecision.confidence,
 };
 }
 const items: EvidenceItem[] = result.chunks.map((c, i) => {
@@ -566,14 +595,14 @@ const canProve = textCanProveProperty(c.text, requestedProperty)
 return {
 evidenceId: `${turnId}:hybrid:${i}`,
 citation: buildRagCitation({
-  citationId: `cite_${turnId}_hybrid_${i}`.replace(/[^A-Za-z0-9_-]/g, '_'),
-  documentId: c.documentId ?? c.sourceId,
-  documentName: c.documentName ?? c.fileName,
-  chunkId: c.chunkId ?? `${c.sourceId}:${c.chunkIndex}`,
-  pageStart: c.pageStart,
-  pageEnd: c.pageEnd,
-  section: c.section,
-  sourceType: 'mode',
+citationId: `cite_${turnId}_hybrid_${i}`.replace(/[^A-Za-z0-9_-]/g, '_'),
+documentId: c.documentId ?? c.sourceId,
+documentName: c.documentName ?? c.fileName,
+chunkId: c.chunkId ?? `${c.sourceId}:${c.chunkIndex}`,
+pageStart: c.pageStart,
+pageEnd: c.pageEnd,
+section: c.section,
+sourceType: 'mode',
 }),
 sourceKind: 'mode_reference_chunk' as const,
 sourceId: c.sourceId,
@@ -609,25 +638,26 @@ propertyMatch: canProve ? 1 : 0,
 reasonIncluded: result.usedHybrid ? 'hybrid semantic+lexical retrieval' : 'lexical fallback retrieval',
 };
 });
-const propertySatisfied = requestedProperty === 'unknown'
-? items.length > 0
-: items.some((i) => i.supports.property === requestedProperty);
-const bestScore = Math.max(...items.map((i) => i.score.final));
-// Confidence gate: an explicit floor even when the confidence-gate flag
-// itself is off (that flag only controls the OBSERVE-only telemetry
-// upstream; this resolver's own floor is the actual enforcement point).
-const confidenceGateEnabled = isRagConfidenceGateEnabled();
-const belowFloor = bestScore < MIN_ANSWER_CONFIDENCE;
-if (belowFloor && requestedProperty !== 'unknown' && !propertySatisfied) {
+const classification = this.deps.classifyQuestion(question);
+const relevanceDecision = evaluateRagRelevanceGate({
+items,
+requestedProperty,
+targetEntities: classification.targetEntities,
+isSynthesis: classification.isSynthesis,
+retrievalConfidence: result.confidence,
+conflicts: request.conflicts,
+});
+if (!relevanceDecision.passed) {
 return {
 pack: this.emptyPack(request, 'insufficient'),
 strategy: 'insufficient',
 attemptedSources: [],
 retrievedSources: [],
 rejectedSources: [],
-confidence: bestScore,
+confidence: relevanceDecision.confidence,
 };
 }
+const bestScore = relevanceDecision.confidence;
 const strategy: EvidenceResolutionStrategy = result.usedHybrid ? 'hybrid_rag' : 'lexical_fallback';
 const pack = this.finalizePack(request, items, [], strategy);
 return {
@@ -649,14 +679,14 @@ items: EvidenceItem[],
 rejected: RejectedEvidenceItem[],
 strategy: EvidenceResolutionStrategy,
 ): EvidencePack {
-const { turnId, sourceContract, requestedProperty, parentPackId, packVersion } = request;
+const { turnId, sourceContract, requestedProperty, parentPackId, packVersion, conflicts } = request;
 const classification = this.deps.classifyQuestion(request.question);
 const factual = items.filter((item) => item.authority === 'evidence');
 const candidatePack = {
 items: factual,
 requestedProperty,
 coverage: { hasDirectEvidence: factual.length > 0, propertySatisfied: false, entityMatched: false, sourceOwnerSatisfied: true, confidence: 0 },
-conflicts: [] as EvidencePack['conflicts'],
+conflicts: conflicts ?? [],
 };
 const initialSufficiency = deriveEvidenceSufficiency({
 pack: candidatePack,
@@ -693,7 +723,7 @@ pack: {
 items: selectedFactual,
 requestedProperty,
 coverage: { hasDirectEvidence: selectedFactual.length > 0, propertySatisfied: false, entityMatched: false, sourceOwnerSatisfied: true, confidence },
-conflicts: [] as EvidencePack['conflicts'],
+conflicts: conflicts ?? [],
 },
 targetEntities: classification.targetEntities,
 isSynthesis: classification.isSynthesis,
@@ -728,7 +758,7 @@ excludedEvidenceIds: excludedItems.map((item) => item.evidenceId),
 strategy: 'smallest_sufficient_set',
 },
 resolver: { strategy, attemptedSources: [], retrievedSources: [] },
-conflicts: [] as EvidencePack['conflicts'],
+conflicts: conflicts ?? [],
 answerPolicy,
 };
 }
