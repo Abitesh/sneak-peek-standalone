@@ -1145,10 +1145,13 @@ const v3MeetingId = (appState.getIntelligenceManager?.() as any)
 // V3 remains the authorization planner. Translate its document source families
 // into RAGManager's canonical source families. Explicit selection prevents the
 // RAG query planner from broadening this turn into an unauthorized source.
-const ragSelectedSources = new Set<'meeting' | 'mode-reference' | 'personal-files'>();
+const ragSelectedSources = new Set<'meeting' | 'mode-reference' | 'personal-files' | 'knowledge'>();
 if (effectiveAllowedSourceTypes.some((s: string) =>
 s === 'REFERENCE_FILE' || s === 'PROJECT_FILE' || s === 'CODING_SAMPLE')) {
 ragSelectedSources.add('mode-reference');
+// Change 20: OKF is a derived knowledge index over these same reference files.
+// It participates through RAGManager rather than through a second retrieval pipeline.
+ragSelectedSources.add('knowledge');
 if (personalFiles.length) ragSelectedSources.add('personal-files');
 }
 if (effectiveAllowedSourceTypes.includes('MEETING_TRANSCRIPT') && v3MeetingId) {
@@ -3472,6 +3475,7 @@ answerPolicy: 'refuse_insufficient_evidence',
 const resolver = new EvidenceResolver({
 getModeSnapshot: () => activeModeRow,
 getReferenceFiles: (modeId: string) => modesMgr.getReferenceFiles(modeId),
+unifiedRag: appState.getRAGManager?.() ?? undefined,
 hybridRetriever: { retrieveHybrid: (m: any, files: any, opts: any) => modesMgr.retrieveHybridRaw(m, files, opts) },
 knowledgeManager: { getPackForFile: (fileId: string) => KnowledgeManager.getInstance().getPackForFile(fileId) },
 classifyQuestion,

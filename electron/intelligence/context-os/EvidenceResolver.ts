@@ -50,6 +50,7 @@ import { allowsEvidence, allowsRetrieval } from './types';
 import type { EvidenceItem, EvidencePack, RejectedEvidenceItem } from './evidencePack';
 import { textCanProveProperty } from './requestedProperty';
 import { buildRagCitation } from '../../rag/RagCitation';
+import type { RAGSearchOptions, RagSearchResult } from '../../rag/RAGManager';
 import { evaluateRagRelevanceGate } from '../../rag/RagRelevanceGate';
 // Type-only (erased at runtime). The DI ports below described a structural
 // SUBSET of the pack, but what actually flows through them at runtime is a
@@ -73,6 +74,7 @@ isOkfKnowledgePacksEnabled,
 isOkfHybridRetrievalEnabled,
 isRagLocalRerankEnabled,
 isRagSpeculativeRerankEnabled,
+  isIntelligenceFlagEnabled,
 } from '../intelligenceFlags';
 // ── Public types ─────────────────────────────────────────────────────────────
 export type EvidenceResolutionStrategy =
@@ -167,11 +169,16 @@ confidence?: { topScore: number; secondScore: number; isLowConfidence: boolean }
 export interface KnowledgeManagerLike {
 getPackForFile(fileId: string): KnowledgePack | null;
 }
+export interface UnifiedRagSearchLike {
+search(query: string, options?: RAGSearchOptions): Promise<{ status: 'ok' | 'no_relevant_evidence'; results: RagSearchResult[]; confidence: number }>;
+}
 export interface EvidenceResolverDeps {
 getModeSnapshot: () => { id: string; templateType: string; customContext: string } | null;
 getReferenceFiles: (modeId: string) => ReferenceFileLike[];
 hybridRetriever: HybridRetrieverLike;
 knowledgeManager: KnowledgeManagerLike;
+/** Change 20: canonical source retrieval owned by RAGManager. */
+unifiedRag?: UnifiedRagSearchLike;
 classifyQuestion: (question: string) => QuestionClassification;
 queryOkfCards: (
 pack: KnowledgePack,
@@ -325,7 +332,7 @@ confidence: 0,
 // ── Step B/C: OKF card lookup (structured-fact-first) ────────────────────
 attemptedSources.push('okf_document_card');
 if (isOkfKnowledgePacksEnabled() && isOkfHybridRetrievalEnabled()) {
-const okfResult = this.resolveFromOkf(request, files);
+const okfResult = await this.resolveFromOkf(request, files);
 if (okfResult) {
 retrievedSources.push('okf_document_card');
 return okfResult;
@@ -343,10 +350,10 @@ rejectedSources.push({ sourceKind: 'mode_reference_chunk', reason: 'low_confiden
 return { ...hybridResult, attemptedSources, retrievedSources, rejectedSources };
 }
 // ── OKF path ────────────────────────────────────────────────────────────
-private resolveFromOkf(
+private async resolveFromOkf(
 request: EvidenceResolutionRequest,
 files: ReferenceFileLike[],
-): EvidenceResolutionResult | null {
+): Promise<EvidenceResolutionResult | null> {
 const { question, sourceContract, requestedProperty, turnId } = request;
 const classification = this.deps.classifyQuestion(question);
 const h4StageTrace = process.env.NATIVELY_E2E === '1'
@@ -361,14 +368,45 @@ softEntities: classification.softEntities,
 });
 const scoredAcrossFiles: Array<{ card: any; score: number; fileId: string }> = [];
 // All card bodies across the active files — used to measure query-term rarity
-// for the salient-distinctive-term gate below. Collected once here.
+// for the salient-distinctive-term gate below. KnowledgeManager remains the
+// source of truth for the persisted pack; retrieval itself belongs to RAGManager.
 const corpusBodies: string[] = [];
 for (const file of files) {
 const pack = this.deps.knowledgeManager.getPackForFile(file.id);
 if (!pack || pack.cards.length === 0) continue;
 for (const c of pack.cards) corpusBodies.push(`${c.title}\n${c.body}`);
+}
+if (this.deps.unifiedRag) {
+try {
+const response = await this.deps.unifiedRag.search(question, {
+selectedSources: ['knowledge'],
+modeId: request.activeMode.modeId ?? undefined,
+topK: Math.min(50, Math.max(6, files.length * 6)),
+candidatePoolSize: Math.min(1000, Math.max(12, files.length * 12)),
+allowRerank: false,
+forceDocumentGrounding: true,
+});
+for (const result of response.results ?? []) {
+const card = (result.chunk.metadata as any)?.okfCard;
+if (!card) continue;
+scoredAcrossFiles.push({
+card,
+score: Number(result.score) || 0,
+fileId: String(result.source.id),
+});
+}
+} catch (error) {
+if (isIntelligenceFlagEnabled('trace')) {
+console.warn('[EvidenceResolver] Unified OKF retrieval failed; falling back to legacy adapter:', error);
+}
+}
+} else {
+for (const file of files) {
+const pack = this.deps.knowledgeManager.getPackForFile(file.id);
+if (!pack || pack.cards.length === 0) continue;
 const scored = this.deps.queryOkfCards(pack, question, classification, { topN: 6, fileId: file.id });
 for (const s of scored) scoredAcrossFiles.push({ ...s, fileId: file.id });
+}
 }
 if (scoredAcrossFiles.length === 0) return null;
 markH4OkfStage('scored_candidates', {
@@ -528,21 +566,50 @@ if (h4StageTrace) console.log('[TRACE:H4-RESOLVER]', JSON.stringify({ stage, atM
 };
 try {
 markH4ResolverStage('hybrid_enter', { fileCount: files.length, requestedProperty });
+if (this.deps.unifiedRag) {
+const response = await this.deps.unifiedRag.search(question, {
+selectedSources: ['mode-reference'],
+modeId: request.activeMode.modeId ?? undefined,
+topK: relaxed ? 24 : 8,
+candidatePoolSize: relaxed ? 48 : 24,
+tokenBudget: relaxed ? 5200 : undefined,
+allowRerank: isRagLocalRerankEnabled() && isRagSpeculativeRerankEnabled(),
+forceDocumentGrounding: true,
+});
+result = {
+chunks: (response.results ?? []).map((r) => ({
+sourceId: String(r.source.id),
+fileName: r.source.name,
+text: r.chunk.text,
+chunkIndex: r.chunk.chunkIndex,
+score: Number(r.score) || 0,
+ftsScore: Number(r.lexicalScore) || 0,
+vectorScore: Number(r.semanticScore) || 0,
+rerankScore: r.rerankScore,
+pageStart: r.chunk.pageStart,
+pageEnd: r.chunk.pageEnd,
+section: r.chunk.section,
+heading: r.chunk.heading,
+documentId: r.chunk.documentId,
+documentName: r.source.name,
+chunkId: r.chunk.id,
+})),
+formattedContext: '',
+usedFallback: false,
+usedHybrid: (response.results ?? []).some((r) => r.semanticScore !== undefined && r.lexicalScore !== undefined),
+confidence: { topScore: response.confidence ?? 0, secondScore: 0, isLowConfidence: (response.confidence ?? 0) <= 0 },
+};
+} else {
 result = await this.deps.hybridRetriever.retrieveHybrid(mode, files, {
 query: question,
 transcript,
-// Doc-grounded budgets are auto-upgraded inside the retriever when
-// forceDocumentGrounding is true — pass undefined so it self-selects.
 tokenBudget: relaxed ? 5200 : undefined,
 topK: relaxed ? 24 : undefined,
-// The governed manual-chat path has a fixed first-useful deadline. It
-// only opts into the optional local reranker when the explicit
-// speculative rollout gate is on; ragLocalRerank merely permits the
-// model, while ragSpeculativeRerank permits this live path to await it.
 allowRerank: isRagLocalRerankEnabled() && isRagSpeculativeRerankEnabled(),
 forceDocumentGrounding: true,
 followUpReferentHint,
 });
+}
 markH4ResolverStage('hybrid_exit', {
 chunkCount: result.chunks?.length ?? 0,
 usedFallback: result.usedFallback,

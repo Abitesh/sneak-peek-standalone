@@ -20,7 +20,8 @@ export type RagSourceSelection =
  | 'mode-reference'
  | 'personal-files'
  | 'meeting'
- | 'conversation';
+ | 'conversation'
+ | 'knowledge';
 
 export interface RagQueryPlanningContext {
  /** Whether the active mode has reference files available to search. */
@@ -120,7 +121,7 @@ function selectSources(
 
  // Document/reference questions are routed to the active mode's reference files.
  if (mode) {
- if (context.hasModeReferenceFiles !== false) sources.push('mode-reference');
+ if (context.hasModeReferenceFiles !== false) sources.push('mode-reference', 'knowledge');
  if (referential) sources.push('conversation');
  return { sources, sourceReason: 'mode' };
  }

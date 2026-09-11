@@ -23,6 +23,7 @@ import { createLegacyRetrievalPort } from '../context-intelligence/retrieval/leg
 import { MeetingRagAdapter } from './adapters/MeetingRagAdapter';
 import { ModeRagAdapter } from './adapters/ModeRagAdapter';
 import { PersonalRagAdapter } from './adapters/PersonalRagAdapter';
+import { KnowledgeRagAdapter } from './adapters/KnowledgeRagAdapter';
 interface ModesManagerLike {
 getActiveModeInfo(): { id?: string } | null;
 getActiveMode(): any | null;
@@ -56,7 +57,7 @@ reindexEmbeddings?(): Promise<void>;
 * example profile, browser, OKF, and memory evidence) are not silently folded
 * into this contract.
 */
-export type RagSourceType = 'meeting' | 'mode' | 'personal';
+export type RagSourceType = 'meeting' | 'mode' | 'personal' | 'knowledge';
 export type RAGSource = RagSourceType;
 /** A source document independent of its source-specific storage schema. */
 export interface RagDocument {
@@ -224,6 +225,7 @@ private queryPlanner: RagQueryPlanner;
 private readonly meetingAdapter: MeetingRagAdapter;
 private readonly modeAdapter: ModeRagAdapter;
 private readonly personalAdapter: PersonalRagAdapter;
+private readonly knowledgeAdapter: KnowledgeRagAdapter;
 /**
 * Change 1/18: source coordination lives here, while each source keeps ownership
 * of its existing retrieval implementation behind a thin adapter. The application
@@ -283,6 +285,7 @@ this.queryPlanner = new RagQueryPlanner();
 this.meetingAdapter = new MeetingRagAdapter(this.retriever, this.db);
 this.modeAdapter = new ModeRagAdapter();
 this.personalAdapter = new PersonalRagAdapter(this.db);
+this.knowledgeAdapter = new KnowledgeRagAdapter();
 this.embeddingPipeline.initialize({
 openaiKey: config.openaiKey,
 geminiKey: config.geminiKey,
@@ -530,7 +533,7 @@ const legacySourceSelection: RagSourceSelection[] | undefined = options.source
 ? ['mode-reference']
 : options.source === 'personal'
 ? ['personal-files']
-: ['meeting', 'mode-reference', 'personal-files']
+: ['meeting', 'mode-reference', 'knowledge', 'personal-files']
 : undefined;
 const selectedSources = Array.isArray(options.selectedSources)
 ? [...new Set(options.selectedSources)]
@@ -572,6 +575,20 @@ tokenBudget,
 results.push(...modeResults);
 } catch (error) {
 console.warn('[RAGManager] Mode adapter retrieval failed:', error);
+}
+}
+if (sourceSet.has('knowledge')) {
+try {
+const knowledgeResults = await this.knowledgeAdapter.retrieve({
+query: normalizedQuery,
+options,
+candidatePoolSize,
+tokenBudget,
+conversation,
+});
+results.push(...knowledgeResults);
+} catch (error) {
+console.warn('[RAGManager] Knowledge adapter retrieval failed:', error);
 }
 }
 if (sourceSet.has('personal-files')) {
