@@ -932,8 +932,8 @@ options?: { skipSystemPrompt?: boolean; ignoreKnowledgeMode?: boolean },
 // and prevents any use-before-declaration risk when V3 constructs its RAG port.
 let manualActiveMode: import('./llm/modeProfiles').ActiveModeInfo | null = null;
 try {
-  const { ModesManager } = require('./services/ModesManager');
-  manualActiveMode = ModesManager.getInstance().getActiveModeInfo?.() ?? null;
+const { ModesManager } = require('./services/ModesManager');
+manualActiveMode = ModesManager.getInstance().getActiveModeInfo?.() ?? null;
 } catch { /* mode prior unavailable — remain mode-blind */ }
 let myController: AbortController | null = null;
 let _manualFgToken: string | null = null;
@@ -1039,6 +1039,13 @@ event.sender.send('gemini-stream-error', `Skill lookup failed: ${skillErr?.messa
 return null; // sibling error paths return null; handler is typed `| null`
 }
 }
+// Change 19: Hindsight is long-term memory, not document RAG. When V3 owns the
+// turn, recall is performed before prompt composition and passed through a
+// separate memoryContext boundary. This also prevents legacy fallback from
+// recalling the same memory twice if V3 later throws.
+let v3HindsightRecallAttempted = false;
+let v3HindsightRecallUsed = false;
+let v3HindsightRecallCount = 0;
 // ─ ─ CONTEXT INTELLIGENCE V3 — wired manual-chat surface ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
 //
 // Deliberately a SHORT-CIRCUIT, not an interleave. The legacy assembly
@@ -1112,46 +1119,41 @@ profileSources: 0,
 // by RAGManager. Profile Intelligence remains a separate authoritative family
 // until the source-adapter consolidation in Change 18/20.
 const { attachmentSourceTypeExtensions, sourceTypeForFile } =
-  require('./context-intelligence/retrieval/mode-retrieval-port');
+require('./context-intelligence/retrieval/mode-retrieval-port');
 const ragForV3 = appState.getRAGManager?.();
-
 const extraSourceTypes = attachmentSourceTypeExtensions(modeId, files);
 const effectiveAllowedSourceTypes = [...policy.allowedSourceTypes, ...extraSourceTypes];
-
 // Context-debug: identity list of the sources this turn could read
 // (id/role/name/status — never content). Built only when the debug level is
 // active; Off costs one function call.
 let v3DebugSources: Array<Record<string, unknown>> | undefined;
 try {
-  const { getContextDebugLevel } = require('./context-intelligence/debug/debug-config');
-  if (getContextDebugLevel() !== 'off') {
-    const { detectDocumentStatus } = require('./context-intelligence/retrieval/mode-retrieval-port');
-    v3DebugSources = (files as Array<Record<string, unknown>>).map((f) => ({
-      id: String(f.id ?? ''),
-      role: sourceTypeForFile(f.fileName as string | undefined, f.content as string | undefined, effectiveAllowedSourceTypes),
-      name: f.fileName,
-      ...(detectDocumentStatus(f.content as string | undefined) ? { status: detectDocumentStatus(f.content as string | undefined) } : {}),
-      ...(typeof f.pageCount === 'number' ? { pageCount: f.pageCount } : {}),
-    }));
-  }
+const { getContextDebugLevel } = require('./context-intelligence/debug/debug-config');
+if (getContextDebugLevel() !== 'off') {
+const { detectDocumentStatus } = require('./context-intelligence/retrieval/mode-retrieval-port');
+v3DebugSources = (files as Array<Record<string, unknown>>).map((f) => ({
+id: String(f.id ?? ''),
+role: sourceTypeForFile(f.fileName as string | undefined, f.content as string | undefined, effectiveAllowedSourceTypes),
+name: f.fileName,
+...(detectDocumentStatus(f.content as string | undefined) ? { status: detectDocumentStatus(f.content as string | undefined) } : {}),
+...(typeof f.pageCount === 'number' ? { pageCount: f.pageCount } : {}),
+}));
+}
 } catch { /* debug identity only */ }
-
 const v3MeetingId = (appState.getIntelligenceManager?.() as any)
-  ?.getSessionTracker?.()?.getMeetingMetadata?.()?.id ?? null;
-
+?.getSessionTracker?.()?.getMeetingMetadata?.()?.id ?? null;
 // V3 remains the authorization planner. Translate its document source families
 // into RAGManager's canonical source families. Explicit selection prevents the
 // RAG query planner from broadening this turn into an unauthorized source.
 const ragSelectedSources = new Set<'meeting' | 'mode-reference' | 'personal-files'>();
 if (effectiveAllowedSourceTypes.some((s: string) =>
-  s === 'REFERENCE_FILE' || s === 'PROJECT_FILE' || s === 'CODING_SAMPLE')) {
-  ragSelectedSources.add('mode-reference');
-  if (personalFiles.length) ragSelectedSources.add('personal-files');
+s === 'REFERENCE_FILE' || s === 'PROJECT_FILE' || s === 'CODING_SAMPLE')) {
+ragSelectedSources.add('mode-reference');
+if (personalFiles.length) ragSelectedSources.add('personal-files');
 }
 if (effectiveAllowedSourceTypes.includes('MEETING_TRANSCRIPT') && v3MeetingId) {
-  ragSelectedSources.add('meeting');
+ragSelectedSources.add('meeting');
 }
-
 // Profile Intelligence hydration (2026-07-31 source-routing fix).
 // The user's active résumé/target JD, uploaded ONCE in Profile
 // settings, are the PRIMARY pool for profile-aware modes — mode
@@ -1186,48 +1188,44 @@ v3ProfileResolved = collected.resolved;
 // from "no profile" and reintroduces the upload-again defect (§22.1).
 console.warn('[V3] profile hydration failed — continuing with mode attachments only:', (profErr as Error)?.message ?? profErr);
 }
-
 // Preserve the mode-port's source classification without performing retrieval
 // here. RAGManager uses this map only when converting canonical mode results back
 // into the V3 RetrievalPort contract, so resume/JD/candidate/code typing remains
 // identical to Changes 6–15.
 const modeSourceTypes = new Map();
 for (const f of files as Array<Record<string, unknown>>) {
-  const id = String(f.id ?? '');
-  if (!id) continue;
-  modeSourceTypes.set(id, sourceTypeForFile(
-    f.fileName as string | undefined,
-    f.content as string | undefined,
-    effectiveAllowedSourceTypes,
-  ));
+const id = String(f.id ?? '');
+if (!id) continue;
+modeSourceTypes.set(id, sourceTypeForFile(
+f.fileName as string | undefined,
+f.content as string | undefined,
+effectiveAllowedSourceTypes,
+));
 }
-
 const { combineRetrievalPorts } =
-  require('./context-intelligence/retrieval/meeting-retrieval-port');
+require('./context-intelligence/retrieval/meeting-retrieval-port');
 const ragPort = ragForV3?.createRAGRetrievalPort
-  ? ragForV3.createRAGRetrievalPort({
-      userId: V3_USER_ID,
-      scope: { userId: V3_USER_ID, sessionId: sharedConversationSessionId,
-        ...(v3MeetingId ? { meetingId: v3MeetingId } : {}) },
-      modeId: modeInfo?.id ?? undefined,
-      modeSourceTypes,
-      selectedSources: [...ragSelectedSources],
-      topK: policy.retrievalPolicy.maximumAcceptedEvidence,
-      candidatePoolSize: policy.retrievalPolicy.maximumCandidates,
-      tokenBudget: policy.contextBudget.evidenceTokens,
-      allowRerank: true,
-      forceDocumentGrounding: (modeInfo as any)?.documentGroundedCustomModeActive === true,
-    })
-  : undefined;
-
+? ragForV3.createRAGRetrievalPort({
+userId: V3_USER_ID,
+scope: { userId: V3_USER_ID, sessionId: sharedConversationSessionId,
+...(v3MeetingId ? { meetingId: v3MeetingId } : {}) },
+modeId: modeInfo?.id ?? undefined,
+modeSourceTypes,
+selectedSources: [...ragSelectedSources],
+topK: policy.retrievalPolicy.maximumAcceptedEvidence,
+candidatePoolSize: policy.retrievalPolicy.maximumCandidates,
+tokenBudget: policy.contextBudget.evidenceTokens,
+allowRerank: true,
+forceDocumentGrounding: (modeInfo as any)?.documentGroundedCustomModeActive === true,
+})
+: undefined;
 // Profile Intelligence remains its own authoritative source family. Combine it
 // with the unified RAGManager document port only when both are present. The
 // application still sees one RetrievalPort, while RAGManager owns all ordinary
 // document/meeting retrieval.
 const port = ragPort && v3ProfilePort
-  ? combineRetrievalPorts([ragPort, v3ProfilePort])
-  : (ragPort ?? (v3ProfilePort as any) ?? undefined);
-
+? combineRetrievalPorts([ragPort, v3ProfilePort])
+: (ragPort ?? (v3ProfilePort as any) ?? undefined);
 // ONE construction, shared with every engine surface: the bridge
 // resolves the per-mode Answer policy, reads conversation state for
 // prior-turn continuity, orchestrates, composes, emits the [V3]
@@ -1238,6 +1236,248 @@ const port = ragPort && v3ProfilePort
 // The skill prefix is stripped for V3 too — otherwise the model reads
 // a literal "/humanize " at the head of the question (PR #429 Bug 003).
 const v3Question = String((skillStrippedMessage ?? message) || '');
+
+// ── Change 19: V3 Hindsight memory boundary ────────────────────────────────
+// Hindsight is intentionally retrieved outside RAGManager and outside the
+// EvidenceItem pipeline. It is only eligible for backward-looking turns and
+// remains low-trust, referent-only prompt context.
+let v3MemoryContext: string | undefined;
+try {
+const { HindsightManager: _V3HM } =
+require('./services/HindsightManager') as typeof import('./services/HindsightManager');
+const _v3HsCfg = _V3HM.getInstance().getHindsightConfig();
+const _v3HsMemoryOn = isIntelligenceFlagEnabled('hindsightMemory');
+const _v3HsLiveOn = isIntelligenceFlagEnabled('hindsightLiveRecall');
+const _v3IsCoding = (() => {
+try {
+return isCodingAnswerType(planAnswer({
+question: v3Question,
+source: 'manual_input',
+speakerPerspective: 'user',
+activeMode: modeInfo ?? undefined,
+}).answerType);
+} catch { return false; }
+})();
+const _v3DocGrounded =
+(modeInfo as any)?.documentGroundedCustomModeActive === true;
+
+// The legacy Hindsight path applies the canonical SourceOwnershipDecision,
+// not merely the persisted mode sourceAuthority. V3 runs before the legacy
+// arbiter is built, so resolve the SAME decision here using the same inputs.
+// This closes the profile-owned/non-custom-mode gap where a persisted
+// profile_only contract could otherwise leave Hindsight enabled merely
+// because its memoryPolicy allowed it.
+let _v3HindsightOwner: string | null = null;
+let _v3HindsightOwnerAllows = true;
+let _v3HindsightSourceContract: any = null;
+try {
+const { buildCustomModeExecutionContract } = require('./llm/customModeExecutionContract');
+const { resolveTurnSourceDecision } = require('./llm/turnSourceDecision') as typeof import('./llm/turnSourceDecision');
+const { resolveSourceOwnership } = require('./llm/sourceOwnership');
+const _v3AnswerPlan = planAnswer({
+question: v3Question,
+source: 'manual_input',
+speakerPerspective: 'user',
+activeMode: modeInfo ?? undefined,
+});
+const _v3HasProfileFacts = Boolean(llmHelper.getKnowledgeOrchestrator?.()?.activeResume?.structured_data);
+const _v3HasRefFiles = Boolean((modeInfo as any)?.hasReferenceFiles ?? false);
+const _v3HasCustomPrompt = Boolean((modeInfo as any)?.hasCustomPrompt ?? false);
+const _v3IntelligenceManager = appState.getIntelligenceManager?.();
+const _v3HasLiveTranscript = Boolean(_v3IntelligenceManager?.getFormattedContext?.(100)?.trim());
+const _v3ExplicitSourceModule = require('./intelligence/context-os/explicitSourceSwitch');
+const _v3ExplicitRequests = _v3ExplicitSourceModule.resolveExplicitSourceRequests(String(v3Question || ''));
+const _v3ExplicitSwitch = _v3ExplicitSourceModule.resolveExplicitSourceRequest(String(v3Question || ''));
+const _v3UserExplicitSource = _v3ExplicitSourceModule.toLegacyUserExplicitSource(_v3ExplicitSwitch);
+const _v3ActiveSourceContract = (modeInfo as any)?.sourceContract ?? null;
+const _v3TurnSourceDecision = _v3ActiveSourceContract
+? resolveTurnSourceDecision({
+sourceContract: _v3ActiveSourceContract,
+persistedSourceAuthority: _v3ActiveSourceContract.sourceAuthority,
+explicitRequest: _v3ExplicitSwitch,
+explicitRequests: _v3ExplicitRequests,
+availability: {
+hasReferenceFiles: _v3HasRefFiles,
+hasProfileFacts: _v3HasProfileFacts,
+hasJobDescription: Boolean(llmHelper.getKnowledgeOrchestrator?.()?.activeJD?.structured_data),
+hasLiveTranscript: _v3HasLiveTranscript,
+hasMeetingRag: false,
+},
+})
+: null;
+_v3HindsightSourceContract = buildCustomModeExecutionContract({
+question: String(v3Question || ''),
+streamRoute: 'manual_chat_stream',
+modeId: modeInfo?.id ?? null,
+modeUniqueId: modeInfo?.id ?? null,
+answerType: _v3AnswerPlan.answerType,
+isCustomMode: modeInfo?.isCustom === true,
+isDocGroundedCustomModeActive: _v3DocGrounded,
+hasReferenceFiles: _v3HasRefFiles,
+hasCustomPrompt: _v3HasCustomPrompt,
+hasLiveTranscript: _v3HasLiveTranscript,
+hasProfileFacts: _v3HasProfileFacts,
+hasMeetingRag: false,
+hasLongTermMemory: Boolean(_v3HsLiveOn && _v3HsMemoryOn),
+persistedSourceAuthority: _v3ActiveSourceContract?.sourceAuthority ?? null,
+userExplicitSource: _v3UserExplicitSource,
+turnSourceDecision: _v3TurnSourceDecision,
+});
+const _v3Ownership = resolveSourceOwnership({
+question: String(v3Question || ''),
+contract: _v3HindsightSourceContract,
+profileContextPolicy: _v3AnswerPlan.profileContextPolicy,
+answerType: _v3AnswerPlan.answerType,
+hasProfileFacts: _v3HasProfileFacts,
+turnSourceDecision: _v3TurnSourceDecision,
+});
+_v3HindsightOwner = String(_v3Ownership?.owner ?? '');
+const _v3OwnerEnforcementOff = getSourceOwnerEnforcementStage() === 'off';
+_v3HindsightOwnerAllows = _v3OwnerEnforcementOff
+? true
+: (_v3Ownership?.owner === 'mixed' || _v3Ownership?.owner === 'transcript');
+} catch (ownerErr) {
+// Match the legacy compatibility behavior: when source ownership cannot be
+// resolved, do not introduce a new hard failure into plain/manual chat.
+// The persisted sourceAuthority fallback below still blocks known profile,
+// reference-file, and unknown custom-mode owners.
+if (isIntelligenceFlagEnabled('trace')) {
+const _ownerErrorMessage = ownerErr instanceof Error ? ownerErr.message : String(ownerErr);
+console.warn('[HindsightLiveRecall][V3] source-owner resolution skipped (non-fatal):', _ownerErrorMessage);
+}
+const _v3AuthorityFallback = String((modeInfo as any)?.sourceContract?.sourceAuthority ?? '').toLowerCase();
+// Fail closed if the canonical ownership resolver is unavailable. The legacy
+// Hindsight path only permits mixed/transcript ownership; unknown, profile,
+// reference-file, and other owners must never become eligible merely because
+// a persisted memory policy says allowHindsight=true.
+_v3HindsightOwnerAllows =
+_v3AuthorityFallback.includes('mixed') || _v3AuthorityFallback.includes('transcript');
+}
+
+// Provenance-safe renderer contract. The full TurnContextContract is built
+// later in the legacy preparation path, but Hindsight must be rendered before
+// buildV3Prompt(). The provenance helper only needs sourceOwner and
+// allowedSources; an empty capability list intentionally keeps all current
+// (unvalidated) Hindsight memory referent-only.
+const _v3MemoryRenderContract = _v3HindsightOwner
+? ({ sourceOwner: _v3HindsightOwner, allowedSources: [] } as any)
+: null;
+
+const _v3PersistedMemoryPolicy =
+(modeInfo as any)?.sourceContract?.memoryPolicy;
+const _v3ContractMemoryAllowed =
+_v3PersistedMemoryPolicy?.allowHindsight !== false;
+const _v3IsContractEnforced = (() => {
+try {
+const _contractTypes = new Set([
+'ethical_usage_answer', 'project_link_answer',
+'source_code_evidence_answer', 'project_about_answer',
+]);
+return _contractTypes.has(planAnswer({
+question: v3Question,
+source: 'manual_input',
+speakerPerspective: 'user',
+activeMode: modeInfo ?? undefined,
+}).answerType);
+} catch { return false; }
+})();
+
+if (
+!_v3IsCoding
+&& !_v3IsContractEnforced
+&& !_v3DocGrounded
+&& _v3HindsightOwnerAllows
+&& _v3ContractMemoryAllowed
+&& _v3HsLiveOn
+&& _v3HsMemoryOn
+&& _v3HsCfg
+&& _V3HM.getInstance().isAvailable()
+&& typeof v3Question === 'string'
+&& isBackwardLookingQuery(v3Question)
+) {
+// Mark the attempt BEFORE awaiting it. If V3 fails after recall, legacy
+// fallback must not perform a second Hindsight query.
+const { LongTermMemoryService } =
+require('./intelligence/memory/LongTermMemoryService') as typeof import('./intelligence/memory/LongTermMemoryService');
+const _v3Ltm = LongTermMemoryService.fromFlags({
+hindsight: { ..._v3HsCfg, timeoutMs: 800 },
+});
+
+if (_v3Ltm.enabled) {
+v3HindsightRecallAttempted = true;
+const _v3RecallStarted = Date.now();
+const memories = await _v3Ltm.recallRelevantMemory(
+v3Question,
+{ userId: _V3HM.getInstance().localUserId() },
+{ timeoutMs: 800, maxResults: 5 },
+);
+const _v3RecallMs = Date.now() - _v3RecallStarted;
+
+// Preserve the full memory objects through provenance conversion. Do not
+// flatten to strings before rendering: source id, source kind, confidence,
+// validation state, date and XML escaping are all part of the safety contract.
+const { toRecalledMemoryEvidence, renderHindsightRecallBlock } =
+require('./intelligence/context-os') as typeof import('./intelligence/context-os');
+
+let selectedMemories = memories
+.filter((m) => m && typeof m.text === 'string' && m.text.trim().length > 0)
+.slice(0, 5);
+let memBlock = '';
+
+// Keep the rendered XML block bounded without cutting through an XML tag:
+// reduce the memory set until the complete provenance-safe block fits.
+for (let i = selectedMemories.length; i >= 1; i--) {
+const candidate = selectedMemories.slice(0, i);
+const recalledEvidence = _v3MemoryRenderContract
+? toRecalledMemoryEvidence(candidate, _v3MemoryRenderContract)
+: [];
+const rendered = renderHindsightRecallBlock(recalledEvidence);
+if (rendered.length <= 7000) {
+memBlock = rendered;
+selectedMemories = candidate;
+break;
+}
+}
+
+if (memBlock) {
+v3MemoryContext = memBlock;
+v3HindsightRecallUsed = true;
+v3HindsightRecallCount = selectedMemories.length;
+} else {
+v3HindsightRecallUsed = false;
+v3HindsightRecallCount = 0;
+}
+
+try {
+const { intelligenceMetrics } = require('./intelligence/IntelligenceMetrics') as typeof import('./intelligence/IntelligenceMetrics');
+intelligenceMetrics.timing('hindsight_recall_ms', _v3RecallMs);
+intelligenceMetrics.rate('memory_recall_empty_rate', selectedMemories.length === 0);
+} catch { /* metrics never affect the answer */ }
+
+if (isIntelligenceFlagEnabled('trace')) {
+console.log('[HindsightLiveRecall][V3]', {
+ms: _v3RecallMs,
+facts: selectedMemories.length,
+injected: Boolean(memBlock),
+owner: _v3HindsightOwner,
+});
+}
+iTrace.noteContext({
+source: 'hindsight_recall',
+trustLevel: 'medium',
+requested: true,
+retrieved: selectedMemories.length > 0,
+included: Boolean(memBlock),
+reason: 'live_backward_recall_v3',
+});
+}
+}
+} catch (v3HindsightErr: any) {
+// Memory is strictly optional. A Hindsight/configuration/timeout failure
+// must never prevent document RAG or the provider stream from running.
+console.warn('[HindsightLiveRecall][V3] skipped (non-fatal):', v3HindsightErr?.message);
+}
+
 const composed = await buildV3Prompt({
 surface: 'manual-chat',
 pathTag: 'ipc',
@@ -1304,6 +1544,7 @@ return undefined;
 return appState.getIntelligenceManager?.()?.getFormattedContext?.(180) || undefined;
 } catch { return undefined; }
 })(),
+memoryContext: v3MemoryContext,
 deferDebugCompletion: true,
 requestId: `v3-${myStreamId}`,
 requestSequence: myStreamId,
@@ -2266,6 +2507,8 @@ coding_explicit_contract: explicitCodingContract || 'none',
 coding_followup_resolved: codingFollowupResolved,
 conversation_memory_used: codingFollowupResolved,
 conversation_memory_turns_used: codingFollowupResolved ? 1 : 0,
+hindsight_recall_used: v3HindsightRecallUsed,
+hindsight_recall_count: v3HindsightRecallCount,
 };
 const _emitAttr = (extra?: AttributionInput) => {
 try { recordAttribution({ ..._attr, ...(extra || {}) }); } catch { /* never breaks the answer */ }
@@ -3053,7 +3296,8 @@ const _hindsightOwnerAllows = (manualOwnership && !_ownerEnforcementOff)
 // CONTEXT OS (Phase 7): the contract's memoryReadPolicy must also allow
 // Hindsight. Null contract → legacy decision alone. Narrowing only.
 const _contractAllowsHindsight = turnContract ? turnContract.memoryReadPolicy.allowHindsight : true;
-if (!isCodingChat && !isContractEnforced
+if (!v3HindsightRecallAttempted
+&& !isCodingChat && !isContractEnforced
 && _contractAllowsHindsight
 && !(_isDocGroundedTurn && isIntelligenceFlagEnabled('docGroundedStrictIsolation'))
 && _hindsightOwnerAllows
@@ -5249,12 +5493,12 @@ liveMode: liveModeIdAtDoneEmit,
 // already-streamed tokens stand. streamId (audit finding #3) lets the
 // renderer ignore a stale done from a superseded stream.
 const citationMarkers = manualContextOsGeneration?.govern
-  ? manualContextOsGeneration.renderedEvidenceManifest?.citationMarkers
-  : undefined;
+? manualContextOsGeneration.renderedEvidenceManifest?.citationMarkers
+: undefined;
 event.sender.send('gemini-stream-done', {
-  ...(finalText ? { finalText } : {}),
-  streamId: myStreamId,
-  ...(citationMarkers && Object.keys(citationMarkers).length > 0 ? { citationMarkers } : {}),
+...(finalText ? { finalText } : {}),
+streamId: myStreamId,
+...(citationMarkers && Object.keys(citationMarkers).length > 0 ? { citationMarkers } : {}),
 });
 chatTrace.mark('response_completed', { chars: fullResponse.length, repaired: Boolean(finalText) });
 chatTrace.finish({ chars: fullResponse.length });
