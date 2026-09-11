@@ -16,6 +16,7 @@ import Database from 'better-sqlite3';
 import { extractSafeDocumentText } from '../services/SafeDocumentTextExtractor';
 import { buildDocumentChunks, type DocumentMapChunk } from '../services/modes/DocumentMap';
 import type { EmbeddingPipeline } from '../rag/EmbeddingPipeline';
+import type { RAGManager } from '../rag/RAGManager';
 import { VectorStore } from '../rag/VectorStore';
 export type PersonalFileType = 'resume' | 'job_description' | 'general';
 const PERSONAL_FILE_TYPES: ReadonlySet<string> = new Set(['resume', 'job_description', 'general']);
@@ -208,6 +209,7 @@ private db: Database.Database;
 private embeddingPipeline: EmbeddingPipeline | null = null;
 private vectorStore: VectorStore | null = null;
 private embeddingBackfillInFlight: Promise<void> | null = null;
+private ragManager: RAGManager | null = null;
 private readonly storageRoot: string;
 private readonly repairedFileIds = new Set<string>();
 private constructor(db: Database.Database) {
@@ -312,6 +314,11 @@ private ensureDocumentMetadataColumns(): void {
     addChunkColumn('embedding_provider', 'TEXT');
     addChunkColumn('embedding_dimensions', 'INTEGER');
     addChunkColumn('embedding_space', 'TEXT');
+}
+
+/** Attach the central RAG document-indexing coordinator. */
+setRAGManager(ragManager: RAGManager): void {
+this.ragManager = ragManager;
 }
 
 /**
@@ -429,7 +436,6 @@ text = text.slice(0, MAX_EXTRACTED_CHARS);
 }
 const now = new Date().toISOString();
 const id = makeId('pfile', `${contentHash}:${resolved}`);
-const chunks = chunkDocument(text);
 const pageCount = Number((extracted as any).pageCount) || null;
 const extractedPageCount = Number((extracted as any).extractedPageCount) || pageCount || null;
 const mimeType = this.guessMimeType(ext);
@@ -441,11 +447,6 @@ const insertFile = this.db.prepare(`
 INSERT INTO personal_files
 (id, file_name, file_path, mime_type, size_bytes, content_hash, created_at, updated_at, file_type, page_count, extracted_page_count)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-`);
-const insertChunk = this.db.prepare(`
-INSERT INTO personal_file_chunks
-(id, file_id, chunk_index, text, start_char, end_char, page_start, page_end, section, heading, content_type, metadata_json, embedding, embedding_provider, embedding_dimensions, embedding_space)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL)
 `);
 const tx = this.db.transaction(() => {
 insertFile.run(
@@ -461,22 +462,21 @@ safeFileType,
 pageCount,
 extractedPageCount,
 );
+if (!this.ragManager) {
+const chunks = chunkDocument(text);
+const insertChunk = this.db.prepare(`
+INSERT INTO personal_file_chunks
+(id, file_id, chunk_index, text, start_char, end_char, page_start, page_end, section, heading, content_type, metadata_json, embedding, embedding_provider, embedding_dimensions, embedding_space)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL)
+`);
 chunks.forEach((chunk, index) => {
 insertChunk.run(
-makeId('pchunk', `${id}:${index}:${chunk.text}`),
-id,
-index,
-chunk.text,
-chunk.startChar,
-chunk.endChar,
-chunk.pageStart ?? null,
-chunk.pageEnd ?? null,
-chunk.section ?? null,
-chunk.heading ?? null,
-chunk.contentType ?? 'text',
-JSON.stringify(chunk.metadata ?? {}),
+makeId('pchunk', `${id}:${index}:${chunk.text}`), id, index, chunk.text, chunk.startChar, chunk.endChar,
+chunk.pageStart ?? null, chunk.pageEnd ?? null, chunk.section ?? null, chunk.heading ?? null,
+chunk.contentType ?? 'text', JSON.stringify(chunk.metadata ?? {}),
 );
 });
+}
 });
 try {
 tx();
@@ -495,6 +495,26 @@ const winner = this.db.prepare(
 ).get(contentHash) as { id?: string } | undefined;
 if (winner?.id) return this.getFile(winner.id)!;
 throw error;
+}
+if (this.ragManager) {
+try {
+await this.ragManager.indexDocument({
+sourceType: 'personal',
+documentId: id,
+content: text,
+fileName: path.basename(resolved),
+pageCount: pageCount ?? undefined,
+extractedPageCount: extractedPageCount ?? undefined,
+metadata: { fileType: safeFileType, mimeType },
+});
+} catch (error) {
+console.warn('[PersonalKnowledgeManager] Unified RAG indexing failed; removing incomplete file record:', error instanceof Error ? error.message : String(error));
+try { this.db.prepare('DELETE FROM personal_file_chunks WHERE file_id = ?').run(id); } catch { /* best effort */ }
+try { this.db.prepare('DELETE FROM personal_files WHERE id = ?').run(id); } catch { /* best effort */ }
+try { await fs.promises.unlink(storedPath); } catch { /* best effort */ }
+throw error;
+}
+return this.getFile(id)!;
 }
 const record = this.getFile(id)!;
 void this.embedFileInBackground(id);

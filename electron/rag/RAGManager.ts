@@ -2,6 +2,8 @@
 // Central orchestrator for RAG pipeline
 // Coordinates preprocessing, chunking, embedding, and retrieval
 import Database from 'better-sqlite3';
+import { DatabaseManager } from '../db/DatabaseManager';
+import * as crypto from 'crypto';
 import { LLMHelper } from '../LLMHelper';
 import { preprocessTranscript, RawSegment } from './TranscriptPreprocessor';
 import { chunkTranscript } from './SemanticChunker';
@@ -24,7 +26,9 @@ import { MeetingRagAdapter } from './adapters/MeetingRagAdapter';
 import { ModeRagAdapter } from './adapters/ModeRagAdapter';
 import { PersonalRagAdapter } from './adapters/PersonalRagAdapter';
 import { KnowledgeRagAdapter } from './adapters/KnowledgeRagAdapter';
-import { isRagEnabled, isRagHybridEnabled, isRagConversationAwareEnabled, isRagConfidenceGateEnabled } from '../intelligence/intelligenceFlags';
+import { extractSafeDocumentText } from '../services/SafeDocumentTextExtractor';
+import { buildDocumentChunks } from '../services/modes/DocumentMap';
+import { isRagEnabled, isRagHybridEnabled, isRagConversationAwareEnabled } from '../intelligence/intelligenceFlags';
 interface ModesManagerLike {
 getActiveModeInfo(): { id?: string } | null;
 getActiveMode(): any | null;
@@ -48,12 +52,13 @@ listFiles?(): any[];
 searchRelevant?(query: string, limit?: number): any[];
 search?(query: string, limit?: number): any[];
 setEmbeddingServices?(embeddingPipeline: EmbeddingPipeline, vectorStore: VectorStore): void;
+setRAGManager?(ragManager: RAGManager): void;
 reindexEmbeddings?(): Promise<void>;
 }
 /**
 * Canonical source kinds used by the unified RAG layer.
 *
-* These three values deliberately cover only the document/chunk sources that
+* These four values deliberately cover only the document/chunk sources that
 * Change 2 is normalizing. Other evidence families in the application (for
 * example profile, browser, OKF, and memory evidence) are not silently folded
 * into this contract.
@@ -97,6 +102,28 @@ source: RagDocument;
 }
 /** @deprecated Use RagSearchResult. Kept as an export alias for Change 1 callers. */
 export type UnifiedRAGResult = RagSearchResult;
+export type RagIndexSourceType = 'mode' | 'personal';
+
+export interface RagIndexDocumentInput {
+  sourceType: RagIndexSourceType;
+  documentId: string;
+  filePath?: string;
+  content?: string;
+  fileName?: string;
+  pageCount?: number;
+  extractedPageCount?: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface RagIndexDocumentResult {
+  documentId: string;
+  sourceType: RagIndexSourceType;
+  chunkCount: number;
+  embeddedChunkCount: number;
+  status: 'ready' | 'lexical_only' | 'ocr_required' | 'failed' | 'empty';
+  embeddingSpace?: string;
+}
+
 export interface RAGSearchOptions {
 source?: RagSourceType | 'all';
 /** Conversation session used for retrieval-query rewriting and retrieval context. */
@@ -234,10 +261,19 @@ private readonly knowledgeAdapter: KnowledgeRagAdapter;
 * Source managers are resolved lazily so RAGManager remains safe to construct
 * during AppState startup and does not introduce eager service cycles.
 */
+private configurePersonalKnowledgeCoordinator(personalKnowledge?: PersonalKnowledgeLike | null): void {
+try {
+const manager = personalKnowledge ?? (require('../personalKnowledge').getPersonalKnowledgeManager() as PersonalKnowledgeLike);
+manager.setRAGManager?.(this);
+} catch (error) {
+console.warn('[RAGManager] Personal indexing coordinator unavailable:', error);
+}
+}
 private configurePersonalKnowledge(personalKnowledge?: PersonalKnowledgeLike | null): void {
 try {
 const manager = personalKnowledge ?? (require('../personalKnowledge').getPersonalKnowledgeManager() as PersonalKnowledgeLike);
 manager.setEmbeddingServices?.(this.embeddingPipeline, this.vectorStore);
+manager.setRAGManager?.(this);
 } catch (error) {
 console.warn('[RAGManager] Personal embedding services unavailable:', error);
 }
@@ -287,6 +323,9 @@ this.meetingAdapter = new MeetingRagAdapter(this.retriever, this.db);
 this.modeAdapter = new ModeRagAdapter();
 this.personalAdapter = new PersonalRagAdapter(this.db);
 this.knowledgeAdapter = new KnowledgeRagAdapter();
+// Register only the coordinator before provider initialization. Embedding
+// services are wired after initialize() so existing backfill behavior is kept.
+this.configurePersonalKnowledgeCoordinator();
 this.embeddingPipeline.initialize({
 openaiKey: config.openaiKey,
 geminiKey: config.geminiKey,
@@ -304,6 +343,171 @@ this._backfillEmbeddingProviderMetadata();
 this.scheduleAutoReindex();
 }).catch(() => { /* non-critical, suppress */ });
 }
+/**
+ * Unified document indexing entry point.
+ *
+ * New user documents enter here instead of choosing a source-specific
+ * extraction/chunk/embed path. Source storage remains isolated (mode reference
+ * chunks vs personal-file chunks), but the lifecycle and embedding boundary are
+ * shared: extract -> DocumentMap -> persist metadata/FTS -> embed -> vector index.
+ * Existing source-specific indexers remain available for compatibility/recovery.
+ */
+private clearDocumentIndexForReplacement(documentId: string, sourceType: RagIndexSourceType): void {
+  const dbManager = DatabaseManager.getInstance();
+  if (sourceType === 'mode') {
+    // Clear vectors before replacing chunks so no old semantic index remains
+    // queryable while the replacement is empty or failed. replaceModeReferenceChunks
+    // with [] is transactional and also removes the corresponding FTS rows.
+    this.vectorStore.deleteModeReferenceEmbeddingsForFile(documentId);
+    dbManager.replaceModeReferenceChunks(documentId, [], {});
+    return;
+  }
+
+  // Personal vectors are stored both in the chunk row and, when enabled, in
+  // sqlite-vec dimension tables; use the existing VectorStore cleanup first,
+  // then replace with an empty chunk set so personal FTS rows are removed too.
+  this.vectorStore.deletePersonalEmbeddingsForFile(documentId);
+  dbManager.replacePersonalFileChunks(documentId, [], {});
+}
+
+async indexDocument(input: RagIndexDocumentInput): Promise<RagIndexDocumentResult> {
+  const documentId = String(input.documentId ?? '').trim();
+  if (!documentId) throw new Error('RAG document id is required');
+  if (input.sourceType !== 'mode' && input.sourceType !== 'personal') {
+    throw new Error(`Unsupported RAG document source: ${String(input.sourceType)}`);
+  }
+
+  let content = String(input.content ?? '');
+  let fileName = String(input.fileName ?? '').trim();
+  let pageCount = input.pageCount;
+  let extractedPageCount = input.extractedPageCount;
+  const emptyContentHash = crypto.createHash('sha256').update('').digest('hex');
+  const dbManager = DatabaseManager.getInstance();
+
+  // Replacement safety: if extraction fails, the previous indexed document must
+  // not remain searchable under the same document id. Clear the old index first
+  // and record a terminal failed state for mode documents, then rethrow so the
+  // caller still observes the original extraction failure.
+  if (!content.trim() && input.filePath) {
+    try {
+      const extracted = await extractSafeDocumentText(input.filePath);
+      content = extracted.content;
+      fileName = fileName || extracted.fileName;
+      pageCount = pageCount ?? extracted.pageCount;
+      extractedPageCount = extractedPageCount ?? extracted.extractedPageCount;
+    } catch (error) {
+      this.clearDocumentIndexForReplacement(documentId, input.sourceType);
+      if (input.sourceType === 'mode') {
+        dbManager.updateModeReferenceIndexState(documentId, emptyContentHash, 0, 'failed', null);
+      }
+      throw error;
+    }
+  }
+
+  content = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+  if (!content) {
+    this.clearDocumentIndexForReplacement(documentId, input.sourceType);
+    if (input.sourceType === 'mode') {
+      dbManager.updateModeReferenceIndexState(documentId, emptyContentHash, 0, 'failed', null);
+    }
+    return { documentId, sourceType: input.sourceType, chunkCount: 0, embeddedChunkCount: 0, status: 'empty' };
+  }
+
+  const chunks = buildDocumentChunks(content, {
+    chunkWords: 140,
+    chunkOverlap: 30,
+    tableRowsPerChunk: 10,
+  });
+  if (chunks.length === 0) {
+    this.clearDocumentIndexForReplacement(documentId, input.sourceType);
+    if (input.sourceType === 'mode') {
+      dbManager.updateModeReferenceIndexState(documentId, emptyContentHash, 0, 'failed', null);
+    }
+    return { documentId, sourceType: input.sourceType, chunkCount: 0, embeddedChunkCount: 0, status: 'empty' };
+  }
+
+  const contentHash = crypto.createHash('sha256').update(content).digest('hex');
+  const metadata = {
+    ...(input.metadata ?? {}),
+    ...(fileName ? { fileName } : {}),
+    ...(pageCount !== undefined ? { pageCount } : {}),
+    ...(extractedPageCount !== undefined ? { extractedPageCount } : {}),
+    contentHash,
+  };
+
+  const placeholderOnly = !content.replace(/\[Page\s+\d+\]/gi, '').trim();
+  let persistedChunkIds: Array<number | string>;
+  if (input.sourceType === 'mode') {
+    dbManager.updateModeReferenceIndexState(documentId, contentHash, chunks.length, 'indexing', null);
+    this.vectorStore.deleteModeReferenceEmbeddingsForFile(documentId);
+    persistedChunkIds = dbManager.replaceModeReferenceChunks(documentId, chunks, metadata);
+  } else {
+    this.vectorStore.deletePersonalEmbeddingsForFile(documentId);
+    persistedChunkIds = dbManager.replacePersonalFileChunks(documentId, chunks.map((chunk) => ({
+      id: `pchunk_${crypto.createHash('sha256').update(`${documentId}:${chunk.chunkIndex}:${chunk.text}`).digest('hex').slice(0, 24)}`,
+      ...chunk,
+      startChar: chunk.startOffset ?? 0,
+      endChar: chunk.endOffset ?? chunk.text.length,
+    })), metadata);
+  }
+
+  if (placeholderOnly) {
+    if (input.sourceType === 'mode') {
+      dbManager.updateModeReferenceIndexState(documentId, contentHash, chunks.length, 'ocr_required', null);
+    }
+    return { documentId, sourceType: input.sourceType, chunkCount: chunks.length, embeddedChunkCount: 0, status: 'ocr_required' };
+  }
+
+  let embeddedChunkCount = 0;
+  let embeddingSpace: string | undefined;
+  let embeddingRunComplete = false;
+  try {
+    const embedded = await this.embeddingPipeline.embedDocumentChunks(
+      chunks.map((chunk) => chunk.text),
+      { batchSize: 32 },
+    );
+    embeddingRunComplete = embedded.complete === true;
+    for (let i = 0; i < embedded.vectors.length; i++) {
+      const vector = embedded.vectors[i];
+      if (!vector) continue;
+      const chunkId = persistedChunkIds[i];
+      if (input.sourceType === 'mode') {
+        if (typeof chunkId === 'number') this.vectorStore.storeModeReferenceEmbedding(chunkId, vector.embedding, vector.space, vector.provider, vector.dimensions);
+      } else if (typeof chunkId === 'string') {
+        this.vectorStore.storePersonalEmbedding(chunkId, vector.embedding, vector.space, vector.provider, vector.dimensions);
+      }
+      embeddedChunkCount++;
+      embeddingSpace = embeddingSpace ?? vector.space;
+    }
+  } catch (error) {
+    console.warn(`[RAGManager] Unified document embedding failed for ${documentId}; lexical index remains available:`, error instanceof Error ? error.message : String(error));
+  }
+
+  // A document is vector-ready only when every chunk received an embedding
+  // from one consistent embedding space. If embedding stops after a partial
+  // prefix (batch failure or embedding-space change), discard that prefix.
+  // Keep the lexical chunks/FTS rows so retrieval can fall back and a later
+  // retry can rebuild the complete vector index.
+  let status: RagIndexDocumentResult['status'];
+  const embeddingComplete = embeddingRunComplete && embeddedChunkCount === chunks.length && embeddingSpace !== undefined;
+  if (embeddingComplete) {
+    status = 'ready';
+  } else {
+    if (input.sourceType === 'mode') {
+      this.vectorStore.deleteModeReferenceEmbeddingsForFile(documentId);
+    } else {
+      this.vectorStore.deletePersonalEmbeddingsForFile(documentId);
+    }
+    status = embeddedChunkCount > 0 ? 'failed' : 'lexical_only';
+    embeddingSpace = undefined;
+  }
+
+  if (input.sourceType === 'mode') {
+    dbManager.updateModeReferenceIndexState(documentId, contentHash, chunks.length, status, embeddingSpace ?? null);
+  }
+  return { documentId, sourceType: input.sourceType, chunkCount: chunks.length, embeddedChunkCount, status, ...(embeddingSpace ? { embeddingSpace } : {}) };
+}
+
 /**
 * Unified retrieval entry point for the application.
 *
@@ -338,15 +542,6 @@ private gateCanonicalResults(
   query: string,
 ): RagSearchResult[] {
 if (!results.length) return [];
-const relevantResults = results.filter((result) =>
-  hasQuestionSpecificRelevance(query, [result.chunk as any], this.retriever.detectIntent(query)),
-);
-if (!relevantResults.length) return [];
-// Change 21: the canonical confidence-gate setting is authoritative for the
-// unified manager's confidence/sufficiency decision. Keep the existing
-// question-specific relevance check even when the confidence gate is off so
-// disabling confidence does not turn retrieval into an unconditional bypass.
-if (!isRagConfidenceGateEnabled()) return relevantResults;
 const evidenceItems = results.map((result, index) => ({
   evidenceId: `rag-manager:${String(result.chunk.id ?? index)}`,
   sourceKind: result.source.sourceType,
@@ -385,6 +580,10 @@ const decision = evaluateRagRelevanceGate({
   isSynthesis: true,
 });
 if (!decision.passed) return [];
+const relevantResults = results.filter((result) =>
+  hasQuestionSpecificRelevance(query, [result.chunk as any], this.retriever.detectIntent(query)),
+);
+if (!relevantResults.length) return [];
 const usable = new Set(decision.usableEvidenceIds);
 return relevantResults.filter((result, index) => usable.has(`rag-manager:${String(result.chunk.id ?? index)}`));
 }

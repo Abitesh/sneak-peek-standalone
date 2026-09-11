@@ -632,6 +632,74 @@ export class EmbeddingPipeline {
         }
     }
 
+    /**
+     * Shared document-indexing embedding primitive used by RAGManager.
+     * Each returned vector carries the exact embedding space that produced it,
+     * so a provider fallback cannot silently relabel older vectors.
+     * A failed batch stops the run and leaves the already-produced prefix
+     * available for lexical retrieval/retry.
+     */
+    async embedDocumentChunks(
+        texts: string[],
+        options: { batchSize?: number } = {},
+    ): Promise<{
+        vectors: Array<{ embedding: number[]; space: string; provider?: string; dimensions?: number } | null>;
+        embeddedCount: number;
+        complete: boolean;
+    }> {
+        const input = texts.map((text) => String(text ?? ''));
+        if (input.length === 0) return { vectors: [], embeddedCount: 0, complete: true };
+        await this.waitForReady(15000);
+
+        const batchSize = Math.max(1, Math.min(64, Math.floor(options.batchSize ?? 32)));
+        const vectors: Array<{ embedding: number[]; space: string; provider?: string; dimensions?: number } | null> =
+            new Array(input.length).fill(null);
+        let embeddedCount = 0;
+        let documentSpace: string | null = null;
+        let complete = true;
+
+        for (let start = 0; start < input.length; start += batchSize) {
+            const batch = input.slice(start, start + batchSize);
+            try {
+                const result = await this.getEmbeddingsWithFallback(batch);
+                if (!Array.isArray(result.embeddings) || result.embeddings.length !== batch.length) {
+                    throw new Error(`document batch returned ${result.embeddings?.length ?? 'none'} vectors for ${batch.length} chunks`);
+                }
+                // A fallback can promote the active provider mid-document. Do not
+                // mix vectors from two spaces in one indexing run: keep the safe
+                // prefix and let the next retry rebuild it in the promoted space.
+                if (documentSpace && documentSpace !== result.space) {
+                    console.warn(`[EmbeddingPipeline] Document embedding space changed (${documentSpace} -> ${result.space}); stopping this indexing run to avoid mixed-space vectors.`);
+                    complete = false;
+                    break;
+                }
+                documentSpace = result.space;
+                for (let i = 0; i < batch.length; i++) {
+                    const embedding = result.embeddings[i];
+                    if (!embedding) continue;
+                    vectors[start + i] = {
+                        embedding,
+                        space: result.space,
+                        provider: result.provider,
+                        dimensions: result.dimensions,
+                    };
+                    embeddedCount++;
+                }
+            } catch (error) {
+                console.warn('[EmbeddingPipeline] Document embedding batch failed; keeping remaining chunks lexical-only:', {
+                    start,
+                    batchSize: batch.length,
+                    error: error instanceof Error ? error.message : String(error),
+                });
+                complete = false;
+                break;
+            }
+        }
+
+        if (embeddedCount !== input.length) complete = false;
+        return { vectors, embeddedCount, complete };
+    }
+
     private promoteFallbackProvider(fallback: IEmbeddingProvider): void {
         // Promote fallback for subsequent mode query embeddings. Persisted mode
         // vectors are only comparable within one active space; keeping the

@@ -16,6 +16,7 @@
 
 import * as crypto from 'crypto';
 import { ModesManager } from './ModesManager';
+import type { RAGManager } from '../rag/RAGManager';
 import {
   extractSafeDocumentText,
   SAFE_DOCUMENT_EXTENSIONS,
@@ -50,6 +51,7 @@ export interface ModeReferenceFileIngestOptions {
   modeId: string;
   filePath: string;
   onIndexStatus?: (status: 'indexing' | 'done', fileId: string) => void;
+  ragManager?: RAGManager;
 }
 
 /**
@@ -74,7 +76,21 @@ export const ingestModeReferenceFile = async (
   options.onIndexStatus?.('indexing', file.id);
   void (async () => {
     try {
-      await manager.indexReferenceFile(file);
+      if (options.ragManager?.indexDocument) {
+        await options.ragManager.indexDocument({
+          sourceType: 'mode',
+          documentId: file.id,
+          content: file.content,
+          fileName: file.fileName,
+          pageCount: file.pageCount,
+          extractedPageCount: file.extractedPageCount,
+          metadata: { modeId: file.modeId },
+        });
+      } else {
+        // Compatibility path for direct/unit callers that do not have the
+        // application-owned RAGManager. Production IPC always supplies it.
+        await manager.indexReferenceFile(file);
+      }
       const finalStatus = manager.getReferenceFileIndexStatus(file.id);
       if (finalStatus?.status === 'failed' || finalStatus?.status === 'lexical_only') {
         // The caller's application lifecycle owns retries; this preserves the

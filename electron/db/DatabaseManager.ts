@@ -1799,6 +1799,82 @@ SELECT id, meeting_id, COALESCE(speaker, ''), cleaned_text FROM chunks;
 this.db.pragma('user_version = 34');
 }
 
+// Version 34 → 35: unified document lexical/vector index support for mode
+// reference chunks. Personal files already have FTS5 + dedicated vector storage;
+// this brings the mode source's lexical index to the same indexing lifecycle
+// without changing its existing retrieval algorithm.
+if (version < 35) {
+console.log('[DatabaseManager] Applying migration v34 → v35: mode document FTS index');
+let modeFtsReady = true;
+try {
+this.db.exec(`
+CREATE TABLE IF NOT EXISTS mode_reference_index_state (
+file_id TEXT PRIMARY KEY,
+file_hash TEXT NOT NULL,
+indexed_at INTEGER NOT NULL,
+chunk_count INTEGER NOT NULL DEFAULT 0,
+status TEXT NOT NULL DEFAULT 'pending',
+embedding_space TEXT
+);
+CREATE TABLE IF NOT EXISTS mode_reference_chunks (
+id INTEGER PRIMARY KEY AUTOINCREMENT,
+file_id TEXT NOT NULL,
+chunk_index INTEGER NOT NULL,
+text TEXT NOT NULL,
+embedding BLOB,
+embedding_space TEXT,
+created_at INTEGER NOT NULL,
+page_start INTEGER,
+page_end INTEGER,
+section TEXT,
+heading TEXT,
+content_type TEXT NOT NULL DEFAULT 'text',
+table_index INTEGER,
+metadata_json TEXT NOT NULL DEFAULT '{}',
+UNIQUE(file_id, chunk_index)
+);
+CREATE INDEX IF NOT EXISTS idx_mode_ref_chunks_file ON mode_reference_chunks(file_id);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS mode_reference_chunks_fts
+USING fts5(chunk_id UNINDEXED, file_id UNINDEXED, file_name, text);
+
+CREATE TRIGGER IF NOT EXISTS mode_reference_chunks_ai
+AFTER INSERT ON mode_reference_chunks
+BEGIN
+INSERT INTO mode_reference_chunks_fts(chunk_id, file_id, file_name, text)
+SELECT NEW.id, NEW.file_id, m.file_name, NEW.text
+FROM mode_reference_files m WHERE m.id = NEW.file_id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS mode_reference_chunks_ad
+AFTER DELETE ON mode_reference_chunks
+BEGIN
+DELETE FROM mode_reference_chunks_fts WHERE chunk_id = OLD.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS mode_reference_chunks_au
+AFTER UPDATE OF file_id, text ON mode_reference_chunks
+BEGIN
+DELETE FROM mode_reference_chunks_fts WHERE chunk_id = OLD.id;
+INSERT INTO mode_reference_chunks_fts(chunk_id, file_id, file_name, text)
+SELECT NEW.id, NEW.file_id, m.file_name, NEW.text
+FROM mode_reference_files m WHERE m.id = NEW.file_id;
+END;
+
+DELETE FROM mode_reference_chunks_fts;
+INSERT INTO mode_reference_chunks_fts(chunk_id, file_id, file_name, text)
+SELECT c.id, c.file_id, m.file_name, c.text
+FROM mode_reference_chunks c
+JOIN mode_reference_files m ON m.id = c.file_id;
+`);
+} catch (e) {
+modeFtsReady = false;
+console.error('[DatabaseManager] v35 mode FTS index setup failed; leaving schema version at 34 for retry:', e);
+}
+if (!modeFtsReady) return;
+this.db.pragma('user_version = 35');
+}
+
 console.log('[DatabaseManager] Migrations completed.');
 }
 // ============================================
@@ -2193,6 +2269,134 @@ console.error('[DatabaseManager] getReferenceFiles failed:', e);
 return [];
 }
 }
+private ensureModeReferenceChunkSchema(): void {
+if (!this.db) return;
+this.db.exec(`
+CREATE TABLE IF NOT EXISTS mode_reference_index_state (
+file_id TEXT PRIMARY KEY,
+file_hash TEXT NOT NULL,
+indexed_at INTEGER NOT NULL,
+chunk_count INTEGER NOT NULL DEFAULT 0,
+status TEXT NOT NULL DEFAULT 'pending',
+embedding_space TEXT
+);
+CREATE TABLE IF NOT EXISTS mode_reference_chunks (
+id INTEGER PRIMARY KEY AUTOINCREMENT,
+file_id TEXT NOT NULL,
+chunk_index INTEGER NOT NULL,
+text TEXT NOT NULL,
+embedding BLOB,
+embedding_space TEXT,
+created_at INTEGER NOT NULL,
+page_start INTEGER,
+page_end INTEGER,
+section TEXT,
+heading TEXT,
+content_type TEXT NOT NULL DEFAULT 'text',
+table_index INTEGER,
+metadata_json TEXT NOT NULL DEFAULT '{}',
+UNIQUE(file_id, chunk_index)
+);
+CREATE INDEX IF NOT EXISTS idx_mode_ref_chunks_file ON mode_reference_chunks(file_id);
+`);
+}
+
+public replaceModeReferenceChunks(
+fileId: string,
+chunks: Array<{ text: string; chunkIndex: number; pageStart?: number; pageEnd?: number; section?: string; heading?: string; contentType?: string; tableIndex?: number; metadata?: Record<string, unknown> }>,
+baseMetadata: Record<string, unknown> = {},
+): number[] {
+if (!this.db) throw new Error('Database not initialized');
+const db = this.db;
+this.ensureModeReferenceChunkSchema();
+const insert = db.prepare(`
+INSERT INTO mode_reference_chunks
+(file_id, chunk_index, text, embedding, embedding_space, created_at, page_start, page_end, section, heading, content_type, table_index, metadata_json)
+VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
+`);
+const ids: number[] = [];
+db.transaction(() => {
+db.prepare('DELETE FROM mode_reference_chunks WHERE file_id = ?').run(fileId);
+const now = Date.now();
+for (const chunk of chunks) {
+const result = insert.run(
+fileId,
+chunk.chunkIndex,
+chunk.text,
+now,
+chunk.pageStart ?? null,
+chunk.pageEnd ?? null,
+chunk.section ?? null,
+chunk.heading ?? null,
+chunk.contentType ?? 'text',
+chunk.tableIndex ?? null,
+JSON.stringify({ ...baseMetadata, ...(chunk.metadata ?? {}) }),
+);
+ids.push(Number(result.lastInsertRowid));
+}
+})();
+return ids;
+}
+
+public getModeReferenceChunkIds(fileId: string): Array<{ id: number; chunkIndex: number }> {
+if (!this.db) return [];
+this.ensureModeReferenceChunkSchema();
+return this.db.prepare(
+'SELECT id, chunk_index AS chunkIndex FROM mode_reference_chunks WHERE file_id = ? ORDER BY chunk_index ASC'
+).all(fileId) as Array<{ id: number; chunkIndex: number }>;
+}
+
+public updateModeReferenceIndexState(
+fileId: string,
+fileHash: string,
+chunkCount: number,
+status: string = 'ready',
+embeddingSpace: string | null = null,
+): void {
+if (!this.db) return;
+this.ensureModeReferenceChunkSchema();
+this.db.prepare(`
+INSERT OR REPLACE INTO mode_reference_index_state
+(file_id, file_hash, indexed_at, chunk_count, status, embedding_space)
+VALUES (?, ?, ?, ?, ?, ?)
+`).run(fileId, fileHash, Date.now(), chunkCount, status, embeddingSpace);
+}
+
+public replacePersonalFileChunks(
+fileId: string,
+chunks: Array<{ id: string; text: string; chunkIndex: number; startChar?: number; endChar?: number; pageStart?: number; pageEnd?: number; section?: string; heading?: string; contentType?: string; metadata?: Record<string, unknown> }>,
+baseMetadata: Record<string, unknown> = {},
+): string[] {
+if (!this.db) throw new Error('Database not initialized');
+const db = this.db;
+const insert = db.prepare(`
+INSERT INTO personal_file_chunks
+(id, file_id, chunk_index, text, start_char, end_char, page_start, page_end, section, heading, content_type, metadata_json, embedding, embedding_provider, embedding_dimensions, embedding_space)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL)
+`);
+const ids: string[] = [];
+db.transaction(() => {
+db.prepare('DELETE FROM personal_file_chunks WHERE file_id = ?').run(fileId);
+for (const chunk of chunks) {
+insert.run(
+chunk.id, fileId, chunk.chunkIndex, chunk.text,
+chunk.startChar ?? 0, chunk.endChar ?? chunk.text.length,
+chunk.pageStart ?? null, chunk.pageEnd ?? null, chunk.section ?? null, chunk.heading ?? null,
+chunk.contentType ?? 'text', JSON.stringify({ ...baseMetadata, ...(chunk.metadata ?? {}) }),
+);
+ids.push(chunk.id);
+}
+})();
+return ids;
+}
+
+public getPersonalFileChunkIds(fileId: string): string[] {
+if (!this.db) return [];
+return (this.db.prepare(
+'SELECT id FROM personal_file_chunks WHERE file_id = ? ORDER BY chunk_index ASC'
+).all(fileId) as Array<{ id: string }>).map((row) => row.id);
+}
+
 public addReferenceFile(file: {
 id: string;
 modeId: string;

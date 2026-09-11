@@ -341,6 +341,40 @@ scored.sort((a, b) => b.similarity - a.similarity);
 return scored.slice(0, limit);
 }
 /**
+ * Store a mode-reference embedding in the shared vector-storage boundary.
+ * Mode retrieval currently reads the persisted BLOB directly; keeping this
+ * write behind VectorStore makes the indexing lifecycle source-agnostic without
+ * introducing a second native-vector ownership path for the mode retriever.
+ */
+storeModeReferenceEmbedding(
+chunkId: number,
+embedding: number[],
+spaceKey: string,
+_providerName?: string,
+_dimensions?: number,
+): void {
+const blob = this.embeddingToBlob(embedding);
+this.db.prepare(`
+UPDATE mode_reference_chunks
+SET embedding = ?, embedding_space = ?
+WHERE id = ?
+`).run(blob, spaceKey, chunkId);
+}
+
+/** Remove all mode-reference vectors for a file before its chunks are replaced/deleted. */
+deleteModeReferenceEmbeddingsForFile(fileId: string): void {
+try {
+this.db.prepare(`
+UPDATE mode_reference_chunks
+SET embedding = NULL, embedding_space = NULL
+WHERE file_id = ?
+`).run(fileId);
+} catch (e) {
+console.warn(`[VectorStore] Failed to clear mode-reference embeddings for file ${fileId}:`, e);
+}
+}
+
+/**
 * Store a Personal File embedding in the source row and its dimension-specific
 * sqlite-vec table. The vec table uses the source row's SQLite rowid because the
 * public personal chunk id is a TEXT hash and sqlite-vec primary keys are numeric.

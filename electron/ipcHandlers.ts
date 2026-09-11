@@ -12363,6 +12363,7 @@ const { ingestModeReferenceFile } = require('./services/ModeReferenceFileIngesti
 const file = await ingestModeReferenceFile({
 modeId,
 filePath: selectedPath!, // guarded + assigned on the straight line above
+ragManager: appState.getRAGManager?.() ?? undefined,
 onIndexStatus: (status, fileId) => {
 BrowserWindow.getAllWindows().forEach((win) => {
 if (!win.isDestroyed()) win.webContents.send('mode-file-index-status', { modeId, fileId, phase: status });
@@ -13358,9 +13359,24 @@ fileName: params.fileName,
 content: params.content,
 ...(typeof params.pageCount === 'number' ? { pageCount: params.pageCount, extractedPageCount: params.pageCount } : {}),
 });
-// Best-effort synchronous index so the first retrieval isn't cold.
-try { await ModesManager.getInstance().indexReferenceFile?.(file); } catch (idxErr: any) {
-console.warn('[E2E] indexReferenceFile failed (non-fatal):', idxErr?.message);
+// Exercise the same unified indexing entry point as production.
+try {
+const ragManager = appState.getRAGManager?.();
+if (ragManager?.indexDocument) {
+await ragManager.indexDocument({
+sourceType: 'mode',
+documentId: file.id,
+content: file.content,
+fileName: file.fileName,
+pageCount: file.pageCount,
+extractedPageCount: file.extractedPageCount,
+metadata: { modeId: file.modeId },
+});
+} else {
+await ModesManager.getInstance().indexReferenceFile?.(file);
+}
+} catch (idxErr: any) {
+console.warn('[E2E] unified document index failed (non-fatal):', idxErr?.message);
 }
 return { success: true, file };
 } catch (e: any) {
