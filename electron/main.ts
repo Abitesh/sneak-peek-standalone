@@ -1193,7 +1193,7 @@ import { GoogleSTT } from "./audio/GoogleSTT"
 import { LocalWhisperSTT } from "./audio/LocalWhisperSTT";
 import { RestSTT } from "./audio/RestSTT"
 import { DeepgramStreamingSTT } from "./audio/DeepgramStreamingSTT"
-import { isIntelligenceFlagEnabled } from "./intelligence/intelligenceFlags"
+import { isIntelligenceFlagEnabled, isRagEnabled, isRagHybridEnabled, isRagRerankEnabled, isRagConfidenceGateEnabled, isRagCitationsEnabled, isRagConversationAwareEnabled } from "./intelligence/intelligenceFlags"
 import { buildJudgePrompt } from "./intelligence/autoAnswer/AutoAnswerJudge"
 import { SimpleAutoAnswerEngine } from "./intelligence/autoAnswer/SimpleAutoAnswer"
 import { resolveAutoAnswerThresholds } from "./context-intelligence/policies/mode-policy-registry"
@@ -2124,6 +2124,14 @@ export class AppState {
  try {
  const mem = process.memoryUsage();
  const flags = {
+ // Change 21: canonical RAG controls are emitted first; legacy rollout
+ // flags remain visible for compatibility/diagnostics while migration settles.
+ ragEnabled: isRagEnabled(),
+ ragHybridEnabled: isRagHybridEnabled(),
+ ragRerankEnabled: isRagRerankEnabled(),
+ ragConfidenceGateEnabled: isRagConfidenceGateEnabled(),
+ ragCitationsEnabled: isRagCitationsEnabled(),
+ ragConversationAwareEnabled: isRagConversationAwareEnabled(),
  ragConfidenceGate: isIntelligenceFlagEnabled('ragConfidenceGate'),
  ragLocalRerank: isIntelligenceFlagEnabled('ragLocalRerank'),
  ragSpeculativeRerank: isIntelligenceFlagEnabled('ragSpeculativeRerank'),

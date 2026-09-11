@@ -74,6 +74,16 @@ const FLAG_META: Record<string, { label: string; desc: string; group: string; ti
 // the grouping logic can skip them rather than dump them into an "unknown" bucket.
 const HINDSIGHT_FLAG_KEYS = new Set(['hindsightMemory', 'hindsightPostMeetingRetain', 'hindsightLiveRecall']);
 
+const RAG_SETTING_META: Record<string, { label: string; desc: string }> = {
+  ragEnabled: { label: 'RAG retrieval', desc: 'Use your saved documents, meeting knowledge, and personal files when a question needs grounded context.' },
+  ragHybridEnabled: { label: 'Hybrid retrieval', desc: 'Combine the primary RAG source with additional eligible source families when the question calls for them.' },
+  ragRerankEnabled: { label: 'Reranking', desc: 'Use the on-device reranker to improve ordering when retrieval confidence is low or reranking is requested.' },
+  ragConfidenceGateEnabled: { label: 'Confidence gate', desc: 'Measure retrieval confidence and prevent weak evidence from being treated as grounded evidence.' },
+  ragCitationsEnabled: { label: 'Citations', desc: 'Show document citation markers when the answer pipeline has governed source evidence to cite.' },
+  ragConversationAwareEnabled: { label: 'Conversation-aware retrieval', desc: 'Use recent chat turns to resolve follow-ups and references during RAG retrieval.' },
+};
+const RAG_SETTING_ORDER = ['ragEnabled', 'ragHybridEnabled', 'ragRerankEnabled', 'ragConfidenceGateEnabled', 'ragCitationsEnabled', 'ragConversationAwareEnabled'];
+
 // Order for the per-group rendering inside the "Customize" disclosure (advanced tier).
 const ADVANCED_GROUP_ORDER = ['Memory', 'Answer quality', 'Search', 'Lecture & diagrams'];
 
@@ -406,6 +416,7 @@ const StatusChip: React.FC<{ status: ConnStatus; testing: boolean; onRetry: () =
 export const IntelligenceSettings: React.FC = () => {
   const t = useT();
   const [flags, setFlags] = useState<FlagRow[]>([]);
+  const [ragSettings, setRagSettings] = useState<Array<{ key: string; enabled: boolean; setting: string; env: string; default: boolean; legacy?: string; envForced?: boolean }>>([]);
   const [cfg, setCfg] = useState<HindsightCfg | null>(null);
   const [baseUrl, setBaseUrl] = useState('');
   const [apiKey, setApiKey] = useState('');
@@ -488,20 +499,23 @@ export const IntelligenceSettings: React.FC = () => {
 
   const refresh = useCallback(async () => {
     try {
-      const [f, c] = await Promise.all([
+      const [f, r, h] = await Promise.all([
         window.electronAPI.getIntelligenceFlags?.(),
+        window.electronAPI.getRagSettings?.(),
         window.electronAPI.getHindsightConfig?.(),
       ]);
       if (Array.isArray(f)) setFlags(f);
-      if (c) {
+      if (Array.isArray(r)) setRagSettings(r);
+      const hindsightCfg = h as HindsightCfg | null;
+      if (hindsightCfg) {
         // The IPC payload now carries mode/synthetic/explicitlyDisabled/authFailed. The
         // type in electron.d.ts is the new shape, but a small cast covers the case where
         // an older renderer (pre-this-change) somehow passes the old shape.
-        setCfg(c as HindsightCfg);
-        setBaseUrl(c.baseUrl || '');
-        setAutoStart(c.autoStart !== false);
-        setHealthy(c.available);
-        setCfg((prev) => prev ? { ...prev, authFailed: Boolean((c as HindsightCfg).authFailed) } : prev);
+        setCfg(hindsightCfg);
+        setBaseUrl(hindsightCfg.baseUrl || '');
+        setAutoStart(hindsightCfg.autoStart !== false);
+        setHealthy(hindsightCfg.available);
+        setCfg((prev) => prev ? { ...prev, authFailed: Boolean(hindsightCfg.authFailed) } : prev);
       }
     } catch { /* settings panel never throws */ }
   }, []);
@@ -576,6 +590,19 @@ export const IntelligenceSettings: React.FC = () => {
       const res = await window.electronAPI.setIntelligenceFlag?.(row.key, !row.enabled);
       if (res && typeof res.enabled === 'boolean') {
         setFlags((prev) => prev.map((r) => (r.key === row.key ? { ...r, enabled: res.enabled! } : r)));
+      }
+    } catch { await refresh(); }
+  }, [refresh]);
+
+  const onToggleRagSetting = useCallback(async (row: { key: string; enabled: boolean; envForced?: boolean }) => {
+    if (row.envForced) return;
+    setRagSettings((prev) => prev.map((r) => (r.key === row.key ? { ...r, enabled: !r.enabled } : r)));
+    try {
+      const res = await window.electronAPI.setRagSetting?.(row.key, !row.enabled);
+      if (res && typeof res.enabled === 'boolean') {
+        setRagSettings((prev) => prev.map((r) => (r.key === row.key ? { ...r, enabled: res.enabled! } : r)));
+      } else if (res && res.success === false) {
+        await refresh();
       }
     } catch { await refresh(); }
   }, [refresh]);
@@ -736,6 +763,37 @@ export const IntelligenceSettings: React.FC = () => {
           {t('Tune features that surface during real-time conversations, lectures, and meetings.')}
         </p>
       </header>
+
+      {/* ── Unified RAG controls (Change 21) ──────────────────────── */}
+      <section className="rounded-xl border border-border-subtle bg-bg-item-surface p-5 space-y-3">
+        <div>
+          <div className="text-sm font-semibold text-text-primary">{t('RAG')}</div>
+          <p className="mt-1 text-xs leading-relaxed text-text-secondary">{t('One consistent control surface for document retrieval, reranking, grounding confidence, citations, and conversation-aware retrieval. Older internal rollout flags remain compatibility-only.')}</p>
+        </div>
+        <div className="space-y-1.5">
+          {RAG_SETTING_ORDER.map((key) => {
+            const row = ragSettings.find((item) => item.key === key);
+            if (!row) return null;
+            const meta = RAG_SETTING_META[key];
+            return (
+              <div key={key} className="flex items-start justify-between gap-4 rounded-lg px-3 py-2.5 transition-colors hover:bg-bg-item-active">
+                <div className="min-w-0">
+                  <div className="text-xs font-medium text-text-primary">{t(meta.label)}</div>
+                  <div className="mt-0.5 text-[11px] leading-relaxed text-text-secondary">{t(meta.desc)}</div>
+                  {row.legacy ? <div className="mt-0.5 text-[10px] text-text-tertiary">{t('Compatibility:')} {row.legacy}</div> : null}
+                </div>
+                <SettingsToggle
+                  checked={row.enabled}
+                  disabled={Boolean(row.envForced)}
+                  onChange={() => void onToggleRagSetting(row)}
+                  label={t(meta.label)}
+                  className={row.enabled ? 'bg-accent-primary border border-transparent' : 'bg-bg-toggle-switch border border-border-muted'}
+                />
+              </div>
+            );
+          })}
+        </div>
+      </section>
 
       {/* ── Long-term memory (Hindsight) ─────────────────────────── */}
       <section className="rounded-xl border border-border-subtle bg-bg-item-surface p-5 space-y-4">

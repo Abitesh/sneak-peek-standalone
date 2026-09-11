@@ -17,8 +17,8 @@ rerank(query: string, passages: string[]): Promise<Array<{ index: number; score:
 }
 function isLocalRerankEnabled(): boolean {
 try {
-const { isRagLocalRerankEnabled } = require('../intelligence/intelligenceFlags') as typeof import('../intelligence/intelligenceFlags');
-return isRagLocalRerankEnabled();
+const { isRagRerankEnabled } = require('../intelligence/intelligenceFlags') as typeof import('../intelligence/intelligenceFlags');
+return isRagRerankEnabled();
 } catch {
 return false;
 }

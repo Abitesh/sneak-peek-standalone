@@ -39,7 +39,7 @@ import { CodingStreamGate } from './llm/codingStreamGate';
 import { PiLatencyTrace } from './services/telemetry/PiLatencyTracer';
 import { beginTrace, commitTrace } from './intelligence/IntelligenceTrace';
 import { ProfileTreeService } from './intelligence/ProfileTreeService';
-import { isIntelligenceFlagEnabled, getSourceOwnerEnforcementStage } from './intelligence/intelligenceFlags';
+import { isIntelligenceFlagEnabled, getSourceOwnerEnforcementStage, isRagCitationsEnabled } from './intelligence/intelligenceFlags';
 import { recordAttribution, hindsightModeFor, type AttributionInput } from './intelligence/IntelligenceAttribution';
 import { routeContext, isBackwardLookingQuery } from './intelligence/ContextRouter';
 import { SearchOrchestrator, type SearchCandidate } from './intelligence/SearchOrchestrator';
@@ -5496,7 +5496,7 @@ liveMode: liveModeIdAtDoneEmit,
 // the streamed answer was already valid, finalText is undefined and the
 // already-streamed tokens stand. streamId (audit finding #3) lets the
 // renderer ignore a stale done from a superseded stream.
-const citationMarkers = manualContextOsGeneration?.govern
+const citationMarkers = isRagCitationsEnabled() && manualContextOsGeneration?.govern
 ? manualContextOsGeneration.renderedEvidenceManifest?.citationMarkers
 : undefined;
 event.sender.send('gemini-stream-done', {
@@ -6146,6 +6146,31 @@ return { success: true };
 // The flags read from SettingsManager already, so set() takes effect on the next
 // answer. Production defaults stay conservative (all OFF) — this only surfaces an
 // opt-in toggle. No flag here changes behavior unless its wiring is also exercised.
+safeHandle('rag-settings:get', async () => {
+try {
+const { unifiedRagSettingKeys, unifiedRagSettingMeta, isUnifiedRagSettingEnabled, isUnifiedRagSettingEnvForced } = require('./intelligence/intelligenceFlags') as typeof import('./intelligence/intelligenceFlags');
+return unifiedRagSettingKeys().map((key) => {
+const meta = unifiedRagSettingMeta(key);
+return { key, enabled: isUnifiedRagSettingEnabled(key), setting: meta.setting, env: meta.env, default: meta.default, legacy: meta.legacy, envForced: isUnifiedRagSettingEnvForced(key) };
+});
+} catch (e: any) {
+console.warn('[RagSettings] get failed:', e?.message);
+return [];
+}
+});
+safeHandle('rag-settings:set', async (_, { key, value }: { key: string; value: boolean | null }) => {
+try {
+const { setUnifiedRagSetting, unifiedRagSettingKeys, isUnifiedRagSettingEnabled } = require('./intelligence/intelligenceFlags') as typeof import('./intelligence/intelligenceFlags');
+if (typeof key !== 'string' || !unifiedRagSettingKeys().includes(key as any)) return { success: false, error: 'unknown_setting' };
+if (value !== null && typeof value !== 'boolean') return { success: false, error: 'invalid_value' };
+const ok = setUnifiedRagSetting(key as any, value);
+return { success: ok, enabled: isUnifiedRagSettingEnabled(key as any) };
+} catch (e: any) {
+console.warn('[RagSettings] set failed:', e?.message);
+return { success: false, error: 'set_failed' };
+}
+});
+
 safeHandle('intelligence-flags:get', async () => {
 try {
 const { intelligenceFlagKeys, intelligenceFlagMeta, isIntelligenceFlagEnabled } = require('./intelligence/intelligenceFlags') as typeof import('./intelligence/intelligenceFlags');

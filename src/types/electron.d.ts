@@ -461,6 +461,8 @@ export interface ElectronAPI {
  generateLectureNotes: (opts?: { title?: string; course?: string }) => Promise<{ enabled: boolean; notes: any }>
  generateDiagram: (text?: string) => Promise<{ enabled: boolean; diagram: any }>
  getIntelligenceFlags: () => Promise<Array<{ key: string; enabled: boolean; setting: string; env: string; default: boolean }>>
+ getRagSettings: () => Promise<Array<{ key: string; enabled: boolean; setting: string; env: string; default: boolean; legacy?: string; envForced?: boolean }>>
+ setRagSetting: (key: string, value: boolean | null) => Promise<{ success: boolean; enabled?: boolean; error?: string }>
  setIntelligenceFlag: (key: string, value: boolean | null) => Promise<{ success: boolean; enabled?: boolean; error?: string }>
  getContextDebugConfig: () => Promise<{ level: 'off' | 'standard' | 'verbose'; levelSource: 'environment' | 'setting' | 'default'; contentInclusion: boolean; storedLevel?: 'off' | 'standard' | 'verbose'; logDirectory?: string | null; currentFile?: string | null; error?: string }>
  setContextDebugLevel: (level: 'off' | 'standard' | 'verbose') => Promise<{ ok: boolean; error?: string }>

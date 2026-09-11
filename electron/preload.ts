@@ -490,6 +490,8 @@ interface ElectronAPI {
  generateLectureNotes: (opts?: { title?: string; course?: string }) => Promise<{ enabled: boolean; notes: any }>;
  generateDiagram: (text?: string) => Promise<{ enabled: boolean; diagram: any }>;
  getIntelligenceFlags: () => Promise<Array<{ key: string; enabled: boolean; setting: string; env: string; default: boolean }>>;
+ getRagSettings: () => Promise<Array<{ key: string; enabled: boolean; setting: string; env: string; default: boolean; legacy?: string; envForced?: boolean }>>;
+ setRagSetting: (key: string, value: boolean | null) => Promise<{ success: boolean; enabled?: boolean; error?: string }>;
  setIntelligenceFlag: (key: string, value: boolean | null) => Promise<{ success: boolean; enabled?: boolean; error?: string }>;
  getContextDebugConfig: () => Promise<{ level: 'off' | 'standard' | 'verbose'; levelSource: 'environment' | 'setting' | 'default'; contentInclusion: boolean; storedLevel?: 'off' | 'standard' | 'verbose'; logDirectory?: string | null; currentFile?: string | null; error?: string }>;
  setContextDebugLevel: (level: 'off' | 'standard' | 'verbose') => Promise<{ ok: boolean; error?: string }>;
@@ -1900,6 +1902,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
  generateLectureNotes: (opts?: { title?: string; course?: string }) => ipcRenderer.invoke('lecture:generate-notes', opts),
  generateDiagram: (text?: string) => ipcRenderer.invoke('diagram:generate', { text }),
  getIntelligenceFlags: () => ipcRenderer.invoke('intelligence-flags:get'),
+ getRagSettings: () => ipcRenderer.invoke('rag-settings:get'),
+ setRagSetting: (key: string, value: boolean | null) => ipcRenderer.invoke('rag-settings:set', { key, value }),
  setIntelligenceFlag: (key: string, value: boolean | null) => ipcRenderer.invoke('intelligence-flags:set', { key, value }),
  getContextDebugConfig: () => ipcRenderer.invoke('context-debug:get-config'),
  setContextDebugLevel: (level: 'off' | 'standard' | 'verbose') => ipcRenderer.invoke('context-debug:set-level', { level }),

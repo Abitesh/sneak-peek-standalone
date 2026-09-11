@@ -607,6 +607,149 @@ export function isIntelligenceFlagEnvForced(key: IntelligenceFlagKey): boolean {
 /** True when the observe-only IntelligenceTrace should collect (Phase 12/13). */
 export const isIntelligenceTraceEnabled = (): boolean => isIntelligenceFlagEnabled('trace');
 
+export type UnifiedRagSettingKey =
+  | 'ragEnabled'
+  | 'ragHybridEnabled'
+  | 'ragRerankEnabled'
+  | 'ragConfidenceGateEnabled'
+  | 'ragCitationsEnabled'
+  | 'ragConversationAwareEnabled';
+
+type UnifiedRagSettingSpec = {
+  env: string;
+  setting: string;
+  default: boolean;
+  /** Legacy flag consulted only when the new setting has no explicit value. */
+  legacy?: IntelligenceFlagKey;
+};
+
+/**
+ * Change 21 — canonical RAG control plane.
+ *
+ * These are intentionally separate from the historical rollout flags. The new
+ * names describe user-facing RAG behavior; the legacy flags remain internal
+ * compatibility controls until each specialized subsystem can be retired or
+ * deliberately migrated. A canonical setting wins over its legacy equivalent.
+ *
+ * Important mappings:
+ *   ragRerankEnabled         <- ragLocalRerank
+ *   ragConfidenceGateEnabled <- ragConfidenceGate
+ *
+ * The remaining legacy flags do NOT have a safe one-to-one replacement:
+ *   ragSpeculativeRerank     = live-path placement policy
+ *   okfKnowledgePacks        = Knowledge Pack construction/indexing
+ *   okfHybridRetrieval       = OKF-specific augmentation
+ *   conversationMemoryV2     = conversation-memory feature, not RAG query context
+ *   hindsight*                = long-term memory, deliberately outside document RAG
+ */
+const UNIFIED_RAG_SETTINGS: Record<UnifiedRagSettingKey, UnifiedRagSettingSpec> = {
+  ragEnabled: {
+    env: 'NATIVELY_RAG_ENABLED',
+    setting: 'ragEnabled',
+    default: true,
+  },
+  ragHybridEnabled: {
+    env: 'NATIVELY_RAG_HYBRID_ENABLED',
+    setting: 'ragHybridEnabled',
+    default: true,
+  },
+  ragRerankEnabled: {
+    env: 'NATIVELY_RAG_RERANK_ENABLED',
+    setting: 'ragRerankEnabled',
+    default: true,
+    legacy: 'ragLocalRerank',
+  },
+  ragConfidenceGateEnabled: {
+    env: 'NATIVELY_RAG_CONFIDENCE_GATE_ENABLED',
+    setting: 'ragConfidenceGateEnabled',
+    default: true,
+    legacy: 'ragConfidenceGate',
+  },
+  ragCitationsEnabled: {
+    env: 'NATIVELY_RAG_CITATIONS_ENABLED',
+    setting: 'ragCitationsEnabled',
+    default: true,
+  },
+  ragConversationAwareEnabled: {
+    env: 'NATIVELY_RAG_CONVERSATION_AWARE_ENABLED',
+    setting: 'ragConversationAwareEnabled',
+    default: true,
+  },
+};
+
+function readUnifiedRagEnvOverride(key: UnifiedRagSettingKey): 'on' | 'off' | null {
+  try {
+    const raw = (process.env[UNIFIED_RAG_SETTINGS[key].env] || '').trim().toLowerCase();
+    if (ON_VALUES.has(raw)) return 'on';
+    if (OFF_VALUES.has(raw)) return 'off';
+  } catch { /* fall through */ }
+  return null;
+}
+
+function readUnifiedRagSettingOverride(key: UnifiedRagSettingKey): boolean | null {
+  try {
+    const { SettingsManager } = require('../services/SettingsManager');
+    const value = SettingsManager.getInstance().get(UNIFIED_RAG_SETTINGS[key].setting);
+    if (value === true) return true;
+    if (value === false) return false;
+  } catch { /* settings unavailable */ }
+  return null;
+}
+
+/** Resolve one canonical RAG setting: new env > new setting > legacy flag > default. */
+export function isUnifiedRagSettingEnabled(key: UnifiedRagSettingKey): boolean {
+  const env = readUnifiedRagEnvOverride(key);
+  if (env === 'on') return true;
+  if (env === 'off') return false;
+
+  const setting = readUnifiedRagSettingOverride(key);
+  if (setting !== null) return setting;
+
+  const legacy = UNIFIED_RAG_SETTINGS[key].legacy;
+  if (legacy) return isIntelligenceFlagEnabled(legacy);
+
+  return UNIFIED_RAG_SETTINGS[key].default;
+}
+
+export function unifiedRagSettingKeys(): UnifiedRagSettingKey[] {
+  return Object.keys(UNIFIED_RAG_SETTINGS) as UnifiedRagSettingKey[];
+}
+
+export function unifiedRagSettingMeta(key: UnifiedRagSettingKey): {
+  setting: string;
+  env: string;
+  default: boolean;
+  legacy?: IntelligenceFlagKey;
+} {
+  const spec = UNIFIED_RAG_SETTINGS[key];
+  return { setting: spec.setting, env: spec.env, default: spec.default, ...(spec.legacy ? { legacy: spec.legacy } : {}) };
+}
+
+export function isUnifiedRagSettingEnvForced(key: UnifiedRagSettingKey): boolean {
+  if (readUnifiedRagEnvOverride(key) !== null) return true;
+  const legacy = UNIFIED_RAG_SETTINGS[key].legacy;
+  return legacy ? isIntelligenceFlagEnvForced(legacy) : false;
+}
+
+export function setUnifiedRagSetting(key: UnifiedRagSettingKey, value: boolean | null): boolean {
+  try {
+    if (!Object.prototype.hasOwnProperty.call(UNIFIED_RAG_SETTINGS, key)) return false;
+    const { SettingsManager } = require('../services/SettingsManager');
+    const sm = SettingsManager.getInstance();
+    const setting = UNIFIED_RAG_SETTINGS[key].setting;
+    return sm.set(setting, value === null ? undefined : value);
+  } catch {
+    return false;
+  }
+}
+
+export const isRagEnabled = (): boolean => isUnifiedRagSettingEnabled('ragEnabled');
+export const isRagHybridEnabled = (): boolean => isUnifiedRagSettingEnabled('ragHybridEnabled');
+export const isRagRerankEnabled = (): boolean => isUnifiedRagSettingEnabled('ragRerankEnabled');
+export const isRagConfidenceGateEnabled = (): boolean => isUnifiedRagSettingEnabled('ragConfidenceGateEnabled');
+export const isRagCitationsEnabled = (): boolean => isUnifiedRagSettingEnabled('ragCitationsEnabled');
+export const isRagConversationAwareEnabled = (): boolean => isUnifiedRagSettingEnabled('ragConversationAwareEnabled');
+
 /**
  * True when the full-JIT final-answer law is enforced: AOT intro/identity/
  * greeting text is demoted to evidence and the provider writes every
@@ -625,25 +768,11 @@ export const isDurableMemoryWindowEnabled = (): boolean =>
   isIntelligenceFlagEnabled('durableMemoryWindow');
 
 /**
- * True when the observe-only retrieval-confidence telemetry should be computed
- * and emitted (Phase 0 of the smart-retrieval rollout). Default OFF. This flag
- * NEVER changes retrieval output — it only gates the extra `rag_confidence`
- * telemetry + the optional `confidence` field on ModeRetrievedContext, so the
- * low-confidence thresholds for the later local-reranker escalation can be
- * tuned from real traffic before any behavior change ships.
- */
-export const isRagConfidenceGateEnabled = (): boolean =>
-  isIntelligenceFlagEnabled('ragConfidenceGate');
-
-/**
- * True when the local cross-encoder rerank escalation (Phase 1) may run on a
- * manual/follow-up query whose confidence gate tripped. Default OFF. Requires
- * `ragConfidenceGate` to also be on — the gate provides the low-confidence trip
- * signal that this escalation reacts to. No-ops gracefully if the reranker
- * model can't load.
+ * Legacy-compatible local rerank helper. Change 21 routes this through the canonical
+ * `ragRerankEnabled` setting while preserving `ragLocalRerank` as a compatibility fallback.
  */
 export const isRagLocalRerankEnabled = (): boolean =>
-  isIntelligenceFlagEnabled('ragLocalRerank');
+  isRagRerankEnabled();
 
 /**
  * True when Reciprocal Rank Fusion across the heterogeneous retrieval sources
@@ -655,14 +784,11 @@ export const isRagRrfFusionEnabled = (): boolean =>
   isIntelligenceFlagEnabled('ragRrfFusion');
 
 /**
- * True when the local rerank escalation may run on the LIVE transcript path
- * (Phase 3), not just manual/follow-up. Safe by construction (prewarmed +
- * inside the existing retrieval budget race). Default OFF. Requires
- * `ragLocalRerank` to also be on — this flag only widens WHERE that reranker
- * is permitted to run.
+ * Legacy-compatible live-path rerank helper. The specialized `ragSpeculativeRerank`
+ * placement flag remains internal, but it can never bypass the canonical rerank master.
  */
 export const isRagSpeculativeRerankEnabled = (): boolean =>
-  isIntelligenceFlagEnabled('ragSpeculativeRerank');
+  isIntelligenceFlagEnabled('ragSpeculativeRerank') && isRagRerankEnabled();
 
 /** True when uploaded reference files should be indexed into OKF Knowledge Packs. */
 export const isOkfKnowledgePacksEnabled = (): boolean =>

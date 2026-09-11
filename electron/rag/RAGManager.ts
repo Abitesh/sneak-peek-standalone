@@ -24,6 +24,7 @@ import { MeetingRagAdapter } from './adapters/MeetingRagAdapter';
 import { ModeRagAdapter } from './adapters/ModeRagAdapter';
 import { PersonalRagAdapter } from './adapters/PersonalRagAdapter';
 import { KnowledgeRagAdapter } from './adapters/KnowledgeRagAdapter';
+import { isRagEnabled, isRagHybridEnabled, isRagConversationAwareEnabled, isRagConfidenceGateEnabled } from '../intelligence/intelligenceFlags';
 interface ModesManagerLike {
 getActiveModeInfo(): { id?: string } | null;
 getActiveMode(): any | null;
@@ -337,6 +338,15 @@ private gateCanonicalResults(
   query: string,
 ): RagSearchResult[] {
 if (!results.length) return [];
+const relevantResults = results.filter((result) =>
+  hasQuestionSpecificRelevance(query, [result.chunk as any], this.retriever.detectIntent(query)),
+);
+if (!relevantResults.length) return [];
+// Change 21: the canonical confidence-gate setting is authoritative for the
+// unified manager's confidence/sufficiency decision. Keep the existing
+// question-specific relevance check even when the confidence gate is off so
+// disabling confidence does not turn retrieval into an unconditional bypass.
+if (!isRagConfidenceGateEnabled()) return relevantResults;
 const evidenceItems = results.map((result, index) => ({
   evidenceId: `rag-manager:${String(result.chunk.id ?? index)}`,
   sourceKind: result.source.sourceType,
@@ -375,10 +385,6 @@ const decision = evaluateRagRelevanceGate({
   isSynthesis: true,
 });
 if (!decision.passed) return [];
-const relevantResults = results.filter((result) =>
-  hasQuestionSpecificRelevance(query, [result.chunk as any], this.retriever.detectIntent(query)),
-);
-if (!relevantResults.length) return [];
 const usable = new Set(decision.usableEvidenceIds);
 return relevantResults.filter((result, index) => usable.has(`rag-manager:${String(result.chunk.id ?? index)}`));
 }
@@ -506,6 +512,7 @@ public createRAGRetrievalPort(
 async search(query: string, options: RAGSearchOptions = {}): Promise<RAGRetrievalResponse> {
 const originalQuery = String(query ?? '').trim();
 if (!originalQuery) return { status: 'no_relevant_evidence', results: [], confidence: 0 };
+if (!isRagEnabled()) return { status: 'no_relevant_evidence', results: [], confidence: 0 };
 // Change 8: query planning is an explicit retrieval-stage concern. The
 // original user question remains untouched for answer generation; only
 // retrieval receives the rewritten query.
@@ -539,9 +546,19 @@ const selectedSources = Array.isArray(options.selectedSources)
 ? [...new Set(options.selectedSources)]
 : (legacySourceSelection ?? queryPlan.sources);
 const sourceSet = new Set<RagSourceSelection>(selectedSources);
-const conversation = sourceSet.has('conversation')
+const conversation = sourceSet.has('conversation') && isRagConversationAwareEnabled()
 ? this.getConversationForRetrieval(options.sessionId, options.conversation)
 : undefined;
+
+// Change 21: when unified RAG hybrid mode is off, retain only the primary
+// source family selected for this query. The underlying single-source hybrid
+// algorithms (lexical + semantic) remain untouched; this switch only controls
+// cross-source fusion at the RAGManager boundary.
+const effectiveSourceSet = isRagHybridEnabled()
+? sourceSet
+: new Set<RagSourceSelection>(
+    selectedSources.filter((source) => source !== 'conversation').slice(0, 1),
+  );
 const topK = Math.max(1, Math.min(50, options.topK ?? 8));
 const candidatePoolSize = Math.max(topK, Math.min(1000, options.candidatePoolSize ?? 100));
 const rerankCandidatePoolSize = Math.max(
@@ -550,7 +567,7 @@ Math.min(candidatePoolSize, Math.min(1000, options.rerankCandidatePoolSize ?? ca
 );
 const tokenBudget = Math.max(1, options.tokenBudget ?? 1800);
 const results: RagSearchResult[] = [];
-if (sourceSet.has('meeting')) {
+if (effectiveSourceSet.has('meeting')) {
 try {
 const meetingResults = await this.meetingAdapter.retrieve({
 query: normalizedQuery,
@@ -564,7 +581,7 @@ results.push(...meetingResults);
 console.warn('[RAGManager] Meeting adapter retrieval failed:', error);
 }
 }
-if (sourceSet.has('mode-reference')) {
+if (effectiveSourceSet.has('mode-reference')) {
 try {
 const modeResults = await this.modeAdapter.retrieve({
 query: normalizedQuery,
@@ -577,7 +594,7 @@ results.push(...modeResults);
 console.warn('[RAGManager] Mode adapter retrieval failed:', error);
 }
 }
-if (sourceSet.has('knowledge')) {
+if (effectiveSourceSet.has('knowledge')) {
 try {
 const knowledgeResults = await this.knowledgeAdapter.retrieve({
 query: normalizedQuery,
@@ -591,7 +608,7 @@ results.push(...knowledgeResults);
 console.warn('[RAGManager] Knowledge adapter retrieval failed:', error);
 }
 }
-if (sourceSet.has('personal-files')) {
+if (effectiveSourceSet.has('personal-files')) {
 try {
 const personalResults = await this.personalAdapter.retrieve({
 query: normalizedQuery,
@@ -642,8 +659,8 @@ candidatePoolSize: number,
 if (results.length < 2) return results;
 let enabled = false;
 try {
-const { isRagLocalRerankEnabled } = require('../intelligence/intelligenceFlags') as typeof import('../intelligence/intelligenceFlags');
-enabled = isRagLocalRerankEnabled();
+const { isRagRerankEnabled } = require('../intelligence/intelligenceFlags') as typeof import('../intelligence/intelligenceFlags');
+enabled = isRagRerankEnabled();
 } catch {
 return results;
 }
