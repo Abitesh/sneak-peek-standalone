@@ -12322,6 +12322,35 @@ console.error('[IPC] modes:set-active error:', e);
 return { success: false, error: e.message };
 }
 });
+// Change 23: direct status lookup for mode and personal documents. The renderer
+// may use this for an initial fetch while the event channel handles live updates.
+safeHandle('rag:get-index-status', async (_, sourceType: 'mode' | 'personal', documentId: string) => {
+  try {
+    const ragManager = appState.getRAGManager?.();
+    if (!ragManager) return { success: false, error: 'RAG manager unavailable.' };
+    return { success: true, status: ragManager.getIndexStatus(sourceType, documentId) };
+  } catch (e: any) {
+    console.error('[IPC] rag:get-index-status error:', e?.message || e);
+    return { success: false, error: e?.message || String(e) };
+  }
+});
+
+// Change 23: forward canonical RAG index lifecycle events to every renderer.
+// Guard the subscription because setupIpcHandlers can be called more than once.
+try {
+  const ragManager = appState.getRAGManager?.();
+  if (ragManager && !(global as any).__ragIndexStatusListenerAttached) {
+    (global as any).__ragIndexStatusListenerAttached = true;
+    ragManager.onIndexStatusChange?.((snapshot: any) => {
+      BrowserWindow.getAllWindows().forEach((win) => {
+        if (!win.isDestroyed()) win.webContents.send('rag-index-status', snapshot);
+      });
+    });
+  }
+} catch (e: any) {
+  console.warn('[IPC] RAG index status listener setup failed (non-fatal):', e?.message);
+}
+
 // PI v3 (W3): per-file index status for the Modes Manager UI badges.
 safeHandle('modes:get-reference-file-status', async (_, modeId: string) => {
 try {
@@ -12364,9 +12393,9 @@ const file = await ingestModeReferenceFile({
 modeId,
 filePath: selectedPath!, // guarded + assigned on the straight line above
 ragManager: appState.getRAGManager?.() ?? undefined,
-onIndexStatus: (status, fileId) => {
+onIndexStatus: (status, fileId, snapshot) => {
 BrowserWindow.getAllWindows().forEach((win) => {
-if (!win.isDestroyed()) win.webContents.send('mode-file-index-status', { modeId, fileId, phase: status });
+if (!win.isDestroyed()) win.webContents.send('mode-file-index-status', { modeId, fileId, status, snapshot });
 });
 },
 });

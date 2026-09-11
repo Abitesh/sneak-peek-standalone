@@ -1875,6 +1875,35 @@ if (!modeFtsReady) return;
 this.db.pragma('user_version = 35');
 }
 
+// Version 35 → 36: canonical unified document-index lifecycle status.
+// This is additive: legacy mode_reference_index_state and personal-file fields
+// remain intact for compatibility, while the UI consumes one status contract.
+if (version < 36) {
+console.log('[DatabaseManager] Applying migration v35 → v36: canonical RAG index status');
+try {
+this.db.exec(`
+CREATE TABLE IF NOT EXISTS rag_index_status (
+source_type TEXT NOT NULL,
+document_id TEXT NOT NULL,
+status TEXT NOT NULL,
+chunk_count INTEGER NOT NULL DEFAULT 0,
+embedded_chunk_count INTEGER NOT NULL DEFAULT 0,
+extracted_page_count INTEGER,
+total_page_count INTEGER,
+error_code TEXT,
+error_message TEXT,
+updated_at INTEGER NOT NULL,
+PRIMARY KEY (source_type, document_id)
+);
+CREATE INDEX IF NOT EXISTS idx_rag_index_status_updated ON rag_index_status(updated_at);
+`);
+this.db.pragma('user_version = 36');
+} catch (e) {
+console.error('[DatabaseManager] v36 canonical RAG index status migration failed; leaving schema version at 35 for retry:', e);
+return;
+}
+}
+
 console.log('[DatabaseManager] Migrations completed.');
 }
 // ============================================
@@ -2427,6 +2456,7 @@ public deleteReferenceFile(id: string): void {
 if (!this.db) return;
 try {
 this.db.prepare('DELETE FROM mode_reference_files WHERE id = ?').run(id);
+this.db.prepare("DELETE FROM rag_index_status WHERE source_type = 'mode' AND document_id = ?").run(id);
 } catch (e) {
 console.error('[DatabaseManager] deleteReferenceFile failed:', e);
 }
@@ -3522,6 +3552,93 @@ usage: [] as any[]
 };
 });
 }
+// ============================================
+// Unified RAG document index status (Change 23)
+// ============================================
+public upsertRagIndexStatus(snapshot: {
+sourceType: 'mode' | 'personal'; documentId: string; status: string;
+chunkCount?: number; embeddedChunkCount?: number; extractedPageCount?: number;
+totalPageCount?: number; errorCode?: string; errorMessage?: string; updatedAt?: number;
+}): boolean {
+if (!this.db) return false;
+try {
+this.db.prepare(`
+INSERT INTO rag_index_status
+(source_type, document_id, status, chunk_count, embedded_chunk_count, extracted_page_count, total_page_count, error_code, error_message, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(source_type, document_id) DO UPDATE SET
+status=excluded.status,
+chunk_count=excluded.chunk_count,
+embedded_chunk_count=excluded.embedded_chunk_count,
+extracted_page_count=excluded.extracted_page_count,
+total_page_count=excluded.total_page_count,
+error_code=excluded.error_code,
+error_message=excluded.error_message,
+updated_at=excluded.updated_at
+`).run(
+snapshot.sourceType, snapshot.documentId, snapshot.status,
+snapshot.chunkCount ?? 0, snapshot.embeddedChunkCount ?? 0,
+snapshot.extractedPageCount ?? null, snapshot.totalPageCount ?? null,
+snapshot.errorCode ?? null, snapshot.errorMessage ?? null,
+snapshot.updatedAt ?? Date.now(),
+);
+return true;
+} catch (error) {
+console.warn('[DatabaseManager] Failed to persist RAG index status:', error instanceof Error ? error.message : String(error));
+return false;
+}
+}
+
+public deleteRagIndexStatus(sourceType: 'mode' | 'personal', documentId: string): void {
+if (!this.db) return;
+try {
+this.db.prepare('DELETE FROM rag_index_status WHERE source_type = ? AND document_id = ?').run(sourceType, documentId);
+} catch (error) {
+console.warn('[DatabaseManager] Failed to delete RAG index status:', error instanceof Error ? error.message : String(error));
+}
+}
+
+public getRagIndexStatus(sourceType: 'mode' | 'personal', documentId: string): any | null {
+if (!this.db) return null;
+try {
+const row = this.db.prepare(`
+SELECT source_type AS sourceType, document_id AS documentId, status,
+chunk_count AS chunkCount, embedded_chunk_count AS embeddedChunkCount,
+extracted_page_count AS extractedPageCount, total_page_count AS totalPageCount,
+error_code AS errorCode, error_message AS errorMessage, updated_at AS updatedAt
+FROM rag_index_status WHERE source_type = ? AND document_id = ?
+`).get(sourceType, documentId) as any;
+return row ?? null;
+} catch (error) {
+console.warn('[DatabaseManager] Failed to read RAG index status:', error instanceof Error ? error.message : String(error));
+return null;
+}
+}
+
+public listRagIndexStatuses(sourceType: 'mode' | 'personal', documentIds?: string[]): any[] {
+if (!this.db) return [];
+try {
+if (!documentIds?.length) return this.db.prepare(`
+SELECT source_type AS sourceType, document_id AS documentId, status,
+chunk_count AS chunkCount, embedded_chunk_count AS embeddedChunkCount,
+extracted_page_count AS extractedPageCount, total_page_count AS totalPageCount,
+error_code AS errorCode, error_message AS errorMessage, updated_at AS updatedAt
+FROM rag_index_status WHERE source_type = ? ORDER BY updated_at DESC
+`).all(sourceType) as any[];
+const placeholders = documentIds.map(() => '?').join(',');
+return this.db.prepare(`
+SELECT source_type AS sourceType, document_id AS documentId, status,
+chunk_count AS chunkCount, embedded_chunk_count AS embeddedChunkCount,
+extracted_page_count AS extractedPageCount, total_page_count AS totalPageCount,
+error_code AS errorCode, error_message AS errorMessage, updated_at AS updatedAt
+FROM rag_index_status WHERE source_type = ? AND document_id IN (${placeholders})
+`).all(sourceType, ...documentIds) as any[];
+} catch (error) {
+console.warn('[DatabaseManager] Failed to list RAG index statuses:', error instanceof Error ? error.message : String(error));
+return [];
+}
+}
+
 // ============================================
 // Personal Files Management
 // ============================================

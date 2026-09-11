@@ -8,7 +8,21 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { FileText, Paperclip, Trash2, RefreshCw, Database } from 'lucide-react';
 
 type PersonalFileType = 'resume' | 'job_description' | 'general';
+type RagIndexStatus = 'NOT_INDEXED' | 'QUEUED' | 'EXTRACTING' | 'CHUNKING' | 'EMBEDDING' | 'READY' | 'FAILED' | 'OCR_REQUIRED';
 type PersonalFileIndexStatus = 'indexing' | 'done' | 'lexical_only';
+
+type RagIndexStatusSnapshot = {
+    sourceType: 'personal' | 'mode';
+    documentId: string;
+    status: RagIndexStatus;
+    chunkCount: number;
+    embeddedChunkCount: number;
+    extractedPageCount?: number;
+    totalPageCount?: number;
+    errorCode?: string;
+    errorMessage?: string;
+    updatedAt: number;
+};
 
 type PersonalFile = {
     id: string;
@@ -20,6 +34,7 @@ type PersonalFile = {
     chunkCount: number;
     fileType: PersonalFileType;
     indexStatus: PersonalFileIndexStatus;
+    ragIndexStatus?: RagIndexStatus;
 };
 
 const FILE_TYPE_LABELS: Record<PersonalFileType, string> = {
@@ -32,6 +47,23 @@ const STATUS_BADGES: Record<PersonalFileIndexStatus, { label: string; color: str
     indexing: { label: 'INDEXING', color: '#eab308' },
     done: { label: 'READY', color: '#22c55e' },
     lexical_only: { label: 'NEEDS REPAIR', color: '#f97316' },
+};
+
+const RAG_STATUS_BADGES: Record<RagIndexStatus, { label: string; color: string }> = {
+    NOT_INDEXED: { label: 'NOT INDEXED', color: '#9ca3af' },
+    QUEUED: { label: 'QUEUED', color: '#eab308' },
+    EXTRACTING: { label: 'EXTRACTING', color: '#eab308' },
+    CHUNKING: { label: 'CHUNKING', color: '#eab308' },
+    EMBEDDING: { label: 'EMBEDDING', color: '#eab308' },
+    READY: { label: 'READY', color: '#22c55e' },
+    FAILED: { label: 'FAILED', color: '#ef4444' },
+    OCR_REQUIRED: { label: 'OCR REQUIRED', color: '#f97316' },
+};
+
+const legacyStatusForRag = (status: RagIndexStatus): PersonalFileIndexStatus => {
+    if (status === 'READY') return 'done';
+    if (status === 'OCR_REQUIRED') return 'lexical_only';
+    return 'indexing';
 };
 
 const normalizeSizeBytes = (value: number | string | undefined | null): number => {
@@ -62,7 +94,13 @@ export function MyFilesPanel() {
                     sizeBytes: normalizeSizeBytes(file?.sizeBytes ?? file?.size_bytes),
                     chunkCount: Number.isFinite(Number(file?.chunkCount ?? file?.chunk_count)) ? Number(file?.chunkCount ?? file?.chunk_count) : 0,
                     fileType: (file?.fileType ?? file?.file_type ?? 'general') as PersonalFileType,
-                    indexStatus: (file?.indexStatus ?? file?.index_status ?? 'done') as PersonalFileIndexStatus,
+                    // Canonical status is authoritative. A legacy 'done' value is
+                    // not sufficient evidence for vector readiness. Until the
+                    // canonical status is present, render the file as indexing.
+                    indexStatus: file?.ragIndexStatus
+                        ? legacyStatusForRag(file.ragIndexStatus as RagIndexStatus)
+                        : 'indexing',
+                    ragIndexStatus: file?.ragIndexStatus as RagIndexStatus | undefined,
                 })));
             } else setError(result?.error ?? 'Could not load My Files.');
         } catch (e: any) {
@@ -75,6 +113,21 @@ export function MyFilesPanel() {
     useEffect(() => {
         void refresh();
     }, [refresh]);
+
+    useEffect(() => {
+        const unsubscribe = window.electronAPI?.onRagIndexStatus?.((snapshot: RagIndexStatusSnapshot) => {
+            if (snapshot?.sourceType !== 'personal' || !snapshot.documentId) return;
+            setFiles((prev) => prev.map((file) => file.id === snapshot.documentId
+                ? {
+                    ...file,
+                    ragIndexStatus: snapshot.status,
+                    indexStatus: legacyStatusForRag(snapshot.status),
+                    chunkCount: snapshot.chunkCount ?? file.chunkCount,
+                }
+                : file));
+        });
+        return () => { unsubscribe?.(); };
+    }, []);
 
     const addFile = async () => {
         setBusy(true);
@@ -184,7 +237,9 @@ export function MyFilesPanel() {
 
             <div style={{ marginTop: 16, display: 'grid', gap: 7 }}>
                 {files.map(file => {
-                    const badge = STATUS_BADGES[file.indexStatus] ?? STATUS_BADGES.done;
+                    const badge = file.ragIndexStatus
+                        ? RAG_STATUS_BADGES[file.ragIndexStatus]
+                        : STATUS_BADGES[file.indexStatus] ?? STATUS_BADGES.indexing;
                     return (
                     <div
                         key={file.id}
@@ -203,6 +258,9 @@ export function MyFilesPanel() {
                             </div>
                             <div style={{ fontSize: 10, opacity: 0.5, marginTop: 2 }}>
                                 {formatBytes(file.sizeBytes)} · {file.chunkCount} indexed chunks
+                                {file.ragIndexStatus && file.ragIndexStatus !== 'NOT_INDEXED' && file.ragIndexStatus !== 'FAILED' && (
+                                    <> · {file.ragIndexStatus === 'READY' ? file.chunkCount : '…'} embedded</>
+                                )}
                             </div>
                         </div>
                         <select

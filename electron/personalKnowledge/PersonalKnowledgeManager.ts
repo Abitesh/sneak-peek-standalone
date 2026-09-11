@@ -18,6 +18,7 @@ import { buildDocumentChunks, type DocumentMapChunk } from '../services/modes/Do
 import type { EmbeddingPipeline } from '../rag/EmbeddingPipeline';
 import type { RAGManager } from '../rag/RAGManager';
 import { VectorStore } from '../rag/VectorStore';
+import { invalidateIndexAttempt } from '../rag/IndexAttemptRegistry';
 export type PersonalFileType = 'resume' | 'job_description' | 'general';
 const PERSONAL_FILE_TYPES: ReadonlySet<string> = new Set(['resume', 'job_description', 'general']);
 export interface PersonalFileRecord {
@@ -43,6 +44,8 @@ extractedPageCount?: number;
 * lexical index while the background embedding pass is running.
 */
 indexStatus: 'indexing' | 'done' | 'lexical_only';
+/** Canonical Change 23 status. Legacy indexStatus remains for renderer/back-compat. */
+ragIndexStatus?: import('../rag/RAGManager').RagIndexStatus;
 }
 export interface PersonalFileSearchResult {
 fileId: string;
@@ -428,14 +431,30 @@ const existing = this.db.prepare(
 if (existing?.id) {
 return this.getFile(existing.id)!;
 }
-const extracted = await extractSafeDocumentText(resolved);
+const id = makeId('pfile', `${contentHash}:${resolved}`);
+this.ragManager?.setIndexStatus('personal', id, 'QUEUED');
+this.ragManager?.setIndexStatus('personal', id, 'EXTRACTING');
+let extracted: Awaited<ReturnType<typeof extractSafeDocumentText>>;
+try {
+extracted = await extractSafeDocumentText(resolved);
+} catch (error) {
+this.ragManager?.setIndexStatus('personal', id, 'FAILED', { errorCode: 'EXTRACTION_FAILED', errorMessage: error instanceof Error ? error.message : String(error) });
+try { DatabaseManager.getInstance().deleteRagIndexStatus('personal', id); } catch { /* best effort */ }
+throw error;
+}
 let text = normalizeWhitespace(extracted.content);
-if (!text) throw new Error('No readable text was found in this file.');
+if (!text) {
+this.ragManager?.setIndexStatus('personal', id, 'FAILED', {
+errorCode: 'EMPTY_CONTENT',
+errorMessage: 'No readable text was found in this file.',
+});
+try { DatabaseManager.getInstance().deleteRagIndexStatus('personal', id); } catch { /* best effort */ }
+throw new Error('No readable text was found in this file.');
+}
 if (text.length > MAX_EXTRACTED_CHARS) {
 text = text.slice(0, MAX_EXTRACTED_CHARS);
 }
 const now = new Date().toISOString();
-const id = makeId('pfile', `${contentHash}:${resolved}`);
 const pageCount = Number((extracted as any).pageCount) || null;
 const extractedPageCount = Number((extracted as any).extractedPageCount) || pageCount || null;
 const mimeType = this.guessMimeType(ext);
@@ -488,6 +507,7 @@ operation: 'insert file and chunks',
 error: error instanceof Error ? error.message : String(error),
 });
 try { await fs.promises.unlink(storedPath); } catch { /* preserve original error */ }
+try { DatabaseManager.getInstance().deleteRagIndexStatus('personal', id); } catch { /* best effort */ }
 // If two concurrent uploads raced on the same content hash, return
 // the winner rather than surfacing a UNIQUE error to the UI.
 const winner = this.db.prepare(
@@ -506,11 +526,15 @@ fileName: path.basename(resolved),
 pageCount: pageCount ?? undefined,
 extractedPageCount: extractedPageCount ?? undefined,
 metadata: { fileType: safeFileType, mimeType },
+          onStatus: (snapshot) => {
+            // Canonical status is persisted by RAGManager. mapFile reads it on refresh.
+          },
 });
 } catch (error) {
 console.warn('[PersonalKnowledgeManager] Unified RAG indexing failed; removing incomplete file record:', error instanceof Error ? error.message : String(error));
 try { this.db.prepare('DELETE FROM personal_file_chunks WHERE file_id = ?').run(id); } catch { /* best effort */ }
 try { this.db.prepare('DELETE FROM personal_files WHERE id = ?').run(id); } catch { /* best effort */ }
+try { DatabaseManager.getInstance().deleteRagIndexStatus('personal', id); } catch { /* best effort */ }
 try { await fs.promises.unlink(storedPath); } catch { /* best effort */ }
 throw error;
 }
@@ -603,10 +627,13 @@ const rows = this.db.prepare(`SELECT id, file_type FROM personal_files`).all() a
 return new Map(rows.map((r) => [r.id, (PERSONAL_FILE_TYPES.has(r.file_type) ? r.file_type : 'general') as PersonalFileType]));
 }
 deleteFile(id: string): boolean {
+// Invalidate any async embedding run before removing its storage boundary.
+invalidateIndexAttempt('personal', id);
 if (this.vectorStore) this.vectorStore.deletePersonalEmbeddingsForFile(id);
 const result = this.db.transaction(() => {
 // FTS trigger needs the chunk rows to exist while it fires.
 this.db.prepare(`DELETE FROM personal_file_chunks WHERE file_id = ?`).run(id);
+this.db.prepare(`DELETE FROM rag_index_status WHERE source_type = 'personal' AND document_id = ?`).run(id);
 return this.db.prepare(`DELETE FROM personal_files WHERE id = ?`).run(id);
 })();
 return result.changes > 0;
@@ -1032,7 +1059,17 @@ blocks.join('\n\n---\n\n'),
 '</personal_file_knowledge>',
 ].join('\n');
 }
-private mapFile = (row: any, garbled?: Set<string>): PersonalFileRecord => ({
+private mapFile = (row: any, garbled?: Set<string>): PersonalFileRecord => {
+let ragIndexStatus: import('../rag/RAGManager').RagIndexStatus | undefined;
+try {
+ragIndexStatus = DatabaseManager.getInstance().getRagIndexStatus('personal', row.id)?.status as import('../rag/RAGManager').RagIndexStatus | undefined;
+} catch {
+ragIndexStatus = undefined;
+}
+const legacyIndexStatus: PersonalFileRecord['indexStatus'] = ragIndexStatus
+? (ragIndexStatus === 'READY' ? 'done' : 'indexing')
+: (Number(row.chunk_count) > 0 ? (garbled?.has(row.id) ? 'lexical_only' : 'done') : 'indexing');
+return {
 id: row.id,
 fileName: row.file_name,
 filePath: row.file_path,
@@ -1044,10 +1081,10 @@ chunkCount: Number(row.chunk_count) || 0,
 fileType: (PERSONAL_FILE_TYPES.has(row.file_type) ? row.file_type : 'general') as PersonalFileType,
 pageCount: Number(row.page_count) || undefined,
 extractedPageCount: Number(row.extracted_page_count) || undefined,
-indexStatus: Number(row.chunk_count) > 0
-? (garbled?.has(row.id) ? 'lexical_only' : 'done')
-: 'indexing',
-});
+indexStatus: legacyIndexStatus,
+ragIndexStatus,
+};
+};
 private guessMimeType(ext: string): string {
 const map: Record<string, string> = {
 '.pdf': 'application/pdf',

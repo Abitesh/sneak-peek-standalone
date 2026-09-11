@@ -16,6 +16,7 @@
 
 import * as crypto from 'crypto';
 import { ModesManager } from './ModesManager';
+import type { ModeReferenceFile } from './ModesManager';
 import type { RAGManager } from '../rag/RAGManager';
 import {
   extractSafeDocumentText,
@@ -50,7 +51,7 @@ export interface ModeReferenceFileIngestResult {
 export interface ModeReferenceFileIngestOptions {
   modeId: string;
   filePath: string;
-  onIndexStatus?: (status: 'indexing' | 'done', fileId: string) => void;
+  onIndexStatus?: (status: import('../rag/RAGManager').RagIndexStatus, fileId: string, snapshot?: any) => void;
   ragManager?: RAGManager;
 }
 
@@ -62,18 +63,49 @@ export interface ModeReferenceFileIngestOptions {
 export const ingestModeReferenceFile = async (
   options: ModeReferenceFileIngestOptions,
 ): Promise<ModeReferenceFileIngestResult> => {
-  const extracted = await extractSafeDocumentText(options.filePath);
+  const fileId = `ref_${crypto.randomUUID()}`;
+  // The file row does not exist until extraction succeeds, so do not persist
+  // canonical status rows for this pre-persistence phase. Emit transient
+  // lifecycle notifications to the current renderer instead; once the file is
+  // durable, RAGManager owns the persisted canonical lifecycle.
+  const emitTransient = (status: import('../rag/RAGManager').RagIndexStatus) => {
+    options.onIndexStatus?.(status, fileId, {
+      sourceType: 'mode', documentId: fileId, status, chunkCount: 0,
+      embeddedChunkCount: 0, updatedAt: Date.now(),
+    });
+  };
+  emitTransient('QUEUED');
+  emitTransient('EXTRACTING');
+  let extracted: Awaited<ReturnType<typeof extractSafeDocumentText>>;
+  try {
+    extracted = await extractSafeDocumentText(options.filePath);
+  } catch (error) {
+    // The document was never persisted, so FAILED is also transient. Never
+    // create a durable canonical row for a nonexistent mode file.
+    emitTransient('FAILED');
+    throw error;
+  }
   const contentSha256 = crypto.createHash('sha256').update(extracted.content).digest('hex');
   const manager = ModesManager.getInstance();
-  const file = manager.addReferenceFile({
-    modeId: options.modeId,
-    fileName: extracted.fileName,
-    content: extracted.content,
-    pageCount: extracted.pageCount,
-    extractedPageCount: extracted.extractedPageCount,
-  });
+  let file: ModeReferenceFile;
+  try {
+    file = manager.addReferenceFile({
+      id: fileId,
+      modeId: options.modeId,
+      fileName: extracted.fileName,
+      content: extracted.content,
+      pageCount: extracted.pageCount,
+      extractedPageCount: extracted.extractedPageCount,
+    });
+  } catch (error) {
+    throw error;
+  }
 
-  options.onIndexStatus?.('indexing', file.id);
+  // The file now exists durably; canonical persistence starts only after this
+  // point, so every persisted status is tied to a real document row.
+  options.ragManager?.setIndexStatus('mode', fileId, 'QUEUED', {}, (snapshot) => {
+    options.onIndexStatus?.(snapshot.status, fileId, snapshot);
+  });
   void (async () => {
     try {
       if (options.ragManager?.indexDocument) {
@@ -85,11 +117,18 @@ export const ingestModeReferenceFile = async (
           pageCount: file.pageCount,
           extractedPageCount: file.extractedPageCount,
           metadata: { modeId: file.modeId },
+          onStatus: (snapshot) => options.onIndexStatus?.(snapshot.status, file.id, snapshot),
         });
       } else {
         // Compatibility path for direct/unit callers that do not have the
         // application-owned RAGManager. Production IPC always supplies it.
         await manager.indexReferenceFile(file);
+        const legacy = manager.getReferenceFileIndexStatus(file.id);
+        const canonical = legacy.status === 'ready' ? 'READY'
+          : legacy.status === 'ocr_required' ? 'OCR_REQUIRED'
+          : legacy.status === 'failed' || legacy.status === 'lexical_only' ? 'FAILED'
+          : 'EMBEDDING';
+        options.onIndexStatus?.(canonical as import('../rag/RAGManager').RagIndexStatus, file.id);
       }
       const finalStatus = manager.getReferenceFileIndexStatus(file.id);
       if (finalStatus?.status === 'failed' || finalStatus?.status === 'lexical_only') {
@@ -99,7 +138,8 @@ export const ingestModeReferenceFile = async (
     } catch (error: any) {
       console.warn('[ModeReferenceFileIngestion] index failed (lexical fallback remains):', error?.message);
     } finally {
-      options.onIndexStatus?.('done', file.id);
+      // Terminal status is already emitted by RAGManager. Compatibility callers
+      // that do not provide a RAGManager still receive no synthetic READY.
     }
   })();
 

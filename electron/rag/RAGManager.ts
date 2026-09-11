@@ -29,6 +29,7 @@ import { KnowledgeRagAdapter } from './adapters/KnowledgeRagAdapter';
 import { extractSafeDocumentText } from '../services/SafeDocumentTextExtractor';
 import { buildDocumentChunks } from '../services/modes/DocumentMap';
 import { isRagEnabled, isRagHybridEnabled, isRagConversationAwareEnabled } from '../intelligence/intelligenceFlags';
+import { beginIndexAttempt, isCurrentIndexAttempt, invalidateIndexAttempt, withCurrentIndexAttempt } from './IndexAttemptRegistry';
 interface ModesManagerLike {
 getActiveModeInfo(): { id?: string } | null;
 getActiveMode(): any | null;
@@ -104,6 +105,30 @@ source: RagDocument;
 export type UnifiedRAGResult = RagSearchResult;
 export type RagIndexSourceType = 'mode' | 'personal';
 
+/** Canonical persisted document-index lifecycle exposed to the renderer. */
+export type RagIndexStatus =
+  | 'NOT_INDEXED'
+  | 'QUEUED'
+  | 'EXTRACTING'
+  | 'CHUNKING'
+  | 'EMBEDDING'
+  | 'READY'
+  | 'FAILED'
+  | 'OCR_REQUIRED';
+
+export interface RagIndexStatusSnapshot {
+  sourceType: RagIndexSourceType;
+  documentId: string;
+  status: RagIndexStatus;
+  chunkCount: number;
+  embeddedChunkCount: number;
+  extractedPageCount?: number;
+  totalPageCount?: number;
+  errorCode?: string;
+  errorMessage?: string;
+  updatedAt: number;
+}
+
 export interface RagIndexDocumentInput {
   sourceType: RagIndexSourceType;
   documentId: string;
@@ -113,6 +138,8 @@ export interface RagIndexDocumentInput {
   pageCount?: number;
   extractedPageCount?: number;
   metadata?: Record<string, unknown>;
+  /** Optional lifecycle observer. Used by IPC to stream status to the renderer. */
+  onStatus?: (snapshot: RagIndexStatusSnapshot) => void;
 }
 
 export interface RagIndexDocumentResult {
@@ -121,7 +148,6 @@ export interface RagIndexDocumentResult {
   chunkCount: number;
   embeddedChunkCount: number;
   status: 'ready' | 'lexical_only' | 'ocr_required' | 'failed' | 'empty';
-  embeddingSpace?: string;
 }
 
 export interface RAGSearchOptions {
@@ -243,6 +269,50 @@ export interface RAGManagerRetrievalPortOptions {
 }
 
 export class RAGManager {
+  private readonly indexStatusListeners = new Set<(snapshot: RagIndexStatusSnapshot) => void>();
+
+  /** A newer indexing attempt or deletion owns the document; stale work must stop. */
+  public invalidateIndexAttempt(sourceType: RagIndexSourceType, documentId: string): void {
+    invalidateIndexAttempt(sourceType, documentId);
+  }
+
+  public onIndexStatusChange(listener: (snapshot: RagIndexStatusSnapshot) => void): () => void {
+    this.indexStatusListeners.add(listener);
+    return () => this.indexStatusListeners.delete(listener);
+  }
+
+  public getIndexStatus(sourceType: RagIndexSourceType, documentId: string): RagIndexStatusSnapshot {
+    return DatabaseManager.getInstance().getRagIndexStatus(sourceType, documentId) ?? {
+      sourceType, documentId, status: 'NOT_INDEXED', chunkCount: 0, embeddedChunkCount: 0, updatedAt: Date.now(),
+    };
+  }
+
+  public setIndexStatus(
+    sourceType: RagIndexSourceType,
+    documentId: string,
+    status: RagIndexStatus,
+    details: Partial<Omit<RagIndexStatusSnapshot, 'sourceType' | 'documentId' | 'status'>> = {},
+    onStatus?: (snapshot: RagIndexStatusSnapshot) => void,
+  ): RagIndexStatusSnapshot {
+    const snapshot: RagIndexStatusSnapshot = {
+      sourceType, documentId, status, chunkCount: details.chunkCount ?? 0,
+      embeddedChunkCount: details.embeddedChunkCount ?? 0,
+      ...(details.extractedPageCount !== undefined ? { extractedPageCount: details.extractedPageCount } : {}),
+      ...(details.totalPageCount !== undefined ? { totalPageCount: details.totalPageCount } : {}),
+      ...(details.errorCode ? { errorCode: details.errorCode } : {}),
+      ...(details.errorMessage ? { errorMessage: details.errorMessage } : {}),
+      updatedAt: Date.now(),
+    };
+    const persisted = DatabaseManager.getInstance().upsertRagIndexStatus(snapshot);
+    if (!persisted) {
+      console.warn('[RAGManager] Index status was not persisted; suppressing status event:', { sourceType, documentId, status });
+      return snapshot;
+    }
+    try { onStatus?.(snapshot); } catch { /* observer is non-fatal */ }
+    for (const listener of this.indexStatusListeners) { try { listener(snapshot); } catch { /* observer is non-fatal */ } }
+    return snapshot;
+  }
+
 private db: Database.Database;
 private vectorStore: VectorStore;
 private embeddingPipeline: EmbeddingPipeline;
@@ -383,12 +453,24 @@ async indexDocument(input: RagIndexDocumentInput): Promise<RagIndexDocumentResul
   let extractedPageCount = input.extractedPageCount;
   const emptyContentHash = crypto.createHash('sha256').update('').digest('hex');
   const dbManager = DatabaseManager.getInstance();
+  const indexAttempt = beginIndexAttempt(input.sourceType, documentId);
+  const writeStatus = (next: RagIndexStatus, details: Partial<Omit<RagIndexStatusSnapshot, 'sourceType' | 'documentId' | 'status'>> = {}) => {
+    if (!isCurrentIndexAttempt(input.sourceType, documentId, indexAttempt)) return null;
+    return this.setIndexStatus(input.sourceType, documentId, next, details, input.onStatus);
+  };
+
+  // The central coordinator owns the canonical lifecycle. Upload callers may
+  // also emit transient/preliminary events, but persisted status always starts
+  // here so direct indexDocument({content}) callers cannot skip QUEUED/EXTRACTING.
+  writeStatus('QUEUED', { chunkCount: 0, embeddedChunkCount: 0, totalPageCount: pageCount, extractedPageCount });
+  writeStatus('EXTRACTING', { chunkCount: 0, embeddedChunkCount: 0, totalPageCount: pageCount, extractedPageCount });
 
   // Replacement safety: if extraction fails, the previous indexed document must
   // not remain searchable under the same document id. Clear the old index first
   // and record a terminal failed state for mode documents, then rethrow so the
   // caller still observes the original extraction failure.
   if (!content.trim() && input.filePath) {
+    writeStatus('EXTRACTING', { totalPageCount: pageCount, extractedPageCount });
     try {
       const extracted = await extractSafeDocumentText(input.filePath);
       content = extracted.content;
@@ -396,8 +478,11 @@ async indexDocument(input: RagIndexDocumentInput): Promise<RagIndexDocumentResul
       pageCount = pageCount ?? extracted.pageCount;
       extractedPageCount = extractedPageCount ?? extracted.extractedPageCount;
     } catch (error) {
-      this.clearDocumentIndexForReplacement(documentId, input.sourceType);
-      if (input.sourceType === 'mode') {
+      if (isCurrentIndexAttempt(input.sourceType, documentId, indexAttempt)) {
+        this.clearDocumentIndexForReplacement(documentId, input.sourceType);
+        writeStatus('FAILED', { errorCode: 'EXTRACTION_FAILED', errorMessage: error instanceof Error ? error.message : String(error) });
+      }
+      if (isCurrentIndexAttempt(input.sourceType, documentId, indexAttempt) && input.sourceType === 'mode') {
         dbManager.updateModeReferenceIndexState(documentId, emptyContentHash, 0, 'failed', null);
       }
       throw error;
@@ -406,20 +491,30 @@ async indexDocument(input: RagIndexDocumentInput): Promise<RagIndexDocumentResul
 
   content = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
   if (!content) {
+    if (!isCurrentIndexAttempt(input.sourceType, documentId, indexAttempt)) {
+      return { documentId, sourceType: input.sourceType, chunkCount: 0, embeddedChunkCount: 0, status: 'failed' };
+    }
     this.clearDocumentIndexForReplacement(documentId, input.sourceType);
+    writeStatus('FAILED', { errorCode: 'EMPTY_CONTENT', errorMessage: 'No readable text was found in this document.' });
     if (input.sourceType === 'mode') {
       dbManager.updateModeReferenceIndexState(documentId, emptyContentHash, 0, 'failed', null);
     }
     return { documentId, sourceType: input.sourceType, chunkCount: 0, embeddedChunkCount: 0, status: 'empty' };
   }
 
+  if (!isCurrentIndexAttempt(input.sourceType, documentId, indexAttempt)) return { documentId, sourceType: input.sourceType, chunkCount: 0, embeddedChunkCount: 0, status: 'failed' };
+  writeStatus('CHUNKING', { totalPageCount: pageCount, extractedPageCount });
   const chunks = buildDocumentChunks(content, {
     chunkWords: 140,
     chunkOverlap: 30,
     tableRowsPerChunk: 10,
   });
   if (chunks.length === 0) {
+    if (!isCurrentIndexAttempt(input.sourceType, documentId, indexAttempt)) {
+      return { documentId, sourceType: input.sourceType, chunkCount: 0, embeddedChunkCount: 0, status: 'failed' };
+    }
     this.clearDocumentIndexForReplacement(documentId, input.sourceType);
+    writeStatus('FAILED', { errorCode: 'EMPTY_CHUNKS', errorMessage: 'Document produced no searchable chunks.' });
     if (input.sourceType === 'mode') {
       dbManager.updateModeReferenceIndexState(documentId, emptyContentHash, 0, 'failed', null);
     }
@@ -452,6 +547,7 @@ async indexDocument(input: RagIndexDocumentInput): Promise<RagIndexDocumentResul
   }
 
   if (placeholderOnly) {
+    writeStatus('OCR_REQUIRED', { chunkCount: chunks.length, embeddedChunkCount: 0, totalPageCount: pageCount, extractedPageCount });
     if (input.sourceType === 'mode') {
       dbManager.updateModeReferenceIndexState(documentId, contentHash, chunks.length, 'ocr_required', null);
     }
@@ -461,6 +557,7 @@ async indexDocument(input: RagIndexDocumentInput): Promise<RagIndexDocumentResul
   let embeddedChunkCount = 0;
   let embeddingSpace: string | undefined;
   let embeddingRunComplete = false;
+  writeStatus('EMBEDDING', { chunkCount: chunks.length, embeddedChunkCount: 0, totalPageCount: pageCount, extractedPageCount });
   try {
     const embedded = await this.embeddingPipeline.embedDocumentChunks(
       chunks.map((chunk) => chunk.text),
@@ -471,10 +568,15 @@ async indexDocument(input: RagIndexDocumentInput): Promise<RagIndexDocumentResul
       const vector = embedded.vectors[i];
       if (!vector) continue;
       const chunkId = persistedChunkIds[i];
-      if (input.sourceType === 'mode') {
-        if (typeof chunkId === 'number') this.vectorStore.storeModeReferenceEmbedding(chunkId, vector.embedding, vector.space, vector.provider, vector.dimensions);
-      } else if (typeof chunkId === 'string') {
-        this.vectorStore.storePersonalEmbedding(chunkId, vector.embedding, vector.space, vector.provider, vector.dimensions);
+      const wrote = withCurrentIndexAttempt(input.sourceType, documentId, indexAttempt, () => {
+        if (input.sourceType === 'mode') {
+          if (typeof chunkId === 'number') this.vectorStore.storeModeReferenceEmbedding(chunkId, vector.embedding, vector.space, vector.provider, vector.dimensions);
+        } else if (typeof chunkId === 'string') {
+          this.vectorStore.storePersonalEmbedding(chunkId, vector.embedding, vector.space, vector.provider, vector.dimensions);
+        }
+      });
+      if (!wrote) {
+        return { documentId, sourceType: input.sourceType, chunkCount: chunks.length, embeddedChunkCount, status: 'failed' };
       }
       embeddedChunkCount++;
       embeddingSpace = embeddingSpace ?? vector.space;
@@ -489,17 +591,28 @@ async indexDocument(input: RagIndexDocumentInput): Promise<RagIndexDocumentResul
   // Keep the lexical chunks/FTS rows so retrieval can fall back and a later
   // retry can rebuild the complete vector index.
   let status: RagIndexDocumentResult['status'];
+  if (!isCurrentIndexAttempt(input.sourceType, documentId, indexAttempt)) return { documentId, sourceType: input.sourceType, chunkCount: chunks.length, embeddedChunkCount, status: 'failed' };
   const embeddingComplete = embeddingRunComplete && embeddedChunkCount === chunks.length && embeddingSpace !== undefined;
   if (embeddingComplete) {
     status = 'ready';
+    this.setIndexStatus(input.sourceType, documentId, 'READY', {
+      chunkCount: chunks.length, embeddedChunkCount, totalPageCount: pageCount, extractedPageCount,
+    }, input.onStatus);
   } else {
     if (input.sourceType === 'mode') {
       this.vectorStore.deleteModeReferenceEmbeddingsForFile(documentId);
     } else {
       this.vectorStore.deletePersonalEmbeddingsForFile(documentId);
     }
-    status = embeddedChunkCount > 0 ? 'failed' : 'lexical_only';
+    status = 'failed';
     embeddingSpace = undefined;
+    this.setIndexStatus(input.sourceType, documentId, 'FAILED', {
+      chunkCount: chunks.length, embeddedChunkCount, totalPageCount: pageCount, extractedPageCount,
+      errorCode: 'EMBEDDING_INCOMPLETE',
+      errorMessage: embeddedChunkCount > 0
+        ? `Only ${embeddedChunkCount} of ${chunks.length} chunks were embedded.`
+        : 'No chunks were embedded.',
+    }, input.onStatus);
   }
 
   if (input.sourceType === 'mode') {
