@@ -6613,16 +6613,9 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
         setAudioSessionState('processing');
 
         try {
-          if (currentAttachments.length === 0) {
-            // Only try meeting RAG if a meeting is currently active
-            const isMeetingActive = await window.electronAPI.getMeetingActive();
-            if (isMeetingActive) {
-              const ragResult = await window.electronAPI.ragQueryLive?.(question);
-              if (ragResult?.success) {
-                return;
-              }
-            }
-          }
+          // Change 17: normal/manual chat has ONE retrieval transport. Meeting
+          // evidence is selected inside gemini-chat-stream -> Context Intelligence
+          // -> RAGManager; do not preflight the separate rag:query-live IPC path.
 
           // R-17: claim the desktop surface BEFORE the round-trip. The stream's
           // id does not exist until main allocates it, so without a claim a
@@ -6794,17 +6787,9 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
     pinAnswerPanel();
 
     try {
-      // JIT RAG pre-flight: only try indexed meeting context if a meeting is active
-      if (currentAttachments.length === 0) {
-        const isMeetingActive = await window.electronAPI.getMeetingActive();
-        if (isMeetingActive) {
-          const ragResult = await window.electronAPI.ragQueryLive?.(userText || '');
-          if (ragResult?.success) {
-            // JIT RAG handled it — response streamed via rag:stream-chunk events
-            return;
-          }
-        }
-      }
+      // Change 17: normal/manual chat has ONE retrieval transport. Meeting
+      // evidence is selected inside gemini-chat-stream -> Context Intelligence
+      // -> RAGManager; do not preflight the separate rag:query-live IPC path.
 
       // Pass imagePath if attached, AND conversation context
       // R-17: claim the desktop surface before the round-trip (see the note at

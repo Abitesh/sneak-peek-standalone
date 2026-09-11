@@ -16,6 +16,10 @@ import { ConversationMemoryService } from '../intelligence/ConversationMemorySer
 import type { RAGConversationTurn } from './RAGRetriever';
 import { evaluateRagRelevanceGate } from './RagRelevanceGate';
 import type { EvidenceItem } from '../intelligence/context-os/evidencePack';
+import type { EvidenceScope, SourceType } from '../context-intelligence/contracts/types';
+import type { RetrievalPort } from '../context-intelligence/orchestration/orchestrator';
+import type { LegacyChunk } from '../context-intelligence/retrieval/legacy-adapter';
+import { createLegacyRetrievalPort } from '../context-intelligence/retrieval/legacy-retrieval-port';
 interface ModesManagerLike {
 getActiveModeInfo(): { id?: string } | null;
 getActiveMode(): any | null;
@@ -35,6 +39,7 @@ forceDocumentGrounding?: boolean;
 }
 interface PersonalKnowledgeLike {
 searchRelevantAsync(query: string, limit?: number): Promise<any[]>;
+listFiles?(): any[];
 searchRelevant?(query: string, limit?: number): any[];
 search?(query: string, limit?: number): any[];
 setEmbeddingServices?(embeddingPipeline: EmbeddingPipeline, vectorStore: VectorStore): void;
@@ -190,6 +195,21 @@ explicitKeyManagement?: boolean;
 * 2. When meeting ends: processMeeting() -> chunks + queue embeddings
 * 3. When user queries: query() -> retrieve + stream response
 */
+export interface RAGManagerRetrievalPortOptions {
+  userId: string;
+  scope?: EvidenceScope;
+  modeId?: string;
+  /** Source typing for mode-attached documents, supplied by the V3 caller. */
+  modeSourceTypes?: ReadonlyMap<string, SourceType>;
+  selectedSources?: readonly RagSourceSelection[];
+  topK?: number;
+  candidatePoolSize?: number;
+  rerankCandidatePoolSize?: number;
+  tokenBudget?: number;
+  allowRerank?: boolean;
+  forceDocumentGrounding?: boolean;
+}
+
 export class RAGManager {
 private db: Database.Database;
 private vectorStore: VectorStore;
@@ -350,6 +370,126 @@ const usable = new Set(decision.usableEvidenceIds);
 return relevantResults.filter((result, index) => usable.has(`rag-manager:${String(result.chunk.id ?? index)}`));
 }
 
+/**
+ * Build the Context Intelligence retrieval port used by normal/manual chat.
+ *
+ * Change 17: manual chat must not construct separate mode/personal/meeting
+ * retrieval ports beside RAGManager. RAGManager owns candidate generation,
+ * source-family retrieval, common reranking and the canonical relevance gate.
+ * The existing legacy-retrieval-port remains the single V3 authorization and
+ * scope/version filter after those candidates are produced.
+ *
+ * Profile Intelligence is intentionally not folded in here. It is a distinct
+ * authoritative source family and continues through its existing profile port
+ * until the source-adapter consolidation in Change 18/20.
+ */
+public createRAGRetrievalPort(
+  options: RAGManagerRetrievalPortOptions,
+): RetrievalPort {
+  const sourceTypes = new Map<string, SourceType>();
+  const activeVersions = new Map<string, string>();
+  const chunkVersions = new Map<string, string>();
+  const sourceScopes = new Map<string, EvidenceScope>();
+
+  // Declare stable document sources before retrieval where possible. Meeting
+  // sources are discovered from returned chunks because the meeting store has
+  // no file registry; its source id is the meeting id itself.
+  try {
+    const { modesManager, personalKnowledge } = this.getSourceManagers();
+    const modeId = options.modeId ?? modesManager?.getActiveModeInfo?.()?.id;
+    if (modeId && modesManager) {
+      for (const file of modesManager.getReferenceFiles(modeId) ?? []) {
+        const id = String(file?.id ?? '');
+        if (!id) continue;
+        sourceTypes.set(id, options.modeSourceTypes?.get(id) ?? 'REFERENCE_FILE');
+        activeVersions.set(id, 'legacy');
+        chunkVersions.set(id, 'legacy');
+        sourceScopes.set(id, { userId: options.userId });
+      }
+    }
+    for (const file of personalKnowledge?.listFiles?.() ?? []) {
+      const id = String(file?.id ?? '');
+      if (!id) continue;
+      sourceTypes.set(id, 'REFERENCE_FILE');
+      activeVersions.set(id, 'current');
+      chunkVersions.set(id, 'current');
+      sourceScopes.set(id, {
+        userId: options.userId,
+        ...(options.scope?.sessionId ? { sessionId: options.scope.sessionId } : {}),
+      });
+    }
+  } catch { /* source registry is completed lazily below */ }
+
+  return createLegacyRetrievalPort({
+    registry: { sourceTypes, activeVersions, chunkVersions, sourceScopes },
+    retrieve: async (query: string, opts: { topK: number }): Promise<LegacyChunk[]> => {
+      const response = await this.search(query, {
+        selectedSources: options.selectedSources,
+        modeId: options.modeId,
+        meetingId: options.scope?.meetingId,
+        sessionId: options.scope?.sessionId,
+        topK: Math.max(1, opts.topK),
+        candidatePoolSize: options.candidatePoolSize,
+        rerankCandidatePoolSize: options.rerankCandidatePoolSize,
+        tokenBudget: options.tokenBudget,
+        allowRerank: options.allowRerank !== false,
+        forceDocumentGrounding: options.forceDocumentGrounding,
+      });
+
+      for (const result of response.results) {
+        const sourceId = String(result.source.id);
+        let sourceType: SourceType;
+        if (result.source.sourceType === 'meeting') {
+          sourceType = 'MEETING_TRANSCRIPT';
+          activeVersions.set(sourceId, 'live');
+          chunkVersions.set(sourceId, 'live');
+          sourceScopes.set(sourceId, {
+            userId: options.userId,
+            meetingId: options.scope?.meetingId ?? sourceId,
+          });
+        } else if (result.source.sourceType === 'personal') {
+          sourceType = 'REFERENCE_FILE';
+          activeVersions.set(sourceId, activeVersions.get(sourceId) ?? 'current');
+          chunkVersions.set(sourceId, chunkVersions.get(sourceId) ?? 'current');
+          sourceScopes.set(sourceId, sourceScopes.get(sourceId) ?? {
+            userId: options.userId,
+            ...(options.scope?.sessionId ? { sessionId: options.scope.sessionId } : {}),
+          });
+        } else {
+          sourceType = options.modeSourceTypes?.get(sourceId)
+            ?? sourceTypes.get(sourceId)
+            ?? 'REFERENCE_FILE';
+          activeVersions.set(sourceId, activeVersions.get(sourceId) ?? 'legacy');
+          chunkVersions.set(sourceId, chunkVersions.get(sourceId) ?? 'legacy');
+          sourceScopes.set(sourceId, sourceScopes.get(sourceId) ?? { userId: options.userId });
+        }
+        sourceTypes.set(sourceId, sourceType);
+      }
+
+      return response.results.map((result): LegacyChunk => ({
+        sourceId: String(result.source.id),
+        fileName: result.source.name,
+        text: result.chunk.text,
+        chunkIndex: result.chunk.chunkIndex,
+        score: result.score,
+        ftsScore: result.lexicalScore,
+        vectorScore: result.semanticScore,
+        rerankScore: result.rerankScore,
+        provenance: result.source.sourceType === 'meeting'
+          ? (process.env.NATIVELY_TEST_TRANSCRIPT_INJECTION === '1' ? 'TEST_TRANSCRIPT' : 'LIVE_STT')
+          : result.source.sourceType === 'personal' ? 'PERSONAL_FILE' : 'MODE_REFERENCE_FILE',
+        metadata: {
+          ...(result.chunk.pageStart !== undefined ? { pageStart: result.chunk.pageStart } : {}),
+          ...(result.chunk.pageEnd !== undefined ? { pageEnd: result.chunk.pageEnd } : {}),
+          ...(result.chunk.section ? { section: result.chunk.section } : {}),
+          ...(result.chunk.heading ? { heading: result.chunk.heading } : {}),
+          ...(result.chunk.metadata ?? {}),
+        },
+      }));
+    },
+  });
+}
+
 async search(query: string, options: RAGSearchOptions = {}): Promise<RAGRetrievalResponse> {
 const originalQuery = String(query ?? '').trim();
 if (!originalQuery) return { status: 'no_relevant_evidence', results: [], confidence: 0 };
@@ -382,7 +522,7 @@ const legacySourceSelection: RagSourceSelection[] | undefined = options.source
 ? ['personal-files']
 : ['meeting', 'mode-reference', 'personal-files']
 : undefined;
-const selectedSources = options.selectedSources?.length
+const selectedSources = Array.isArray(options.selectedSources)
 ? [...new Set(options.selectedSources)]
 : (legacySourceSelection ?? queryPlan.sources);
 const sourceSet = new Set<RagSourceSelection>(selectedSources);
