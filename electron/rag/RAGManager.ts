@@ -20,6 +20,9 @@ import type { EvidenceScope, SourceType } from '../context-intelligence/contract
 import type { RetrievalPort } from '../context-intelligence/orchestration/orchestrator';
 import type { LegacyChunk } from '../context-intelligence/retrieval/legacy-adapter';
 import { createLegacyRetrievalPort } from '../context-intelligence/retrieval/legacy-retrieval-port';
+import { MeetingRagAdapter } from './adapters/MeetingRagAdapter';
+import { ModeRagAdapter } from './adapters/ModeRagAdapter';
+import { PersonalRagAdapter } from './adapters/PersonalRagAdapter';
 interface ModesManagerLike {
 getActiveModeInfo(): { id?: string } | null;
 getActiveMode(): any | null;
@@ -218,11 +221,15 @@ private retriever: RAGRetriever;
 private llmHelper: LLMHelper | null = null;
 private liveIndexer: LiveRAGIndexer;
 private queryPlanner: RagQueryPlanner;
+private readonly meetingAdapter: MeetingRagAdapter;
+private readonly modeAdapter: ModeRagAdapter;
+private readonly personalAdapter: PersonalRagAdapter;
 /**
-* Change 1: source coordination lives here, while each source keeps ownership
-* of its existing retrieval implementation. The managers are resolved lazily
-* so RAGManager remains safe to construct during AppState startup and does not
-* introduce an eager circular dependency with main.ts/services.
+* Change 1/18: source coordination lives here, while each source keeps ownership
+* of its existing retrieval implementation behind a thin adapter. The application
+* sees RAGManager.search(); specialized retrievers/managers remain internal.
+* Source managers are resolved lazily so RAGManager remains safe to construct
+* during AppState startup and does not introduce eager service cycles.
 */
 private configurePersonalKnowledge(personalKnowledge?: PersonalKnowledgeLike | null): void {
 try {
@@ -273,6 +280,9 @@ this.embeddingPipeline = new EmbeddingPipeline(config.db, this.vectorStore);
 this.retriever = new RAGRetriever(this.vectorStore, this.embeddingPipeline);
 this.liveIndexer = new LiveRAGIndexer(this.vectorStore, this.embeddingPipeline);
 this.queryPlanner = new RagQueryPlanner();
+this.meetingAdapter = new MeetingRagAdapter(this.retriever, this.db);
+this.modeAdapter = new ModeRagAdapter();
+this.personalAdapter = new PersonalRagAdapter(this.db);
 this.embeddingPipeline.initialize({
 openaiKey: config.openaiKey,
 geminiKey: config.geminiKey,
@@ -539,179 +549,41 @@ const tokenBudget = Math.max(1, options.tokenBudget ?? 1800);
 const results: RagSearchResult[] = [];
 if (sourceSet.has('meeting')) {
 try {
-const context = await this.retriever.retrieve(normalizedQuery, {
-...(options.meetingId ? { meetingId: options.meetingId } : {}),
-...(conversation ? { conversation } : {}),
-// Change 7: preserve the full hybrid candidate pool for the
-// common BGE reranker. RAGManager owns the final top-K boundary
-// on this unified path, so the source retriever must not narrow
-// the meeting results first.
-topK: candidatePoolSize,
-candidatePoolSize,
-maxTokens: tokenBudget,
-deferFinalSelection: true,
-allowRerank: false,
-});
-const documentCache = new Map<string, RagDocument>();
-for (const rawChunk of context.chunks ?? []) {
-const c = rawChunk as any;
-const documentId = String(c.meetingId ?? options.meetingId ?? '');
-const text = String(c.text ?? '');
-if (!documentId || !text.trim()) continue;
-let document = documentCache.get(documentId);
-if (!document) {
-document = this.buildMeetingDocument(documentId);
-documentCache.set(documentId, document);
-}
-const chunkId = c.id ?? c.chunkId;
-const chunkIndex = Number(c.chunkIndex);
-const score = Number(c.finalScore ?? c.similarity);
-const semanticScore = Number(c.similarity);
-results.push({
-chunk: {
-id: String(chunkId ?? `${documentId}:${Number.isFinite(chunkIndex) ? chunkIndex : results.length}`),
-documentId,
-text,
-chunkIndex: Number.isFinite(chunkIndex) ? chunkIndex : 0,
-speaker: typeof c.speaker === 'string' ? c.speaker : undefined,
-timestampStart: Number.isFinite(Number(c.startMs)) ? Number(c.startMs) : undefined,
-timestampEnd: Number.isFinite(Number(c.endMs)) ? Number(c.endMs) : undefined,
-metadata: {
-tokenCount: c.tokenCount,
-meetingId: documentId,
-},
-},
-score: Number.isFinite(score) ? score : 0,
-semanticScore: Number.isFinite(semanticScore) ? semanticScore : undefined,
-source: document,
-});
-}
-} catch (error) {
-console.warn('[RAGManager] Meeting retrieval failed:', error);
-}
-}
-if (sourceSet.has('mode-reference') && modesManager) {
-try {
-const modeInfo = modesManager.getActiveModeInfo() ?? null;
-const modeId = options.modeId ?? modeInfo?.id;
-const activeMode = options.modeId
-? (modesManager.getModes() ?? []).find((mode: any) => mode?.id === options.modeId) ?? null
-: modesManager.getActiveMode() ?? null;
-const files = modeId ? (modesManager.getReferenceFiles(modeId) ?? []) : [];
-if (activeMode && files.length) {
-const context = await modesManager.retrieveHybridRaw(activeMode, files, {
+const meetingResults = await this.meetingAdapter.retrieve({
 query: normalizedQuery,
-topK: candidatePoolSize,
+options,
+candidatePoolSize,
 tokenBudget,
-// Change 7: the unified manager owns the common BGE rerank
-// stage, so do not rerank Mode candidates a second time here.
-allowRerank: false,
-...(options.forceDocumentGrounding !== undefined ? { forceDocumentGrounding: options.forceDocumentGrounding } : {}),
+conversation,
 });
-// ModeContextRetriever's public context uses `snippets`; the
-// hybrid raw context uses `chunks` in some builds. Accept both
-// without changing either source implementation.
-const rawChunks = context?.chunks ?? context?.snippets ?? [];
-const fileById = new Map<string, any>(
-files.map((file: any) => [String(file?.id ?? ''), file]),
-);
-for (const rawChunk of rawChunks) {
-const c = rawChunk as any;
-const documentId = String(c.sourceId ?? c.fileId ?? '');
-const text = String(c.text ?? '');
-if (!documentId || !text.trim()) continue;
-const file = fileById.get(documentId);
-const sourceDocument = this.buildModeDocument(documentId, file, modeId);
-const pageRange = this.extractModePageRange(text);
-const heading = this.extractModeHeading(text);
-const section = this.extractModeSection(heading);
-const chunkIndex = Number(c.chunkIndex);
-const resolvedChunkIndex = Number.isFinite(chunkIndex) ? chunkIndex : 0;
-const score = Number(c.score);
-const semanticScore = Number(c.vectorScore);
-const lexicalScore = Number(c.ftsScore);
-const rerankScore = Number(c.rerankScore);
-results.push({
-chunk: {
-// Mode storage exposes (file_id, chunk_index) as the
-// effective public identity. Keep that identity stable
-// rather than pretending the internal SQLite row id is
-// available to callers.
-id: `${documentId}:${resolvedChunkIndex}`,
-documentId,
-text,
-...(pageRange ? { pageStart: pageRange.start, pageEnd: pageRange.end } : {}),
-...(section ? { section } : {}),
-...(heading ? { heading } : {}),
-chunkIndex: resolvedChunkIndex,
-metadata: {
-trustLevel: c.trustLevel,
-embeddingSpace: c.embeddingSpace,
-...(c.provenance && typeof c.provenance === 'object' ? c.provenance : {}),
-...(c.metadata && typeof c.metadata === 'object' ? c.metadata : {}),
-},
-},
-score: Number.isFinite(score) ? score : 0,
-semanticScore: Number.isFinite(semanticScore) ? semanticScore : undefined,
-lexicalScore: Number.isFinite(lexicalScore) ? lexicalScore : undefined,
-rerankScore: Number.isFinite(rerankScore) ? rerankScore : undefined,
-source: sourceDocument,
-});
-}
-}
+results.push(...meetingResults);
 } catch (error) {
-console.warn('[RAGManager] Mode retrieval failed:', error);
+console.warn('[RAGManager] Meeting adapter retrieval failed:', error);
 }
 }
-if (sourceSet.has('personal-files') && personalKnowledge) {
+if (sourceSet.has('mode-reference')) {
 try {
-const items = await (personalKnowledge.searchRelevantAsync?.(normalizedQuery, candidatePoolSize)
-?? Promise.resolve(personalKnowledge.searchRelevant?.(normalizedQuery, candidatePoolSize)
-?? personalKnowledge.search?.(normalizedQuery, candidatePoolSize)
-?? []));
-const documentCache = new Map<string, RagDocument>();
-for (const item of items ?? []) {
-const documentId = String(item.fileId ?? '');
-const text = String(item.text ?? '');
-const chunkId = String(item.chunkId ?? '');
-if (!documentId || !chunkId || !text.trim()) continue;
-let document = documentCache.get(documentId);
-if (!document) {
-document = this.buildPersonalDocument(documentId, item);
-documentCache.set(documentId, document);
-}
-const chunkMeta = this.getPersonalChunkMetadata(documentId, chunkId);
-const chunkIndex = Number(item.chunkIndex ?? chunkMeta?.chunkIndex);
-const startOffset = Number(item.startChar ?? chunkMeta?.startChar);
-const endOffset = Number(item.endChar ?? chunkMeta?.endChar);
-const score = Number(item.score);
-results.push({
-chunk: {
-id: chunkId,
-documentId,
-text,
-chunkIndex: Number.isFinite(chunkIndex) ? chunkIndex : 0,
-...(Number.isFinite(startOffset) ? { startOffset } : {}),
-...(Number.isFinite(endOffset) ? { endOffset } : {}),
-...(item.pageStart !== undefined ? { pageStart: Number(item.pageStart) } : {}),
-...(item.pageEnd !== undefined ? { pageEnd: Number(item.pageEnd) } : {}),
-...(item.section ? { section: String(item.section) } : {}),
-...(item.heading ? { heading: String(item.heading) } : {}),
-metadata: {
-sourceType: 'personal',
-contentType: item.contentType,
-...(item.metadata && typeof item.metadata === 'object' ? item.metadata : {}),
-...(item.embeddingSpace ? { embeddingSpace: item.embeddingSpace } : {}),
-},
-},
-score: Number.isFinite(score) ? score : 0,
-semanticScore: Number.isFinite(Number(item.semanticScore)) ? Number(item.semanticScore) : undefined,
-lexicalScore: Number.isFinite(Number(item.lexicalScore)) ? Number(item.lexicalScore) : undefined,
-source: document,
+const modeResults = await this.modeAdapter.retrieve({
+query: normalizedQuery,
+options,
+candidatePoolSize,
+tokenBudget,
 });
-}
+results.push(...modeResults);
 } catch (error) {
-console.warn('[RAGManager] Personal retrieval failed:', error);
+console.warn('[RAGManager] Mode adapter retrieval failed:', error);
+}
+}
+if (sourceSet.has('personal-files')) {
+try {
+const personalResults = await this.personalAdapter.retrieve({
+query: normalizedQuery,
+options,
+candidatePoolSize,
+});
+results.push(...personalResults);
+} catch (error) {
+console.warn('[RAGManager] Personal adapter retrieval failed:', error);
 }
 }
 // Final common-layer fusion boundary: source adapters provide candidates,
@@ -800,106 +672,6 @@ return ranked;
 console.warn('[RAGManager] Local rerank failed; keeping unified retrieval order:', error);
 return results;
 }
-}
-/** Build the canonical document object for a meeting from the existing meetings row. */
-private buildMeetingDocument(meetingId: string): RagDocument {
-let row: any = null;
-try {
-row = this.db.prepare(`
-SELECT id, title, start_time, duration_ms, source, created_at, summary_json
-FROM meetings
-WHERE id = ?
-LIMIT 1
-`).get(meetingId);
-} catch (error) {
-console.warn('[RAGManager] Failed to load meeting metadata:', error);
-}
-return {
-id: meetingId,
-sourceType: 'meeting',
-name: String(row?.title ?? meetingId),
-metadata: {
-meetingId,
-...(row?.start_time !== undefined ? { startTime: row.start_time } : {}),
-...(row?.duration_ms !== undefined ? { durationMs: row.duration_ms } : {}),
-...(row?.source !== undefined ? { source: row.source } : {}),
-...(row?.created_at !== undefined ? { createdAt: row.created_at } : {}),
-...(row?.summary_json !== undefined ? { summaryJson: row.summary_json } : {}),
-},
-};
-}
-/** Build a canonical mode document from the existing reference-file record. */
-private buildModeDocument(documentId: string, file: any, modeId?: string): RagDocument {
-return {
-id: documentId,
-sourceType: 'mode',
-name: String(file?.fileName ?? file?.file_name ?? documentId),
-metadata: {
-...(modeId ? { modeId } : {}),
-...(file?.pageCount !== undefined ? { pageCount: file.pageCount } : {}),
-...(file?.extractedPageCount !== undefined ? { extractedPageCount: file.extractedPageCount } : {}),
-},
-};
-}
-/** Build a canonical personal document from the existing search result/DB-backed record. */
-private buildPersonalDocument(documentId: string, item: any): RagDocument {
-const row = this.getPersonalDocumentMetadata(documentId);
-return {
-id: documentId,
-sourceType: 'personal',
-name: String(item.fileName ?? row?.file_name ?? documentId),
-...(row?.file_path ? { path: String(row.file_path) } : {}),
-...(row?.mime_type ? { mimeType: String(row.mime_type) } : {}),
-metadata: {
-fileType: row?.file_type,
-sizeBytes: row?.size_bytes,
-contentHash: row?.content_hash,
-createdAt: row?.created_at,
-updatedAt: row?.updated_at,
-},
-};
-}
-private getPersonalDocumentMetadata(documentId: string): any | null {
-try {
-return this.db.prepare(`
-SELECT id, file_name, file_path, mime_type, size_bytes, content_hash, created_at, updated_at, file_type
-FROM personal_files
-WHERE id = ?
-LIMIT 1
-`).get(documentId) ?? null;
-} catch (error) {
-console.warn('[RAGManager] Failed to load personal document metadata:', error);
-return null;
-}
-}
-private getPersonalChunkMetadata(documentId: string, chunkId: string): any | null {
-try {
-return this.db.prepare(`
-SELECT chunk_index, start_char, end_char
-FROM personal_file_chunks
-WHERE id = ? AND file_id = ?
-LIMIT 1
-`).get(chunkId, documentId) ?? null;
-} catch (error) {
-console.warn('[RAGManager] Failed to load personal chunk metadata:', error);
-return null;
-}
-}
-private extractModePageRange(text: string): { start: number; end: number } | null {
-const matches = [...text.matchAll(/\[Page\s+(\d+)\]/gi)]
-.map(match => Number(match[1]))
-.filter(Number.isFinite);
-if (matches.length === 0) return null;
-return { start: Math.min(...matches), end: Math.max(...matches) };
-}
-private extractModeHeading(text: string): string | undefined {
-const match = text.match(/^\s*(?:#{1,3}\s+|(?:\d+(?:\.\d+){0,2}\s+))([^\n]+)/m);
-return match?.[1]?.trim() || undefined;
-}
-private extractModeSection(heading?: string): string | undefined {
-if (!heading) return undefined;
-const match = heading.match(/^((?:\d+)(?:\.\d+){0,2})\s+/);
-return match?.[1];
 }
 /**
 * Change 8: expose the query-planning result for diagnostics/tests while
