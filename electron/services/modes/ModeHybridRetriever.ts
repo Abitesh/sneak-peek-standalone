@@ -408,13 +408,13 @@ return; // up to date
 if (state && state.status === 'ocr_required' && state.fileHash === contentHash) {
 return;
 }
-const chunkRecords = this.chunkRecords(content);
-const chunks = chunkRecords.map((chunk) => chunk.text);
-if (chunks.length === 0) return;
 // Context-debug ingest event (observability only, 2026-08-01): reports
 // what THIS pipeline computed — chunk/embed counts, page counts from
 // the extractor, terminal index state. Level 'off' costs one call.
+// The count starts at zero because OCR_REQUIRED must be decided before
+// chunking; it is updated immediately after normal chunking succeeds.
 const ingestT0 = Date.now();
+let debugChunkCount = 0;
 const emitIngestDebug = (indexState: string, embeddedCount: number, errorMessage?: string): void => {
 try {
 const { emitModeFileIngestDebug } = require('../../context-intelligence/debug/ingest-debug');
@@ -425,7 +425,7 @@ modeId: (file as { modeId?: string }).modeId,
 characters: content.length,
 expectedPages: (file as { pageCount?: number }).pageCount,
 parsedPages: (file as { extractedPageCount?: number }).extractedPageCount,
-chunkCount: chunks.length,
+chunkCount: debugChunkCount,
 embeddedChunkCount: embeddedCount,
 embeddingSpace: activeSpace,
 indexState,
@@ -434,19 +434,24 @@ errorMessage,
 });
 } catch { /* debug logging must never affect indexing */ }
 };
-// Image-only / unparsed PDF: the "text" is page markers only. Embedding
-// it manufactures a fake searchable document (measured, lastrun.md);
-// mark OCR_REQUIRED instead and skip embedding entirely. Retrieval may
-// still surface the placeholder lexically, where the property gate
-// already grades it unsupporting — but no vectors, no READY, and the
-// ingest event says exactly why the file cannot answer anything.
+// Image-only / unparsed PDF: the "text" is page markers only. Decide
+// this BEFORE chunking/persistence so placeholder markers can never become
+// searchable lexical/FTS evidence. This legacy path may still be reached by
+// mode activation/prewarm, independently of RAGManager.indexDocument().
+// Clear any previous index first so a replacement cannot leave stale READY
+// chunks/vectors searchable while the file waits for OCR.
 if (isPlaceholderOnlyContent(content)) {
-this.persistChunks(file.id, chunkRecords, null, null);
-this.updateIndexState(file.id, contentHash, chunks.length, 'ocr_required', null);
+this.vectorStore.deleteModeReferenceEmbeddingsForFile(file.id);
+this.persistChunks(file.id, [], null, null);
+this.updateIndexState(file.id, contentHash, 0, 'ocr_required', null);
 console.warn(`[ModeHybridRetriever] "${file.fileName}": no searchable text extracted (image-only PDF?) — marked OCR_REQUIRED; the file cannot be searched until it has text.`);
 emitIngestDebug('ocr_required', 0, 'no searchable text extracted — image-only or scanned PDF');
 return;
 }
+const chunkRecords = this.chunkRecords(content);
+const chunks = chunkRecords.map((chunk) => chunk.text);
+debugChunkCount = chunks.length;
+if (chunks.length === 0) return;
 if (!this.isEmbeddingAvailable() || !activeSpace) {
 // No embedder: persist chunk TEXT (lexical retrieval still wins a
 // re-chunk per query) and mark lexical_only so prewarm retries later.
