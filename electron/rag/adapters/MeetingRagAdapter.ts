@@ -1,5 +1,5 @@
-import type Database from 'better-sqlite3';
 import type { RagSearchResult, RagDocument } from '../RAGManager';
+import type { MeetingStorageContract } from '../storage/MeetingStorageContract';
 import type { RAGRetriever } from '../RAGRetriever';
 import type { RagSourceAdapter, RagSourceAdapterContext } from './RagSourceAdapter';
 
@@ -7,7 +7,7 @@ import type { RagSourceAdapter, RagSourceAdapterContext } from './RagSourceAdapt
 export class MeetingRagAdapter implements RagSourceAdapter {
   constructor(
     private readonly retriever: RAGRetriever,
-    private readonly db: Database.Database,
+    private readonly storage: MeetingStorageContract,
   ) {}
 
   async retrieve(context: RagSourceAdapterContext): Promise<RagSearchResult[]> {
@@ -63,28 +63,23 @@ export class MeetingRagAdapter implements RagSourceAdapter {
   }
 
   private buildMeetingDocument(meetingId: string): RagDocument {
-    let row: any = null;
+    let meeting: ReturnType<MeetingStorageContract['readMeeting']> = null;
     try {
-      row = this.db.prepare(`
-        SELECT id, title, start_time, duration_ms, source, created_at, summary_json
-        FROM meetings
-        WHERE id = ?
-        LIMIT 1
-      `).get(meetingId);
+      meeting = this.storage.readMeeting(meetingId);
     } catch (error) {
       console.warn('[MeetingRagAdapter] Failed to load meeting metadata:', error);
     }
     return {
       id: meetingId,
       sourceType: 'meeting',
-      name: String(row?.title ?? meetingId),
+      name: String(meeting?.title ?? meetingId),
       metadata: {
         meetingId,
-        ...(row?.start_time !== undefined ? { startTime: row.start_time } : {}),
-        ...(row?.duration_ms !== undefined ? { durationMs: row.duration_ms } : {}),
-        ...(row?.source !== undefined ? { source: row.source } : {}),
-        ...(row?.created_at !== undefined ? { createdAt: row.created_at } : {}),
-        ...(row?.summary_json !== undefined ? { summaryJson: row.summary_json } : {}),
+        ...(meeting?.startTime !== undefined ? { startTime: meeting.startTime } : {}),
+        ...(meeting?.durationMs !== undefined ? { durationMs: meeting.durationMs } : {}),
+        ...(meeting?.source !== undefined ? { source: meeting.source } : {}),
+        ...(meeting?.createdAt !== undefined ? { createdAt: meeting.createdAt } : {}),
+        ...(meeting?.summaryJson !== undefined ? { summaryJson: meeting.summaryJson } : {}),
       },
     };
   }

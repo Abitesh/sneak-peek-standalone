@@ -30,6 +30,21 @@ import { extractSafeDocumentText } from '../services/SafeDocumentTextExtractor';
 import { buildDocumentChunks } from '../services/modes/DocumentMap';
 import { isRagEnabled, isRagHybridEnabled, isRagConversationAwareEnabled } from '../intelligence/intelligenceFlags';
 import { beginIndexAttempt, isCurrentIndexAttempt, invalidateIndexAttempt, withCurrentIndexAttempt } from './IndexAttemptRegistry';
+import { PersonalStorageAdapter } from './storage/PersonalStorageAdapter';
+import { ModeStorageAdapter } from './storage/ModeStorageAdapter';
+import { MeetingStorageAdapter } from './storage/MeetingStorageAdapter';
+import type {
+RagChunk,
+RagDocument,
+RagSearchResult,
+RagSourceType,
+} from './storage/RagStorageTypes';
+export type {
+RagChunk,
+RagDocument,
+RagSearchResult,
+RagSourceType,
+} from './storage/RagStorageTypes';
 interface ModesManagerLike {
 getActiveModeInfo(): { id?: string } | null;
 getActiveMode(): any | null;
@@ -64,92 +79,51 @@ reindexEmbeddings?(): Promise<void>;
 * example profile, browser, OKF, and memory evidence) are not silently folded
 * into this contract.
 */
-export type RagSourceType = 'meeting' | 'mode' | 'personal' | 'knowledge';
 export type RAGSource = RagSourceType;
-/** A source document independent of its source-specific storage schema. */
-export interface RagDocument {
-id: string;
-sourceType: RagSourceType;
-name: string;
-path?: string;
-mimeType?: string;
-metadata: Record<string, unknown>;
-}
-/** A canonical retrievable unit with source-specific provenance normalized into one shape. */
-export interface RagChunk {
-id: string;
-documentId: string;
-text: string;
-pageStart?: number;
-pageEnd?: number;
-section?: string;
-heading?: string;
-chunkIndex: number;
-startOffset?: number;
-endOffset?: number;
-speaker?: string;
-timestampStart?: number;
-timestampEnd?: number;
-metadata: Record<string, unknown>;
-}
-/** Unified retrieval result. Source and chunk always travel together. */
-export interface RagSearchResult {
-chunk: RagChunk;
-score: number;
-semanticScore?: number;
-lexicalScore?: number;
-rerankScore?: number;
-source: RagDocument;
-}
 /** @deprecated Use RagSearchResult. Kept as an export alias for Change 1 callers. */
 export type UnifiedRAGResult = RagSearchResult;
 export type RagIndexSourceType = 'mode' | 'personal';
-
 /** Canonical persisted document-index lifecycle exposed to the renderer. */
 export type RagIndexStatus =
-  | 'NOT_INDEXED'
-  | 'QUEUED'
-  | 'EXTRACTING'
-  | 'CHUNKING'
-  | 'EMBEDDING'
-  | 'READY'
-  | 'FAILED'
-  | 'OCR_REQUIRED';
-
+| 'NOT_INDEXED'
+| 'QUEUED'
+| 'EXTRACTING'
+| 'CHUNKING'
+| 'EMBEDDING'
+| 'READY'
+| 'FAILED'
+| 'OCR_REQUIRED';
 export interface RagIndexStatusSnapshot {
-  sourceType: RagIndexSourceType;
-  documentId: string;
-  status: RagIndexStatus;
-  chunkCount: number;
-  embeddedChunkCount: number;
-  extractedPageCount?: number;
-  totalPageCount?: number;
-  errorCode?: string;
-  errorMessage?: string;
-  updatedAt: number;
+sourceType: RagIndexSourceType;
+documentId: string;
+status: RagIndexStatus;
+chunkCount: number;
+embeddedChunkCount: number;
+extractedPageCount?: number;
+totalPageCount?: number;
+errorCode?: string;
+errorMessage?: string;
+updatedAt: number;
 }
-
 export interface RagIndexDocumentInput {
-  sourceType: RagIndexSourceType;
-  documentId: string;
-  filePath?: string;
-  content?: string;
-  fileName?: string;
-  pageCount?: number;
-  extractedPageCount?: number;
-  metadata?: Record<string, unknown>;
-  /** Optional lifecycle observer. Used by IPC to stream status to the renderer. */
-  onStatus?: (snapshot: RagIndexStatusSnapshot) => void;
+sourceType: RagIndexSourceType;
+documentId: string;
+filePath?: string;
+content?: string;
+fileName?: string;
+pageCount?: number;
+extractedPageCount?: number;
+metadata?: Record<string, unknown>;
+/** Optional lifecycle observer. Used by IPC to stream status to the renderer. */
+onStatus?: (snapshot: RagIndexStatusSnapshot) => void;
 }
-
 export interface RagIndexDocumentResult {
-  documentId: string;
-  sourceType: RagIndexSourceType;
-  chunkCount: number;
-  embeddedChunkCount: number;
-  status: 'ready' | 'lexical_only' | 'ocr_required' | 'failed' | 'empty';
+documentId: string;
+sourceType: RagIndexSourceType;
+chunkCount: number;
+embeddedChunkCount: number;
+status: 'ready' | 'lexical_only' | 'ocr_required' | 'failed' | 'empty';
 }
-
 export interface RAGSearchOptions {
 source?: RagSourceType | 'all';
 /** Conversation session used for retrieval-query rewriting and retrieval context. */
@@ -221,14 +195,11 @@ export const NO_GROUNDED_EVIDENCE_PROMPT = `
 NO GROUNDED EVIDENCE
 The retrieval system found no relevant evidence for the user's question in the selected sources. Do not claim that any factual statement came from the documents or meetings. Do not invent, infer, or fabricate document facts or citations. If the question requires source-grounded information, say that you could not find the information in the available sources.
 </rag_retrieval_status>`;
-
 function appendRagRetrievalStatus(prompt: string, status: 'ok' | 'no_relevant_evidence'): string {
 if (status !== 'no_relevant_evidence') return prompt;
 return `${prompt}\n${NO_GROUNDED_EVIDENCE_PROMPT.trim()}`;
 }
-
 export interface RAGRetrievalResponse extends RagRetrieverResponse<RagSearchResult> {}
-
 export interface RAGManagerConfig {
 db: Database.Database;
 // dbPath/extPath are unused by VectorStore now (it runs on `db` directly —
@@ -254,65 +225,59 @@ explicitKeyManagement?: boolean;
 * 3. When user queries: query() -> retrieve + stream response
 */
 export interface RAGManagerRetrievalPortOptions {
-  userId: string;
-  scope?: EvidenceScope;
-  modeId?: string;
-  /** Source typing for mode-attached documents, supplied by the V3 caller. */
-  modeSourceTypes?: ReadonlyMap<string, SourceType>;
-  selectedSources?: readonly RagSourceSelection[];
-  topK?: number;
-  candidatePoolSize?: number;
-  rerankCandidatePoolSize?: number;
-  tokenBudget?: number;
-  allowRerank?: boolean;
-  forceDocumentGrounding?: boolean;
+userId: string;
+scope?: EvidenceScope;
+modeId?: string;
+/** Source typing for mode-attached documents, supplied by the V3 caller. */
+modeSourceTypes?: ReadonlyMap<string, SourceType>;
+selectedSources?: readonly RagSourceSelection[];
+topK?: number;
+candidatePoolSize?: number;
+rerankCandidatePoolSize?: number;
+tokenBudget?: number;
+allowRerank?: boolean;
+forceDocumentGrounding?: boolean;
 }
-
 export class RAGManager {
-  private readonly indexStatusListeners = new Set<(snapshot: RagIndexStatusSnapshot) => void>();
-
-  /** A newer indexing attempt or deletion owns the document; stale work must stop. */
-  public invalidateIndexAttempt(sourceType: RagIndexSourceType, documentId: string): void {
-    invalidateIndexAttempt(sourceType, documentId);
-  }
-
-  public onIndexStatusChange(listener: (snapshot: RagIndexStatusSnapshot) => void): () => void {
-    this.indexStatusListeners.add(listener);
-    return () => this.indexStatusListeners.delete(listener);
-  }
-
-  public getIndexStatus(sourceType: RagIndexSourceType, documentId: string): RagIndexStatusSnapshot {
-    return DatabaseManager.getInstance().getRagIndexStatus(sourceType, documentId) ?? {
-      sourceType, documentId, status: 'NOT_INDEXED', chunkCount: 0, embeddedChunkCount: 0, updatedAt: Date.now(),
-    };
-  }
-
-  public setIndexStatus(
-    sourceType: RagIndexSourceType,
-    documentId: string,
-    status: RagIndexStatus,
-    details: Partial<Omit<RagIndexStatusSnapshot, 'sourceType' | 'documentId' | 'status'>> = {},
-    onStatus?: (snapshot: RagIndexStatusSnapshot) => void,
-  ): RagIndexStatusSnapshot {
-    const snapshot: RagIndexStatusSnapshot = {
-      sourceType, documentId, status, chunkCount: details.chunkCount ?? 0,
-      embeddedChunkCount: details.embeddedChunkCount ?? 0,
-      ...(details.extractedPageCount !== undefined ? { extractedPageCount: details.extractedPageCount } : {}),
-      ...(details.totalPageCount !== undefined ? { totalPageCount: details.totalPageCount } : {}),
-      ...(details.errorCode ? { errorCode: details.errorCode } : {}),
-      ...(details.errorMessage ? { errorMessage: details.errorMessage } : {}),
-      updatedAt: Date.now(),
-    };
-    const persisted = DatabaseManager.getInstance().upsertRagIndexStatus(snapshot);
-    if (!persisted) {
-      console.warn('[RAGManager] Index status was not persisted; suppressing status event:', { sourceType, documentId, status });
-      return snapshot;
-    }
-    try { onStatus?.(snapshot); } catch { /* observer is non-fatal */ }
-    for (const listener of this.indexStatusListeners) { try { listener(snapshot); } catch { /* observer is non-fatal */ } }
-    return snapshot;
-  }
-
+private readonly indexStatusListeners = new Set<(snapshot: RagIndexStatusSnapshot) => void>();
+/** A newer indexing attempt or deletion owns the document; stale work must stop. */
+public invalidateIndexAttempt(sourceType: RagIndexSourceType, documentId: string): void {
+invalidateIndexAttempt(sourceType, documentId);
+}
+public onIndexStatusChange(listener: (snapshot: RagIndexStatusSnapshot) => void): () => void {
+this.indexStatusListeners.add(listener);
+return () => this.indexStatusListeners.delete(listener);
+}
+public getIndexStatus(sourceType: RagIndexSourceType, documentId: string): RagIndexStatusSnapshot {
+return DatabaseManager.getInstance().getRagIndexStatus(sourceType, documentId) ?? {
+sourceType, documentId, status: 'NOT_INDEXED', chunkCount: 0, embeddedChunkCount: 0, updatedAt: Date.now(),
+};
+}
+public setIndexStatus(
+sourceType: RagIndexSourceType,
+documentId: string,
+status: RagIndexStatus,
+details: Partial<Omit<RagIndexStatusSnapshot, 'sourceType' | 'documentId' | 'status'>> = {},
+onStatus?: (snapshot: RagIndexStatusSnapshot) => void,
+): RagIndexStatusSnapshot {
+const snapshot: RagIndexStatusSnapshot = {
+sourceType, documentId, status, chunkCount: details.chunkCount ?? 0,
+embeddedChunkCount: details.embeddedChunkCount ?? 0,
+...(details.extractedPageCount !== undefined ? { extractedPageCount: details.extractedPageCount } : {}),
+...(details.totalPageCount !== undefined ? { totalPageCount: details.totalPageCount } : {}),
+...(details.errorCode ? { errorCode: details.errorCode } : {}),
+...(details.errorMessage ? { errorMessage: details.errorMessage } : {}),
+updatedAt: Date.now(),
+};
+const persisted = DatabaseManager.getInstance().upsertRagIndexStatus(snapshot);
+if (!persisted) {
+console.warn('[RAGManager] Index status was not persisted; suppressing status event:', { sourceType, documentId, status });
+return snapshot;
+}
+try { onStatus?.(snapshot); } catch { /* observer is non-fatal */ }
+for (const listener of this.indexStatusListeners) { try { listener(snapshot); } catch { /* observer is non-fatal */ } }
+return snapshot;
+}
 private db: Database.Database;
 private vectorStore: VectorStore;
 private embeddingPipeline: EmbeddingPipeline;
@@ -324,6 +289,8 @@ private readonly meetingAdapter: MeetingRagAdapter;
 private readonly modeAdapter: ModeRagAdapter;
 private readonly personalAdapter: PersonalRagAdapter;
 private readonly knowledgeAdapter: KnowledgeRagAdapter;
+private readonly personalStorage: PersonalStorageAdapter;
+private readonly modeStorage: ModeStorageAdapter;
 /**
 * Change 1/18: source coordination lives here, while each source keeps ownership
 * of its existing retrieval implementation behind a thin adapter. The application
@@ -389,9 +356,12 @@ this.embeddingPipeline = new EmbeddingPipeline(config.db, this.vectorStore);
 this.retriever = new RAGRetriever(this.vectorStore, this.embeddingPipeline);
 this.liveIndexer = new LiveRAGIndexer(this.vectorStore, this.embeddingPipeline);
 this.queryPlanner = new RagQueryPlanner();
-this.meetingAdapter = new MeetingRagAdapter(this.retriever, this.db);
+const meetingStorage = new MeetingStorageAdapter(this.db, this.vectorStore);
+this.meetingAdapter = new MeetingRagAdapter(this.retriever, meetingStorage);
 this.modeAdapter = new ModeRagAdapter();
 this.personalAdapter = new PersonalRagAdapter(this.db);
+this.personalStorage = new PersonalStorageAdapter(this.db, this.vectorStore);
+this.modeStorage = new ModeStorageAdapter(this.db, this.vectorStore);
 this.knowledgeAdapter = new KnowledgeRagAdapter();
 // Register only the coordinator before provider initialization. Embedding
 // services are wired after initialize() so existing backfill behavior is kept.
@@ -414,235 +384,250 @@ this.scheduleAutoReindex();
 }).catch(() => { /* non-critical, suppress */ });
 }
 /**
- * Unified document indexing entry point.
- *
- * New user documents enter here instead of choosing a source-specific
- * extraction/chunk/embed path. Source storage remains isolated (mode reference
- * chunks vs personal-file chunks), but the lifecycle and embedding boundary are
- * shared: extract -> DocumentMap -> persist metadata/FTS -> embed -> vector index.
- * Existing source-specific indexers remain available for compatibility/recovery.
- */
+* Unified document indexing entry point.
+*
+* New user documents enter here instead of choosing a source-specific
+* extraction/chunk/embed path. Source storage remains isolated (mode reference
+* chunks vs personal-file chunks), but the lifecycle and embedding boundary are
+* shared: extract -> DocumentMap -> persist metadata/FTS -> embed -> vector index.
+* Existing source-specific indexers remain available for compatibility/recovery.
+*/
 private clearDocumentIndexForReplacement(documentId: string, sourceType: RagIndexSourceType): void {
-  const dbManager = DatabaseManager.getInstance();
-  if (sourceType === 'mode') {
-    // Clear vectors before replacing chunks so no old semantic index remains
-    // queryable while the replacement is empty or failed. replaceModeReferenceChunks
-    // with [] is transactional and also removes the corresponding FTS rows.
-    this.vectorStore.deleteModeReferenceEmbeddingsForFile(documentId);
-    dbManager.replaceModeReferenceChunks(documentId, [], {});
-    return;
-  }
-
-  // Personal vectors are stored both in the chunk row and, when enabled, in
-  // sqlite-vec dimension tables; use the existing VectorStore cleanup first,
-  // then replace with an empty chunk set so personal FTS rows are removed too.
-  this.vectorStore.deletePersonalEmbeddingsForFile(documentId);
-  dbManager.replacePersonalFileChunks(documentId, [], {});
+const dbManager = DatabaseManager.getInstance();
+if (sourceType === 'mode') {
+// Clear vectors before replacing chunks so no old semantic index remains
+// queryable while the replacement is empty or failed. replaceModeReferenceChunks
+// with [] is transactional and also removes the corresponding FTS rows.
+this.modeStorage.deleteDocumentIndex(documentId);
+return;
 }
-
+// Personal storage is source-specific, but its physical persistence is now
+// behind the storage adapter. The adapter delegates to the existing
+// DatabaseManager/VectorStore primitives, so FTS/vector cleanup semantics
+// remain unchanged.
+this.personalStorage.clearEmbeddings(documentId);
+this.personalStorage.replaceChunks(documentId, [], {});
+}
 async indexDocument(input: RagIndexDocumentInput): Promise<RagIndexDocumentResult> {
-  const documentId = String(input.documentId ?? '').trim();
-  if (!documentId) throw new Error('RAG document id is required');
-  if (input.sourceType !== 'mode' && input.sourceType !== 'personal') {
-    throw new Error(`Unsupported RAG document source: ${String(input.sourceType)}`);
-  }
-
-  let content = String(input.content ?? '');
-  let fileName = String(input.fileName ?? '').trim();
-  let pageCount = input.pageCount;
-  let extractedPageCount = input.extractedPageCount;
-  const emptyContentHash = crypto.createHash('sha256').update('').digest('hex');
-  const dbManager = DatabaseManager.getInstance();
-  const indexAttempt = beginIndexAttempt(input.sourceType, documentId);
-  const writeStatus = (next: RagIndexStatus, details: Partial<Omit<RagIndexStatusSnapshot, 'sourceType' | 'documentId' | 'status'>> = {}) => {
-    if (!isCurrentIndexAttempt(input.sourceType, documentId, indexAttempt)) return null;
-    return this.setIndexStatus(input.sourceType, documentId, next, details, input.onStatus);
-  };
-
-  // The central coordinator owns the canonical lifecycle. Upload callers may
-  // also emit transient/preliminary events, but persisted status always starts
-  // here so direct indexDocument({content}) callers cannot skip QUEUED/EXTRACTING.
-  writeStatus('QUEUED', { chunkCount: 0, embeddedChunkCount: 0, totalPageCount: pageCount, extractedPageCount });
-  writeStatus('EXTRACTING', { chunkCount: 0, embeddedChunkCount: 0, totalPageCount: pageCount, extractedPageCount });
-
-  // Replacement safety: if extraction fails, the previous indexed document must
-  // not remain searchable under the same document id. Clear the old index first
-  // and record a terminal failed state for mode documents, then rethrow so the
-  // caller still observes the original extraction failure.
-  if (!content.trim() && input.filePath) {
-    writeStatus('EXTRACTING', { totalPageCount: pageCount, extractedPageCount });
-    try {
-      const extracted = await extractSafeDocumentText(input.filePath);
-      content = extracted.content;
-      fileName = fileName || extracted.fileName;
-      pageCount = pageCount ?? extracted.pageCount;
-      extractedPageCount = extractedPageCount ?? extracted.extractedPageCount;
-    } catch (error) {
-      if (isCurrentIndexAttempt(input.sourceType, documentId, indexAttempt)) {
-        this.clearDocumentIndexForReplacement(documentId, input.sourceType);
-        writeStatus('FAILED', { errorCode: 'EXTRACTION_FAILED', errorMessage: error instanceof Error ? error.message : String(error) });
-      }
-      if (isCurrentIndexAttempt(input.sourceType, documentId, indexAttempt) && input.sourceType === 'mode') {
-        dbManager.updateModeReferenceIndexState(documentId, emptyContentHash, 0, 'failed', null);
-      }
-      throw error;
-    }
-  }
-
-  content = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
-  if (!content) {
-    if (!isCurrentIndexAttempt(input.sourceType, documentId, indexAttempt)) {
-      return { documentId, sourceType: input.sourceType, chunkCount: 0, embeddedChunkCount: 0, status: 'failed' };
-    }
-    this.clearDocumentIndexForReplacement(documentId, input.sourceType);
-    writeStatus('FAILED', { errorCode: 'EMPTY_CONTENT', errorMessage: 'No readable text was found in this document.' });
-    if (input.sourceType === 'mode') {
-      dbManager.updateModeReferenceIndexState(documentId, emptyContentHash, 0, 'failed', null);
-    }
-    return { documentId, sourceType: input.sourceType, chunkCount: 0, embeddedChunkCount: 0, status: 'empty' };
-  }
-
-  if (!isCurrentIndexAttempt(input.sourceType, documentId, indexAttempt)) return { documentId, sourceType: input.sourceType, chunkCount: 0, embeddedChunkCount: 0, status: 'failed' };
-
-  const contentHash = crypto.createHash('sha256').update(content).digest('hex');
-
-  // OCR is deliberately not implemented here. A PDF whose extracted content
-  // consists only of the page-boundary markers generated by
-  // SafeDocumentTextExtractor has no searchable text yet. Treat that as a
-  // first-class terminal indexing state BEFORE chunking/persisting so the
-  // placeholder markers can never become misleading FTS or lexical results.
-  // Clearing the previous index is important when a document is being replaced:
-  // an older READY/lexical index must not remain searchable while this attempt
-  // waits for a future OCR pass.
-  const placeholderOnly = !content.replace(/\[Page\s+\d+\]/gi, '').trim();
-  if (placeholderOnly) {
-    this.clearDocumentIndexForReplacement(documentId, input.sourceType);
-    if (!isCurrentIndexAttempt(input.sourceType, documentId, indexAttempt)) {
-      return { documentId, sourceType: input.sourceType, chunkCount: 0, embeddedChunkCount: 0, status: 'failed' };
-    }
-    const ocrMessage = 'No usable text was extracted from this document; OCR is required before it can be indexed.';
-    writeStatus('OCR_REQUIRED', {
-      chunkCount: 0,
-      embeddedChunkCount: 0,
-      totalPageCount: pageCount,
-      extractedPageCount,
-      errorCode: 'OCR_REQUIRED',
-      errorMessage: ocrMessage,
-    });
-    if (input.sourceType === 'mode') {
-      dbManager.updateModeReferenceIndexState(documentId, contentHash, 0, 'ocr_required', null);
-    }
-    return { documentId, sourceType: input.sourceType, chunkCount: 0, embeddedChunkCount: 0, status: 'ocr_required' };
-  }
-
-  writeStatus('CHUNKING', { totalPageCount: pageCount, extractedPageCount });
-  const chunks = buildDocumentChunks(content, {
-    chunkWords: 140,
-    chunkOverlap: 30,
-    tableRowsPerChunk: 10,
-  });
-  if (chunks.length === 0) {
-    if (!isCurrentIndexAttempt(input.sourceType, documentId, indexAttempt)) {
-      return { documentId, sourceType: input.sourceType, chunkCount: 0, embeddedChunkCount: 0, status: 'failed' };
-    }
-    this.clearDocumentIndexForReplacement(documentId, input.sourceType);
-    writeStatus('FAILED', { errorCode: 'EMPTY_CHUNKS', errorMessage: 'Document produced no searchable chunks.' });
-    if (input.sourceType === 'mode') {
-      dbManager.updateModeReferenceIndexState(documentId, emptyContentHash, 0, 'failed', null);
-    }
-    return { documentId, sourceType: input.sourceType, chunkCount: 0, embeddedChunkCount: 0, status: 'empty' };
-  }
-
-  const metadata = {
-    ...(input.metadata ?? {}),
-    ...(fileName ? { fileName } : {}),
-    ...(pageCount !== undefined ? { pageCount } : {}),
-    ...(extractedPageCount !== undefined ? { extractedPageCount } : {}),
-    contentHash,
-  };
-
-  let persistedChunkIds: Array<number | string>;
-  if (input.sourceType === 'mode') {
-    dbManager.updateModeReferenceIndexState(documentId, contentHash, chunks.length, 'indexing', null);
-    this.vectorStore.deleteModeReferenceEmbeddingsForFile(documentId);
-    persistedChunkIds = dbManager.replaceModeReferenceChunks(documentId, chunks, metadata);
-  } else {
-    this.vectorStore.deletePersonalEmbeddingsForFile(documentId);
-    persistedChunkIds = dbManager.replacePersonalFileChunks(documentId, chunks.map((chunk) => ({
-      id: `pchunk_${crypto.createHash('sha256').update(`${documentId}:${chunk.chunkIndex}:${chunk.text}`).digest('hex').slice(0, 24)}`,
-      ...chunk,
-      startChar: chunk.startOffset ?? 0,
-      endChar: chunk.endOffset ?? chunk.text.length,
-    })), metadata);
-  }
-
-  let embeddedChunkCount = 0;
-  let embeddingSpace: string | undefined;
-  let embeddingRunComplete = false;
-  writeStatus('EMBEDDING', { chunkCount: chunks.length, embeddedChunkCount: 0, totalPageCount: pageCount, extractedPageCount });
-  try {
-    const embedded = await this.embeddingPipeline.embedDocumentChunks(
-      chunks.map((chunk) => chunk.text),
-      { batchSize: 32 },
-    );
-    embeddingRunComplete = embedded.complete === true;
-    for (let i = 0; i < embedded.vectors.length; i++) {
-      const vector = embedded.vectors[i];
-      if (!vector) continue;
-      const chunkId = persistedChunkIds[i];
-      const wrote = withCurrentIndexAttempt(input.sourceType, documentId, indexAttempt, () => {
-        if (input.sourceType === 'mode') {
-          if (typeof chunkId === 'number') this.vectorStore.storeModeReferenceEmbedding(chunkId, vector.embedding, vector.space, vector.provider, vector.dimensions);
-        } else if (typeof chunkId === 'string') {
-          this.vectorStore.storePersonalEmbedding(chunkId, vector.embedding, vector.space, vector.provider, vector.dimensions);
-        }
-      });
-      if (!wrote) {
-        return { documentId, sourceType: input.sourceType, chunkCount: chunks.length, embeddedChunkCount, status: 'failed' };
-      }
-      embeddedChunkCount++;
-      embeddingSpace = embeddingSpace ?? vector.space;
-    }
-  } catch (error) {
-    console.warn(`[RAGManager] Unified document embedding failed for ${documentId}; lexical index remains available:`, error instanceof Error ? error.message : String(error));
-  }
-
-  // A document is vector-ready only when every chunk received an embedding
-  // from one consistent embedding space. If embedding stops after a partial
-  // prefix (batch failure or embedding-space change), discard that prefix.
-  // Keep the lexical chunks/FTS rows so retrieval can fall back and a later
-  // retry can rebuild the complete vector index.
-  let status: RagIndexDocumentResult['status'];
-  if (!isCurrentIndexAttempt(input.sourceType, documentId, indexAttempt)) return { documentId, sourceType: input.sourceType, chunkCount: chunks.length, embeddedChunkCount, status: 'failed' };
-  const embeddingComplete = embeddingRunComplete && embeddedChunkCount === chunks.length && embeddingSpace !== undefined;
-  if (embeddingComplete) {
-    status = 'ready';
-    this.setIndexStatus(input.sourceType, documentId, 'READY', {
-      chunkCount: chunks.length, embeddedChunkCount, totalPageCount: pageCount, extractedPageCount,
-    }, input.onStatus);
-  } else {
-    if (input.sourceType === 'mode') {
-      this.vectorStore.deleteModeReferenceEmbeddingsForFile(documentId);
-    } else {
-      this.vectorStore.deletePersonalEmbeddingsForFile(documentId);
-    }
-    status = 'failed';
-    embeddingSpace = undefined;
-    this.setIndexStatus(input.sourceType, documentId, 'FAILED', {
-      chunkCount: chunks.length, embeddedChunkCount, totalPageCount: pageCount, extractedPageCount,
-      errorCode: 'EMBEDDING_INCOMPLETE',
-      errorMessage: embeddedChunkCount > 0
-        ? `Only ${embeddedChunkCount} of ${chunks.length} chunks were embedded.`
-        : 'No chunks were embedded.',
-    }, input.onStatus);
-  }
-
-  if (input.sourceType === 'mode') {
-    dbManager.updateModeReferenceIndexState(documentId, contentHash, chunks.length, status, embeddingSpace ?? null);
-  }
-  return { documentId, sourceType: input.sourceType, chunkCount: chunks.length, embeddedChunkCount, status, ...(embeddingSpace ? { embeddingSpace } : {}) };
+const documentId = String(input.documentId ?? '').trim();
+if (!documentId) throw new Error('RAG document id is required');
+if (input.sourceType !== 'mode' && input.sourceType !== 'personal') {
+throw new Error(`Unsupported RAG document source: ${String(input.sourceType)}`);
 }
-
+let content = String(input.content ?? '');
+let fileName = String(input.fileName ?? '').trim();
+let pageCount = input.pageCount;
+let extractedPageCount = input.extractedPageCount;
+const emptyContentHash = crypto.createHash('sha256').update('').digest('hex');
+const dbManager = DatabaseManager.getInstance();
+const indexAttempt = beginIndexAttempt(input.sourceType, documentId);
+const writeStatus = (next: RagIndexStatus, details: Partial<Omit<RagIndexStatusSnapshot, 'sourceType' | 'documentId' | 'status'>> = {}) => {
+if (!isCurrentIndexAttempt(input.sourceType, documentId, indexAttempt)) return null;
+return this.setIndexStatus(input.sourceType, documentId, next, details, input.onStatus);
+};
+// The central coordinator owns the canonical lifecycle. Upload callers may
+// also emit transient/preliminary events, but persisted status always starts
+// here so direct indexDocument({content}) callers cannot skip QUEUED/EXTRACTING.
+writeStatus('QUEUED', { chunkCount: 0, embeddedChunkCount: 0, totalPageCount: pageCount, extractedPageCount });
+writeStatus('EXTRACTING', { chunkCount: 0, embeddedChunkCount: 0, totalPageCount: pageCount, extractedPageCount });
+// Replacement safety: if extraction fails, the previous indexed document must
+// not remain searchable under the same document id. Clear the old index first
+// and record a terminal failed state for mode documents, then rethrow so the
+// caller still observes the original extraction failure.
+if (!content.trim() && input.filePath) {
+writeStatus('EXTRACTING', { totalPageCount: pageCount, extractedPageCount });
+try {
+const extracted = await extractSafeDocumentText(input.filePath);
+content = extracted.content;
+fileName = fileName || extracted.fileName;
+pageCount = pageCount ?? extracted.pageCount;
+extractedPageCount = extractedPageCount ?? extracted.extractedPageCount;
+} catch (error) {
+if (isCurrentIndexAttempt(input.sourceType, documentId, indexAttempt)) {
+this.clearDocumentIndexForReplacement(documentId, input.sourceType);
+writeStatus('FAILED', { errorCode: 'EXTRACTION_FAILED', errorMessage: error instanceof Error ? error.message : String(error) });
+}
+if (isCurrentIndexAttempt(input.sourceType, documentId, indexAttempt) && input.sourceType === 'mode') {
+dbManager.updateModeReferenceIndexState(documentId, emptyContentHash, 0, 'failed', null);
+}
+throw error;
+}
+}
+content = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+if (!content) {
+if (!isCurrentIndexAttempt(input.sourceType, documentId, indexAttempt)) {
+return { documentId, sourceType: input.sourceType, chunkCount: 0, embeddedChunkCount: 0, status: 'failed' };
+}
+this.clearDocumentIndexForReplacement(documentId, input.sourceType);
+writeStatus('FAILED', { errorCode: 'EMPTY_CONTENT', errorMessage: 'No readable text was found in this document.' });
+if (input.sourceType === 'mode') {
+dbManager.updateModeReferenceIndexState(documentId, emptyContentHash, 0, 'failed', null);
+}
+return { documentId, sourceType: input.sourceType, chunkCount: 0, embeddedChunkCount: 0, status: 'empty' };
+}
+if (!isCurrentIndexAttempt(input.sourceType, documentId, indexAttempt)) return { documentId, sourceType: input.sourceType, chunkCount: 0, embeddedChunkCount: 0, status: 'failed' };
+const contentHash = crypto.createHash('sha256').update(content).digest('hex');
+// OCR is deliberately not implemented here. A PDF whose extracted content
+// consists only of the page-boundary markers generated by
+// SafeDocumentTextExtractor has no searchable text yet. Treat that as a
+// first-class terminal indexing state BEFORE chunking/persisting so the
+// placeholder markers can never become misleading FTS or lexical results.
+// Clearing the previous index is important when a document is being replaced:
+// an older READY/lexical index must not remain searchable while this attempt
+// waits for a future OCR pass.
+const placeholderOnly = !content.replace(/\[Page\s+\d+\]/gi, '').trim();
+if (placeholderOnly) {
+this.clearDocumentIndexForReplacement(documentId, input.sourceType);
+if (!isCurrentIndexAttempt(input.sourceType, documentId, indexAttempt)) {
+return { documentId, sourceType: input.sourceType, chunkCount: 0, embeddedChunkCount: 0, status: 'failed' };
+}
+const ocrMessage = 'No usable text was extracted from this document; OCR is required before it can be indexed.';
+writeStatus('OCR_REQUIRED', {
+chunkCount: 0,
+embeddedChunkCount: 0,
+totalPageCount: pageCount,
+extractedPageCount,
+errorCode: 'OCR_REQUIRED',
+errorMessage: ocrMessage,
+});
+if (input.sourceType === 'mode') {
+dbManager.updateModeReferenceIndexState(documentId, contentHash, 0, 'ocr_required', null);
+}
+return { documentId, sourceType: input.sourceType, chunkCount: 0, embeddedChunkCount: 0, status: 'ocr_required' };
+}
+writeStatus('CHUNKING', { totalPageCount: pageCount, extractedPageCount });
+const chunks = buildDocumentChunks(content, {
+chunkWords: 140,
+chunkOverlap: 30,
+tableRowsPerChunk: 10,
+});
+if (chunks.length === 0) {
+if (!isCurrentIndexAttempt(input.sourceType, documentId, indexAttempt)) {
+return { documentId, sourceType: input.sourceType, chunkCount: 0, embeddedChunkCount: 0, status: 'failed' };
+}
+this.clearDocumentIndexForReplacement(documentId, input.sourceType);
+writeStatus('FAILED', { errorCode: 'EMPTY_CHUNKS', errorMessage: 'Document produced no searchable chunks.' });
+if (input.sourceType === 'mode') {
+dbManager.updateModeReferenceIndexState(documentId, emptyContentHash, 0, 'failed', null);
+}
+return { documentId, sourceType: input.sourceType, chunkCount: 0, embeddedChunkCount: 0, status: 'empty' };
+}
+const metadata = {
+...(input.metadata ?? {}),
+...(fileName ? { fileName } : {}),
+...(pageCount !== undefined ? { pageCount } : {}),
+...(extractedPageCount !== undefined ? { extractedPageCount } : {}),
+contentHash,
+};
+let persistedChunkIds: Array<number | string>;
+if (input.sourceType === 'mode') {
+dbManager.updateModeReferenceIndexState(documentId, contentHash, chunks.length, 'indexing', null);
+const modeChunks: RagChunk[] = chunks.map((chunk) => ({
+id: `mchunk_pending_${chunk.chunkIndex}`,
+documentId,
+text: chunk.text,
+pageStart: chunk.pageStart,
+pageEnd: chunk.pageEnd,
+section: chunk.section,
+heading: chunk.heading,
+chunkIndex: chunk.chunkIndex,
+metadata: chunk.metadata ?? {},
+}));
+persistedChunkIds = this.modeStorage.replaceChunks(documentId, modeChunks, metadata);
+} else {
+// DocumentMapChunk is the chunking-layer shape. The storage boundary uses
+// the canonical RagChunk shape, including stable document/chunk identity.
+// Preserve Change 22's exact deterministic personal chunk IDs.
+const personalChunks: RagChunk[] = chunks.map((chunk) => ({
+id: `pchunk_${crypto.createHash('sha256').update(`${documentId}:${chunk.chunkIndex}:${chunk.text}`).digest('hex').slice(0, 24)}`,
+documentId,
+text: chunk.text,
+pageStart: chunk.pageStart,
+pageEnd: chunk.pageEnd,
+section: chunk.section,
+heading: chunk.heading,
+chunkIndex: chunk.chunkIndex,
+startOffset: chunk.startOffset,
+endOffset: chunk.endOffset,
+metadata: chunk.metadata ?? {},
+}));
+this.personalStorage.clearEmbeddings(documentId);
+persistedChunkIds = this.personalStorage.replaceChunks(documentId, personalChunks, metadata);
+}
+let embeddedChunkCount = 0;
+let embeddingSpace: string | undefined;
+let embeddingRunComplete = false;
+writeStatus('EMBEDDING', { chunkCount: chunks.length, embeddedChunkCount: 0, totalPageCount: pageCount, extractedPageCount });
+try {
+const embedded = await this.embeddingPipeline.embedDocumentChunks(
+chunks.map((chunk) => chunk.text),
+{ batchSize: 32 },
+);
+embeddingRunComplete = embedded.complete === true;
+for (let i = 0; i < embedded.vectors.length; i++) {
+const vector = embedded.vectors[i];
+if (!vector) continue;
+const chunkId = persistedChunkIds[i];
+const wrote = withCurrentIndexAttempt(input.sourceType, documentId, indexAttempt, () => {
+if (input.sourceType === 'mode') {
+if (typeof chunkId === 'number') this.modeStorage.storeEmbedding(chunkId, {
+embedding: vector.embedding,
+space: vector.space,
+provider: vector.provider,
+dimensions: vector.dimensions,
+});
+} else if (typeof chunkId === 'string') {
+this.personalStorage.storeEmbedding(chunkId, {
+embedding: vector.embedding,
+space: vector.space,
+provider: vector.provider,
+dimensions: vector.dimensions,
+});
+}
+});
+if (!wrote) {
+return { documentId, sourceType: input.sourceType, chunkCount: chunks.length, embeddedChunkCount, status: 'failed' };
+}
+embeddedChunkCount++;
+embeddingSpace = embeddingSpace ?? vector.space;
+}
+} catch (error) {
+console.warn(`[RAGManager] Unified document embedding failed for ${documentId}; lexical index remains available:`, error instanceof Error ? error.message : String(error));
+}
+// A document is vector-ready only when every chunk received an embedding
+// from one consistent embedding space. If embedding stops after a partial
+// prefix (batch failure or embedding-space change), discard that prefix.
+// Keep the lexical chunks/FTS rows so retrieval can fall back and a later
+// retry can rebuild the complete vector index.
+let status: RagIndexDocumentResult['status'];
+if (!isCurrentIndexAttempt(input.sourceType, documentId, indexAttempt)) return { documentId, sourceType: input.sourceType, chunkCount: chunks.length, embeddedChunkCount, status: 'failed' };
+const embeddingComplete = embeddingRunComplete && embeddedChunkCount === chunks.length && embeddingSpace !== undefined;
+if (embeddingComplete) {
+status = 'ready';
+this.setIndexStatus(input.sourceType, documentId, 'READY', {
+chunkCount: chunks.length, embeddedChunkCount, totalPageCount: pageCount, extractedPageCount,
+}, input.onStatus);
+} else {
+if (input.sourceType === 'mode') {
+this.modeStorage.clearEmbeddings(documentId);
+} else {
+this.personalStorage.clearEmbeddings(documentId);
+}
+status = 'failed';
+embeddingSpace = undefined;
+this.setIndexStatus(input.sourceType, documentId, 'FAILED', {
+chunkCount: chunks.length, embeddedChunkCount, totalPageCount: pageCount, extractedPageCount,
+errorCode: 'EMBEDDING_INCOMPLETE',
+errorMessage: embeddedChunkCount > 0
+? `Only ${embeddedChunkCount} of ${chunks.length} chunks were embedded.`
+: 'No chunks were embedded.',
+}, input.onStatus);
+}
+if (input.sourceType === 'mode') {
+dbManager.updateModeReferenceIndexState(documentId, contentHash, chunks.length, status, embeddingSpace ?? null);
+}
+return { documentId, sourceType: input.sourceType, chunkCount: chunks.length, embeddedChunkCount, status, ...(embeddingSpace ? { embeddingSpace } : {}) };
+}
 /**
 * Unified retrieval entry point for the application.
 *
@@ -673,176 +658,170 @@ return undefined;
 }
 }
 private gateCanonicalResults(
-  results: RagSearchResult[],
-  query: string,
+results: RagSearchResult[],
+query: string,
 ): RagSearchResult[] {
 if (!results.length) return [];
 const evidenceItems = results.map((result, index) => ({
-  evidenceId: `rag-manager:${String(result.chunk.id ?? index)}`,
-  sourceKind: result.source.sourceType,
-  sourceId: result.source.id,
-  sourceOwner: 'application',
-  authority: 'evidence',
-  trustLevel: 'retrieved',
-  text: result.chunk.text,
-  pointer: {
-    chunkId: result.chunk.id,
-    fileId: result.source.sourceType === 'personal' ? result.source.id : undefined,
-    meetingId: result.source.sourceType === 'meeting' ? result.source.id : undefined,
-    page: result.chunk.pageStart,
-  },
-  documentName: result.source.name,
-  pageStart: result.chunk.pageStart,
-  pageEnd: result.chunk.pageEnd,
-  section: result.chunk.section,
-  heading: result.chunk.heading,
-  documentId: result.chunk.documentId,
-  chunkId: result.chunk.id,
-  retrievalScore: result.score,
-  rerankScore: result.rerankScore,
-  supports: { property: 'unknown' },
-  score: {
-    lexical: result.lexicalScore,
-    vector: result.semanticScore,
-    rerank: result.rerankScore,
-    final: result.score,
-  },
-  reasonIncluded: 'retrieval',
+evidenceId: `rag-manager:${String(result.chunk.id ?? index)}`,
+sourceKind: result.source.sourceType,
+sourceId: result.source.id,
+sourceOwner: 'application',
+authority: 'evidence',
+trustLevel: 'retrieved',
+text: result.chunk.text,
+pointer: {
+chunkId: result.chunk.id,
+fileId: result.source.sourceType === 'personal' ? result.source.id : undefined,
+meetingId: result.source.sourceType === 'meeting' ? result.source.id : undefined,
+page: result.chunk.pageStart,
+},
+documentName: result.source.name,
+pageStart: result.chunk.pageStart,
+pageEnd: result.chunk.pageEnd,
+section: result.chunk.section,
+heading: result.chunk.heading,
+documentId: result.chunk.documentId,
+chunkId: result.chunk.id,
+retrievalScore: result.score,
+rerankScore: result.rerankScore,
+supports: { property: 'unknown' },
+score: {
+lexical: result.lexicalScore,
+vector: result.semanticScore,
+rerank: result.rerankScore,
+final: result.score,
+},
+reasonIncluded: 'retrieval',
 })) as unknown as EvidenceItem[];
 const decision = evaluateRagRelevanceGate({
-  items: evidenceItems,
-  requestedProperty: 'unknown',
-  isSynthesis: true,
+items: evidenceItems,
+requestedProperty: 'unknown',
+isSynthesis: true,
 });
 if (!decision.passed) return [];
 const relevantResults = results.filter((result) =>
-  hasQuestionSpecificRelevance(query, [result.chunk as any], this.retriever.detectIntent(query)),
+hasQuestionSpecificRelevance(query, [result.chunk as any], this.retriever.detectIntent(query)),
 );
 if (!relevantResults.length) return [];
 const usable = new Set(decision.usableEvidenceIds);
 return relevantResults.filter((result, index) => usable.has(`rag-manager:${String(result.chunk.id ?? index)}`));
 }
-
 /**
- * Build the Context Intelligence retrieval port used by normal/manual chat.
- *
- * Change 17: manual chat must not construct separate mode/personal/meeting
- * retrieval ports beside RAGManager. RAGManager owns candidate generation,
- * source-family retrieval, common reranking and the canonical relevance gate.
- * The existing legacy-retrieval-port remains the single V3 authorization and
- * scope/version filter after those candidates are produced.
- *
- * Profile Intelligence is intentionally not folded in here. It is a distinct
- * authoritative source family and continues through its existing profile port
- * until the source-adapter consolidation in Change 18/20.
- */
+* Build the Context Intelligence retrieval port used by normal/manual chat.
+*
+* Change 17: manual chat must not construct separate mode/personal/meeting
+* retrieval ports beside RAGManager. RAGManager owns candidate generation,
+* source-family retrieval, common reranking and the canonical relevance gate.
+* The existing legacy-retrieval-port remains the single V3 authorization and
+* scope/version filter after those candidates are produced.
+*
+* Profile Intelligence is intentionally not folded in here. It is a distinct
+* authoritative source family and continues through its existing profile port
+* until the source-adapter consolidation in Change 18/20.
+*/
 public createRAGRetrievalPort(
-  options: RAGManagerRetrievalPortOptions,
+options: RAGManagerRetrievalPortOptions,
 ): RetrievalPort {
-  const sourceTypes = new Map<string, SourceType>();
-  const activeVersions = new Map<string, string>();
-  const chunkVersions = new Map<string, string>();
-  const sourceScopes = new Map<string, EvidenceScope>();
-
-  // Declare stable document sources before retrieval where possible. Meeting
-  // sources are discovered from returned chunks because the meeting store has
-  // no file registry; its source id is the meeting id itself.
-  try {
-    const { modesManager, personalKnowledge } = this.getSourceManagers();
-    const modeId = options.modeId ?? modesManager?.getActiveModeInfo?.()?.id;
-    if (modeId && modesManager) {
-      for (const file of modesManager.getReferenceFiles(modeId) ?? []) {
-        const id = String(file?.id ?? '');
-        if (!id) continue;
-        sourceTypes.set(id, options.modeSourceTypes?.get(id) ?? 'REFERENCE_FILE');
-        activeVersions.set(id, 'legacy');
-        chunkVersions.set(id, 'legacy');
-        sourceScopes.set(id, { userId: options.userId });
-      }
-    }
-    for (const file of personalKnowledge?.listFiles?.() ?? []) {
-      const id = String(file?.id ?? '');
-      if (!id) continue;
-      sourceTypes.set(id, 'REFERENCE_FILE');
-      activeVersions.set(id, 'current');
-      chunkVersions.set(id, 'current');
-      sourceScopes.set(id, {
-        userId: options.userId,
-        ...(options.scope?.sessionId ? { sessionId: options.scope.sessionId } : {}),
-      });
-    }
-  } catch { /* source registry is completed lazily below */ }
-
-  return createLegacyRetrievalPort({
-    registry: { sourceTypes, activeVersions, chunkVersions, sourceScopes },
-    retrieve: async (query: string, opts: { topK: number }): Promise<LegacyChunk[]> => {
-      const response = await this.search(query, {
-        selectedSources: options.selectedSources,
-        modeId: options.modeId,
-        meetingId: options.scope?.meetingId,
-        sessionId: options.scope?.sessionId,
-        topK: Math.max(1, opts.topK),
-        candidatePoolSize: options.candidatePoolSize,
-        rerankCandidatePoolSize: options.rerankCandidatePoolSize,
-        tokenBudget: options.tokenBudget,
-        allowRerank: options.allowRerank !== false,
-        forceDocumentGrounding: options.forceDocumentGrounding,
-      });
-
-      for (const result of response.results) {
-        const sourceId = String(result.source.id);
-        let sourceType: SourceType;
-        if (result.source.sourceType === 'meeting') {
-          sourceType = 'MEETING_TRANSCRIPT';
-          activeVersions.set(sourceId, 'live');
-          chunkVersions.set(sourceId, 'live');
-          sourceScopes.set(sourceId, {
-            userId: options.userId,
-            meetingId: options.scope?.meetingId ?? sourceId,
-          });
-        } else if (result.source.sourceType === 'personal') {
-          sourceType = 'REFERENCE_FILE';
-          activeVersions.set(sourceId, activeVersions.get(sourceId) ?? 'current');
-          chunkVersions.set(sourceId, chunkVersions.get(sourceId) ?? 'current');
-          sourceScopes.set(sourceId, sourceScopes.get(sourceId) ?? {
-            userId: options.userId,
-            ...(options.scope?.sessionId ? { sessionId: options.scope.sessionId } : {}),
-          });
-        } else {
-          sourceType = options.modeSourceTypes?.get(sourceId)
-            ?? sourceTypes.get(sourceId)
-            ?? 'REFERENCE_FILE';
-          activeVersions.set(sourceId, activeVersions.get(sourceId) ?? 'legacy');
-          chunkVersions.set(sourceId, chunkVersions.get(sourceId) ?? 'legacy');
-          sourceScopes.set(sourceId, sourceScopes.get(sourceId) ?? { userId: options.userId });
-        }
-        sourceTypes.set(sourceId, sourceType);
-      }
-
-      return response.results.map((result): LegacyChunk => ({
-        sourceId: String(result.source.id),
-        fileName: result.source.name,
-        text: result.chunk.text,
-        chunkIndex: result.chunk.chunkIndex,
-        score: result.score,
-        ftsScore: result.lexicalScore,
-        vectorScore: result.semanticScore,
-        rerankScore: result.rerankScore,
-        provenance: result.source.sourceType === 'meeting'
-          ? (process.env.NATIVELY_TEST_TRANSCRIPT_INJECTION === '1' ? 'TEST_TRANSCRIPT' : 'LIVE_STT')
-          : result.source.sourceType === 'personal' ? 'PERSONAL_FILE' : 'MODE_REFERENCE_FILE',
-        metadata: {
-          ...(result.chunk.pageStart !== undefined ? { pageStart: result.chunk.pageStart } : {}),
-          ...(result.chunk.pageEnd !== undefined ? { pageEnd: result.chunk.pageEnd } : {}),
-          ...(result.chunk.section ? { section: result.chunk.section } : {}),
-          ...(result.chunk.heading ? { heading: result.chunk.heading } : {}),
-          ...(result.chunk.metadata ?? {}),
-        },
-      }));
-    },
-  });
+const sourceTypes = new Map<string, SourceType>();
+const activeVersions = new Map<string, string>();
+const chunkVersions = new Map<string, string>();
+const sourceScopes = new Map<string, EvidenceScope>();
+// Declare stable document sources before retrieval where possible. Meeting
+// sources are discovered from returned chunks because the meeting store has
+// no file registry; its source id is the meeting id itself.
+try {
+const { modesManager, personalKnowledge } = this.getSourceManagers();
+const modeId = options.modeId ?? modesManager?.getActiveModeInfo?.()?.id;
+if (modeId && modesManager) {
+for (const file of modesManager.getReferenceFiles(modeId) ?? []) {
+const id = String(file?.id ?? '');
+if (!id) continue;
+sourceTypes.set(id, options.modeSourceTypes?.get(id) ?? 'REFERENCE_FILE');
+activeVersions.set(id, 'legacy');
+chunkVersions.set(id, 'legacy');
+sourceScopes.set(id, { userId: options.userId });
 }
-
+}
+for (const file of personalKnowledge?.listFiles?.() ?? []) {
+const id = String(file?.id ?? '');
+if (!id) continue;
+sourceTypes.set(id, 'REFERENCE_FILE');
+activeVersions.set(id, 'current');
+chunkVersions.set(id, 'current');
+sourceScopes.set(id, {
+userId: options.userId,
+...(options.scope?.sessionId ? { sessionId: options.scope.sessionId } : {}),
+});
+}
+} catch { /* source registry is completed lazily below */ }
+return createLegacyRetrievalPort({
+registry: { sourceTypes, activeVersions, chunkVersions, sourceScopes },
+retrieve: async (query: string, opts: { topK: number }): Promise<LegacyChunk[]> => {
+const response = await this.search(query, {
+selectedSources: options.selectedSources,
+modeId: options.modeId,
+meetingId: options.scope?.meetingId,
+sessionId: options.scope?.sessionId,
+topK: Math.max(1, opts.topK),
+candidatePoolSize: options.candidatePoolSize,
+rerankCandidatePoolSize: options.rerankCandidatePoolSize,
+tokenBudget: options.tokenBudget,
+allowRerank: options.allowRerank !== false,
+forceDocumentGrounding: options.forceDocumentGrounding,
+});
+for (const result of response.results) {
+const sourceId = String(result.source.id);
+let sourceType: SourceType;
+if (result.source.sourceType === 'meeting') {
+sourceType = 'MEETING_TRANSCRIPT';
+activeVersions.set(sourceId, 'live');
+chunkVersions.set(sourceId, 'live');
+sourceScopes.set(sourceId, {
+userId: options.userId,
+meetingId: options.scope?.meetingId ?? sourceId,
+});
+} else if (result.source.sourceType === 'personal') {
+sourceType = 'REFERENCE_FILE';
+activeVersions.set(sourceId, activeVersions.get(sourceId) ?? 'current');
+chunkVersions.set(sourceId, chunkVersions.get(sourceId) ?? 'current');
+sourceScopes.set(sourceId, sourceScopes.get(sourceId) ?? {
+userId: options.userId,
+...(options.scope?.sessionId ? { sessionId: options.scope.sessionId } : {}),
+});
+} else {
+sourceType = options.modeSourceTypes?.get(sourceId)
+?? sourceTypes.get(sourceId)
+?? 'REFERENCE_FILE';
+activeVersions.set(sourceId, activeVersions.get(sourceId) ?? 'legacy');
+chunkVersions.set(sourceId, chunkVersions.get(sourceId) ?? 'legacy');
+sourceScopes.set(sourceId, sourceScopes.get(sourceId) ?? { userId: options.userId });
+}
+sourceTypes.set(sourceId, sourceType);
+}
+return response.results.map((result): LegacyChunk => ({
+sourceId: String(result.source.id),
+fileName: result.source.name,
+text: result.chunk.text,
+chunkIndex: result.chunk.chunkIndex,
+score: result.score,
+ftsScore: result.lexicalScore,
+vectorScore: result.semanticScore,
+rerankScore: result.rerankScore,
+provenance: result.source.sourceType === 'meeting'
+? (process.env.NATIVELY_TEST_TRANSCRIPT_INJECTION === '1' ? 'TEST_TRANSCRIPT' : 'LIVE_STT')
+: result.source.sourceType === 'personal' ? 'PERSONAL_FILE' : 'MODE_REFERENCE_FILE',
+metadata: {
+...(result.chunk.pageStart !== undefined ? { pageStart: result.chunk.pageStart } : {}),
+...(result.chunk.pageEnd !== undefined ? { pageEnd: result.chunk.pageEnd } : {}),
+...(result.chunk.section ? { section: result.chunk.section } : {}),
+...(result.chunk.heading ? { heading: result.chunk.heading } : {}),
+...(result.chunk.metadata ?? {}),
+},
+}));
+},
+});
+}
 async search(query: string, options: RAGSearchOptions = {}): Promise<RAGRetrievalResponse> {
 const originalQuery = String(query ?? '').trim();
 if (!originalQuery) return { status: 'no_relevant_evidence', results: [], confidence: 0 };
@@ -883,7 +862,6 @@ const sourceSet = new Set<RagSourceSelection>(selectedSources);
 const conversation = sourceSet.has('conversation') && isRagConversationAwareEnabled()
 ? this.getConversationForRetrieval(options.sessionId, options.conversation)
 : undefined;
-
 // Change 21: when unified RAG hybrid mode is off, retain only the primary
 // source family selected for this query. The underlying single-source hybrid
 // algorithms (lexical + semantic) remain untouched; this switch only controls
@@ -891,8 +869,8 @@ const conversation = sourceSet.has('conversation') && isRagConversationAwareEnab
 const effectiveSourceSet = isRagHybridEnabled()
 ? sourceSet
 : new Set<RagSourceSelection>(
-    selectedSources.filter((source) => source !== 'conversation').slice(0, 1),
-  );
+selectedSources.filter((source) => source !== 'conversation').slice(0, 1),
+);
 const topK = Math.max(1, Math.min(50, options.topK ?? 8));
 const candidatePoolSize = Math.max(topK, Math.min(1000, options.candidatePoolSize ?? 100));
 const rerankCandidatePoolSize = Math.max(
