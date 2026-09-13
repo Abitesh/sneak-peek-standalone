@@ -147,7 +147,8 @@ export class CanonicalEmbeddingService {
           if (!Array.isArray(vector) && !(vector instanceof Float32Array)) {
             throw new Error(`Embedding provider returned an invalid vector for chunk ${batch[i].id}`);
           }
-          this.storage.storeEmbedding(batch[i].id, space.id, vector);
+          const normalizedVector = vector instanceof Float32Array ? Array.from(vector) : vector;
+          this.storage.storeEmbedding(batch[i].id, space.id, normalizedVector);
           embeddedCount += 1;
         }
       } catch (error) {

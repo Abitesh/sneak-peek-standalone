@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import Database from 'better-sqlite3';
 import * as sqliteVec from 'sqlite-vec';
-import { installCanonicalRagSchema } from '../../dist-electron/rag/canonical/CanonicalRagSchema.js';
-import { CanonicalRagStorage } from '../../dist-electron/rag/canonical/CanonicalRagStorage.js';
-import { CanonicalEmbeddingService } from '../../dist-electron/rag/canonical/CanonicalEmbeddingService.js';
+import { installCanonicalRagSchema } from '../../../dist-electron/electron/rag/canonical/CanonicalRagSchema.js';
+import { CanonicalRagStorage } from '../../../dist-electron/electron/rag/canonical/CanonicalRagStorage.js';
+import { CanonicalEmbeddingService } from '../../../dist-electron/electron/rag/canonical/CanonicalEmbeddingService.js';
 
 function makeStorage() {
   const db = new Database(':memory:');
@@ -26,7 +26,7 @@ function seedRevision(storage, sourceId = 'source') {
     chunkingVersion: 'chunk-1',
     normalizationVersion: 'norm-1',
   });
-  storage.replaceChunks(revision.id, [
+  storage.replaceChunks(doc.id,revision.id, [
     { chunkIndex: 0, text: 'first canonical chunk', sourceLocator: '0' },
     { chunkIndex: 1, text: 'second canonical chunk', sourceLocator: '1' },
     { chunkIndex: 2, text: 'third canonical chunk', sourceLocator: '2' },
