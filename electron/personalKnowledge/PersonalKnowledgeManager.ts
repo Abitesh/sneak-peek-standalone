@@ -538,6 +538,11 @@ try { DatabaseManager.getInstance().deleteRagIndexStatus('personal', id); } catc
 try { await fs.promises.unlink(storedPath); } catch { /* best effort */ }
 throw error;
 }
+try {
+await this.ragManager.projectPersonalFileCanonical(id);
+} catch (error) {
+console.warn('[PersonalKnowledgeManager] Canonical personal RAG projection failed; legacy ingestion remains successful:', error instanceof Error ? error.message : String(error));
+}
 return this.getFile(id)!;
 }
 const record = this.getFile(id)!;

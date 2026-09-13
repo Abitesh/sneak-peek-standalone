@@ -31,6 +31,10 @@ import { buildDocumentChunks } from '../services/modes/DocumentMap';
 import { isRagEnabled, isRagHybridEnabled, isRagConversationAwareEnabled } from '../intelligence/intelligenceFlags';
 import { beginIndexAttempt, isCurrentIndexAttempt, invalidateIndexAttempt, withCurrentIndexAttempt } from './IndexAttemptRegistry';
 import { PersonalStorageAdapter } from './storage/PersonalStorageAdapter';
+import { CanonicalRagStorage } from './canonical/CanonicalRagStorage';
+import { CanonicalEmbeddingService } from './canonical/CanonicalEmbeddingService';
+import { CanonicalEmbeddingProviderAdapter, getCanonicalPipelineEmbeddingIdentity } from './canonical/CanonicalEmbeddingProviderAdapter';
+import { CanonicalPersonalRagService, type CanonicalPersonalProjectionResult } from './canonical/CanonicalPersonalRagService';
 import { ModeStorageAdapter } from './storage/ModeStorageAdapter';
 import { MeetingStorageAdapter } from './storage/MeetingStorageAdapter';
 import type {
@@ -290,6 +294,8 @@ private readonly modeAdapter: ModeRagAdapter;
 private readonly personalAdapter: PersonalRagAdapter;
 private readonly knowledgeAdapter: KnowledgeRagAdapter;
 private readonly personalStorage: PersonalStorageAdapter;
+private canonicalPersonalRagService: CanonicalPersonalRagService | null = null;
+private canonicalPersonalEmbeddingIdentityKey: string | null = null;
 private readonly modeStorage: ModeStorageAdapter;
 /**
 * Change 1/18: source coordination lives here, while each source keeps ownership
@@ -1056,6 +1062,34 @@ return this.retriever;
 }
 getEmbeddingPipeline(): EmbeddingPipeline {
 return this.embeddingPipeline;
+}
+
+/**
+ * Project one legacy personal file into the canonical RAG backend.
+ *
+ * This is intentionally a migration-only bridge: legacy personal storage and
+ * retrieval remain authoritative. The canonical service is cached for one
+ * active embedding identity and rebuilt when the shared pipeline changes
+ * provider/model/dimensions/space.
+ */
+async projectPersonalFileCanonical(personalFileId: string): Promise<CanonicalPersonalProjectionResult> {
+const identity = getCanonicalPipelineEmbeddingIdentity(this.embeddingPipeline);
+if (!identity) {
+throw new Error('Canonical personal RAG projection unavailable: embedding pipeline has no active provider');
+}
+const identityKey = [identity.provider, identity.model, identity.dimensions, identity.space, identity.version].join('\u001f');
+if (!this.canonicalPersonalRagService || this.canonicalPersonalEmbeddingIdentityKey !== identityKey) {
+const storage = new CanonicalRagStorage(this.db);
+const provider = new CanonicalEmbeddingProviderAdapter(this.embeddingPipeline);
+const embeddingService = new CanonicalEmbeddingService(storage, provider);
+this.canonicalPersonalRagService = new CanonicalPersonalRagService(
+storage,
+this.personalStorage,
+embeddingService,
+);
+this.canonicalPersonalEmbeddingIdentityKey = identityKey;
+}
+return this.canonicalPersonalRagService.projectPersonalFile(personalFileId);
 }
 initializeEmbeddings(keys: { openaiKey?: string, geminiKey?: string, geminiKeys?: string[], ollamaUrl?: string, providerDataScopes?: ProviderDataScopePolicy, explicitKeyManagement?: boolean }): void {
 const initPromise = this.embeddingPipeline.initialize({
