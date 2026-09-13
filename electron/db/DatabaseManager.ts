@@ -5,6 +5,7 @@ import { app } from 'electron';
 import fs from 'fs';
 import * as sqliteVec from 'sqlite-vec';
 import { buildLegacySpaceCaseSql } from '../rag/embeddingSpace';
+import { installCanonicalRagSchema } from '../rag/canonical/CanonicalRagSchema';
 import type { ActionItem, DecisionItem, FollowUpDraft, MeetingSummaryGenerationMeta, MeetingSummaryModeMeta, MeetingSummarySectionV3, NoteBlock, PersonMention, QuestionItem, RiskItem, SourceQualityMeta, SpeakerLabelMap, SummaryStatus, TimelineItem } from '../services/meeting/types';
 // Interfaces for our data objects
 export interface Meeting {
@@ -1760,7 +1761,6 @@ this.ensurePersonalVecTableForDim(dim);
 }
 this.db.pragma('user_version = 33');
 }
-
 // Version 33 → 34: add a shared FTS5 index for meeting transcript chunks.
 // This is the lexical arm of the universal meeting hybrid retriever. The
 // existing Personal File FTS5 index remains separate because its storage
@@ -1770,20 +1770,17 @@ console.log('[DatabaseManager] Applying migration v33 → v34: meeting chunk FTS
 this.db.exec(`
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts
 USING fts5(chunk_id UNINDEXED, meeting_id UNINDEXED, speaker, text);
-
 CREATE TRIGGER IF NOT EXISTS chunks_fts_ai
 AFTER INSERT ON chunks
 BEGIN
 INSERT INTO chunks_fts(chunk_id, meeting_id, speaker, text)
 VALUES (NEW.id, NEW.meeting_id, COALESCE(NEW.speaker, ''), NEW.cleaned_text);
 END;
-
 CREATE TRIGGER IF NOT EXISTS chunks_fts_ad
 AFTER DELETE ON chunks
 BEGIN
 DELETE FROM chunks_fts WHERE chunk_id = OLD.id;
 END;
-
 CREATE TRIGGER IF NOT EXISTS chunks_fts_au
 AFTER UPDATE OF meeting_id, speaker, cleaned_text ON chunks
 BEGIN
@@ -1791,14 +1788,12 @@ DELETE FROM chunks_fts WHERE chunk_id = OLD.id;
 INSERT INTO chunks_fts(chunk_id, meeting_id, speaker, text)
 VALUES (NEW.id, NEW.meeting_id, COALESCE(NEW.speaker, ''), NEW.cleaned_text);
 END;
-
 DELETE FROM chunks_fts;
 INSERT INTO chunks_fts(chunk_id, meeting_id, speaker, text)
 SELECT id, meeting_id, COALESCE(speaker, ''), cleaned_text FROM chunks;
 `);
 this.db.pragma('user_version = 34');
 }
-
 // Version 34 → 35: unified document lexical/vector index support for mode
 // reference chunks. Personal files already have FTS5 + dedicated vector storage;
 // this brings the mode source's lexical index to the same indexing lifecycle
@@ -1834,10 +1829,8 @@ metadata_json TEXT NOT NULL DEFAULT '{}',
 UNIQUE(file_id, chunk_index)
 );
 CREATE INDEX IF NOT EXISTS idx_mode_ref_chunks_file ON mode_reference_chunks(file_id);
-
 CREATE VIRTUAL TABLE IF NOT EXISTS mode_reference_chunks_fts
 USING fts5(chunk_id UNINDEXED, file_id UNINDEXED, file_name, text);
-
 CREATE TRIGGER IF NOT EXISTS mode_reference_chunks_ai
 AFTER INSERT ON mode_reference_chunks
 BEGIN
@@ -1845,13 +1838,11 @@ INSERT INTO mode_reference_chunks_fts(chunk_id, file_id, file_name, text)
 SELECT NEW.id, NEW.file_id, m.file_name, NEW.text
 FROM mode_reference_files m WHERE m.id = NEW.file_id;
 END;
-
 CREATE TRIGGER IF NOT EXISTS mode_reference_chunks_ad
 AFTER DELETE ON mode_reference_chunks
 BEGIN
 DELETE FROM mode_reference_chunks_fts WHERE chunk_id = OLD.id;
 END;
-
 CREATE TRIGGER IF NOT EXISTS mode_reference_chunks_au
 AFTER UPDATE OF file_id, text ON mode_reference_chunks
 BEGIN
@@ -1860,7 +1851,6 @@ INSERT INTO mode_reference_chunks_fts(chunk_id, file_id, file_name, text)
 SELECT NEW.id, NEW.file_id, m.file_name, NEW.text
 FROM mode_reference_files m WHERE m.id = NEW.file_id;
 END;
-
 DELETE FROM mode_reference_chunks_fts;
 INSERT INTO mode_reference_chunks_fts(chunk_id, file_id, file_name, text)
 SELECT c.id, c.file_id, m.file_name, c.text
@@ -1874,7 +1864,6 @@ console.error('[DatabaseManager] v35 mode FTS index setup failed; leaving schema
 if (!modeFtsReady) return;
 this.db.pragma('user_version = 35');
 }
-
 // Version 35 → 36: canonical unified document-index lifecycle status.
 // This is additive: legacy mode_reference_index_state and personal-file fields
 // remain intact for compatibility, while the UI consumes one status contract.
@@ -1900,6 +1889,23 @@ CREATE INDEX IF NOT EXISTS idx_rag_index_status_updated ON rag_index_status(upda
 this.db.pragma('user_version = 36');
 } catch (e) {
 console.error('[DatabaseManager] v36 canonical RAG index status migration failed; leaving schema version at 35 for retry:', e);
+return;
+}
+}
+
+// Version 36 → 37: install the NEW canonical RAG storage foundation.
+//
+// IMPORTANT: v36's `rag_index_status` is already a live production
+// contract. The new revision-scoped status table therefore uses the
+// collision-free physical name `rag_canonical_index_status`. This migration
+// is additive and does not redirect any existing caller.
+if (version < 37) {
+console.log('[DatabaseManager] Applying migration v36 → v37: canonical RAG storage foundation');
+try {
+installCanonicalRagSchema(this.db);
+this.db.pragma('user_version = 37');
+} catch (e) {
+console.error('[DatabaseManager] v37 canonical RAG storage migration failed; leaving schema version at 36 for retry:', e);
 return;
 }
 }
@@ -2329,7 +2335,6 @@ UNIQUE(file_id, chunk_index)
 CREATE INDEX IF NOT EXISTS idx_mode_ref_chunks_file ON mode_reference_chunks(file_id);
 `);
 }
-
 public replaceModeReferenceChunks(
 fileId: string,
 chunks: Array<{ text: string; chunkIndex: number; pageStart?: number; pageEnd?: number; section?: string; heading?: string; contentType?: string; tableIndex?: number; metadata?: Record<string, unknown> }>,
@@ -2366,7 +2371,6 @@ ids.push(Number(result.lastInsertRowid));
 })();
 return ids;
 }
-
 public getModeReferenceChunkIds(fileId: string): Array<{ id: number; chunkIndex: number }> {
 if (!this.db) return [];
 this.ensureModeReferenceChunkSchema();
@@ -2374,7 +2378,6 @@ return this.db.prepare(
 'SELECT id, chunk_index AS chunkIndex FROM mode_reference_chunks WHERE file_id = ? ORDER BY chunk_index ASC'
 ).all(fileId) as Array<{ id: number; chunkIndex: number }>;
 }
-
 public updateModeReferenceIndexState(
 fileId: string,
 fileHash: string,
@@ -2390,7 +2393,6 @@ INSERT OR REPLACE INTO mode_reference_index_state
 VALUES (?, ?, ?, ?, ?, ?)
 `).run(fileId, fileHash, Date.now(), chunkCount, status, embeddingSpace);
 }
-
 public replacePersonalFileChunks(
 fileId: string,
 chunks: Array<{ id: string; text: string; chunkIndex: number; startChar?: number; endChar?: number; pageStart?: number; pageEnd?: number; section?: string; heading?: string; contentType?: string; metadata?: Record<string, unknown> }>,
@@ -2418,14 +2420,12 @@ ids.push(chunk.id);
 })();
 return ids;
 }
-
 public getPersonalFileChunkIds(fileId: string): string[] {
 if (!this.db) return [];
 return (this.db.prepare(
 'SELECT id FROM personal_file_chunks WHERE file_id = ? ORDER BY chunk_index ASC'
 ).all(fileId) as Array<{ id: string }>).map((row) => row.id);
 }
-
 public addReferenceFile(file: {
 id: string;
 modeId: string;
@@ -3043,7 +3043,6 @@ embedding float[${dim}] distance_metric=cosine
 console.error(`[DatabaseManager] Failed to create personal vec0 table for dim=${dim}:`, e);
 }
 }
-
 /** Return dimensions for which Personal File vec tables currently exist. */
 public getExistingPersonalVecDims(): number[] {
 const dims = new Set<number>([384, ...DatabaseManager.KNOWN_DIMS]);
@@ -3061,7 +3060,6 @@ console.warn('[DatabaseManager] getExistingPersonalVecDims failed:', e);
 }
 return [...dims];
 }
-
 /**
 * Check if sqlite-vec is available (any per-dimension vec0 table must exist)
 */
@@ -3588,7 +3586,6 @@ console.warn('[DatabaseManager] Failed to persist RAG index status:', error inst
 return false;
 }
 }
-
 public deleteRagIndexStatus(sourceType: 'mode' | 'personal', documentId: string): void {
 if (!this.db) return;
 try {
@@ -3597,7 +3594,6 @@ this.db.prepare('DELETE FROM rag_index_status WHERE source_type = ? AND document
 console.warn('[DatabaseManager] Failed to delete RAG index status:', error instanceof Error ? error.message : String(error));
 }
 }
-
 public getRagIndexStatus(sourceType: 'mode' | 'personal', documentId: string): any | null {
 if (!this.db) return null;
 try {
@@ -3614,7 +3610,6 @@ console.warn('[DatabaseManager] Failed to read RAG index status:', error instanc
 return null;
 }
 }
-
 public listRagIndexStatuses(sourceType: 'mode' | 'personal', documentIds?: string[]): any[] {
 if (!this.db) return [];
 try {
@@ -3638,7 +3633,6 @@ console.warn('[DatabaseManager] Failed to list RAG index statuses:', error insta
 return [];
 }
 }
-
 // ============================================
 // Personal Files Management
 // ============================================
