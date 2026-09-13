@@ -229,6 +229,29 @@ export class EmbeddingPipeline {
     }
 
     /**
+     * Read-only identity bridge for canonical RAG embedding storage. The
+     * adapter compatibility version describes the pipeline-to-canonical
+     * contract; it is deliberately not a model/provider release number.
+     */
+    getActiveCanonicalEmbeddingIdentity(): {
+        provider: string;
+        model: string;
+        dimensions: number;
+        space: string;
+        version: string;
+    } | undefined {
+        const provider = this.provider;
+        if (!provider) return undefined;
+        return {
+            provider: provider.name,
+            model: provider.model,
+            dimensions: provider.dimensions,
+            space: provider.space,
+            version: 'pipeline-v1',
+        };
+    }
+
+    /**
      * Queue a meeting for embedding processing
      * Called when meeting ends
      */
