@@ -587,6 +587,37 @@ export class CanonicalRagStorage {
     return this.readJob(id)!;
   }
 
+  /**
+   * Atomically claim one specific job. This prevents a worker from claiming a
+   * different job when several canonical indexing workers run concurrently.
+   */
+  claimSpecificJob(jobId: string, options: ClaimJobOptions): CanonicalRagIndexJob | null {
+    const now = options.now ?? nowMs();
+    const leaseMs = options.leaseMs ?? 60_000;
+    const tx = this.db.transaction(() => {
+      const row = this.db.prepare(`
+        SELECT j.*
+        FROM rag_index_jobs j
+        JOIN rag_documents d ON d.id = j.document_id
+        WHERE j.id = ?
+          AND j.state IN ('QUEUED', 'RETRY_WAIT', 'RUNNING')
+          AND j.available_at <= ?
+          AND (j.lease_until IS NULL OR j.lease_until <= ?)
+          AND d.deleted_at IS NULL
+          AND (d.current_revision_id IS NULL OR d.current_revision_id = j.revision_id)
+      `).get(jobId, now, now) as any;
+      if (!row) return null;
+      const attempt = Number(row.attempt_count) + 1;
+      this.db.prepare(`
+        UPDATE rag_index_jobs
+        SET state = 'RUNNING', attempt_count = ?, lease_until = ?, leased_by = ?, updated_at = ?
+        WHERE id = ?
+      `).run(attempt, now + leaseMs, options.workerId, now, jobId);
+      return this.readJob(jobId);
+    });
+    return tx() as CanonicalRagIndexJob | null;
+  }
+
   claimJob(options: ClaimJobOptions): CanonicalRagIndexJob | null {
     const now = options.now ?? nowMs();
     const leaseMs = options.leaseMs ?? 60_000;
@@ -626,9 +657,12 @@ export class CanonicalRagStorage {
     return Number(result.changes);
   }
 
-  completeJob(jobId: string): CanonicalRagIndexJob {
+  completeJob(jobId: string, workerId?: string): CanonicalRagIndexJob {
     const job = this.requireJob(jobId);
     if (job.state !== 'RUNNING') throw new Error(`Cannot complete job in state ${job.state}`);
+    if (workerId && job.leasedBy !== workerId) {
+      throw new Error(`Canonical indexing job ${jobId} is leased by another worker`);
+    }
     this.db.prepare(`
       UPDATE rag_index_jobs
       SET state = 'COMPLETED', lease_until = NULL, leased_by = NULL,
@@ -638,9 +672,12 @@ export class CanonicalRagStorage {
     return this.readJob(jobId)!;
   }
 
-  failJob(jobId: string, errorMessage: string, retry = true): CanonicalRagIndexJob {
+  failJob(jobId: string, errorMessage: string, retry = true, workerId?: string): CanonicalRagIndexJob {
     const job = this.requireJob(jobId);
     if (job.state !== 'RUNNING') throw new Error(`Cannot fail job in state ${job.state}`);
+    if (workerId && job.leasedBy !== workerId) {
+      throw new Error(`Canonical indexing job ${jobId} is leased by another worker`);
+    }
     const exhausted = job.attemptCount >= job.maxAttempts;
     const state: CanonicalRagJobState = retry && !exhausted ? 'RETRY_WAIT' : 'FAILED';
     this.db.prepare(`
