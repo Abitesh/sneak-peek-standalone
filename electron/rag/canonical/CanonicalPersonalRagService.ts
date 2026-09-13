@@ -11,6 +11,7 @@ import type { PersonalStorageAdapter } from '../storage/PersonalStorageAdapter';
 import { CanonicalEmbeddingService } from './CanonicalEmbeddingService';
 import type { CanonicalRagDocument, CanonicalRagRevision } from './CanonicalRagTypes';
 import { CanonicalRagStorage } from './CanonicalRagStorage';
+import { CanonicalRagIndexer } from './CanonicalRagIndexer';
 
 export interface CanonicalPersonalProjectionResult {
   personalFileId: string;
@@ -32,6 +33,7 @@ export class CanonicalPersonalRagService {
     private readonly storage: CanonicalRagStorage,
     private readonly personalStorage: PersonalStorageAdapter,
     private readonly embeddingService: CanonicalEmbeddingService,
+    private readonly indexer?: CanonicalRagIndexer,
   ) {}
 
   /**
@@ -95,6 +97,20 @@ export class CanonicalPersonalRagService {
         ...(chunk.metadata ?? {}),
       },
       })));
+    }
+
+    if (this.indexer) {
+      const indexed = await this.indexer.indexRevision(revision.id, { activate: true });
+      return {
+        personalFileId,
+        documentId: indexed.documentId,
+        revisionId: indexed.revisionId,
+        embeddingSpaceId: indexed.embeddingSpaceId,
+        chunkCount: indexed.chunkCount,
+        embeddedChunkCount: indexed.embeddedChunkCount,
+        complete: indexed.complete,
+        activated: indexed.activated,
+      };
     }
 
     const embedding = await this.embeddingService.embedRevision(revision.id);
