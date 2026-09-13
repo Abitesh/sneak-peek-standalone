@@ -604,7 +604,6 @@ export class CanonicalRagStorage {
           AND j.available_at <= ?
           AND (j.lease_until IS NULL OR j.lease_until <= ?)
           AND d.deleted_at IS NULL
-          AND (d.current_revision_id IS NULL OR d.current_revision_id = j.revision_id)
       `).get(jobId, now, now) as any;
       if (!row) return null;
       const attempt = Number(row.attempt_count) + 1;
@@ -630,7 +629,6 @@ export class CanonicalRagStorage {
           AND j.available_at <= ?
           AND (j.lease_until IS NULL OR j.lease_until <= ?)
           AND d.deleted_at IS NULL
-          AND (d.current_revision_id IS NULL OR d.current_revision_id = j.revision_id)
         ORDER BY j.created_at ASC
         LIMIT 1
       `).get(now, now) as any;
