@@ -429,7 +429,17 @@ const existing = this.db.prepare(
 `SELECT id FROM personal_files WHERE content_hash = ?`
 ).get(contentHash) as { id?: string } | undefined;
 if (existing?.id) {
-return this.getFile(existing.id)!;
+  // A duplicate-content upload must still repair a missing/incomplete canonical
+  // projection. Canonical projection is idempotent, while legacy storage remains
+  // authoritative for the early-return decision.
+  if (this.ragManager) {
+    try {
+      await this.ragManager.projectPersonalFileCanonical(existing.id);
+    } catch (error) {
+      console.warn('[PersonalKnowledgeManager] Canonical personal RAG repair failed for existing file; legacy file remains valid:', error instanceof Error ? error.message : String(error));
+    }
+  }
+  return this.getFile(existing.id)!;
 }
 const id = makeId('pfile', `${contentHash}:${resolved}`);
 this.ragManager?.setIndexStatus('personal', id, 'QUEUED');

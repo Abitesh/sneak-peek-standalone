@@ -35,6 +35,9 @@ import { CanonicalRagStorage } from './canonical/CanonicalRagStorage';
 import { CanonicalEmbeddingService } from './canonical/CanonicalEmbeddingService';
 import { CanonicalEmbeddingProviderAdapter, getCanonicalPipelineEmbeddingIdentity } from './canonical/CanonicalEmbeddingProviderAdapter';
 import { CanonicalPersonalRagService, type CanonicalPersonalProjectionResult } from './canonical/CanonicalPersonalRagService';
+import { CanonicalModeBackfillService, type ModeBackfillResult } from './canonical/CanonicalModeBackfillService';
+import { CanonicalMeetingBackfillService, type MeetingBackfillResult } from './canonical/CanonicalMeetingBackfillService';
+import { CanonicalRagIndexer } from './canonical/CanonicalRagIndexer';
 import { ModeStorageAdapter } from './storage/ModeStorageAdapter';
 import { MeetingStorageAdapter } from './storage/MeetingStorageAdapter';
 import type {
@@ -296,6 +299,8 @@ private readonly knowledgeAdapter: KnowledgeRagAdapter;
 private readonly personalStorage: PersonalStorageAdapter;
 private canonicalPersonalRagService: CanonicalPersonalRagService | null = null;
 private canonicalPersonalEmbeddingIdentityKey: string | null = null;
+private canonicalModeBackfillService: CanonicalModeBackfillService | null = null;
+private canonicalMeetingBackfillService: CanonicalMeetingBackfillService | null = null;
 private readonly modeStorage: ModeStorageAdapter;
 /**
 * Change 1/18: source coordination lives here, while each source keeps ownership
@@ -631,6 +636,13 @@ errorMessage: embeddedChunkCount > 0
 }
 if (input.sourceType === 'mode') {
 dbManager.updateModeReferenceIndexState(documentId, contentHash, chunks.length, status, embeddingSpace ?? null);
+}
+if (input.sourceType === 'mode' && status === 'ready') {
+  try {
+    await this.projectModeFileCanonical(documentId);
+  } catch (error) {
+    console.warn('[RAGManager] Canonical Mode projection failed; legacy indexing remains successful:', error instanceof Error ? error.message : String(error));
+  }
 }
 return { documentId, sourceType: input.sourceType, chunkCount: chunks.length, embeddedChunkCount, status, ...(embeddingSpace ? { embeddingSpace } : {}) };
 }
@@ -1091,6 +1103,52 @@ this.canonicalPersonalEmbeddingIdentityKey = identityKey;
 }
 return this.canonicalPersonalRagService.projectPersonalFile(personalFileId);
 }
+
+/**
+ * Project a successfully indexed Mode reference file into canonical RAG.
+ *
+ * Legacy Mode storage remains authoritative. This bridge is intentionally
+ * invoked only after the legacy indexDocument path has completed successfully.
+ */
+async projectModeFileCanonical(modeFileId: string): Promise<ModeBackfillResult> {
+  const identity = getCanonicalPipelineEmbeddingIdentity(this.embeddingPipeline);
+  if (!identity) {
+    throw new Error('Canonical Mode RAG projection unavailable: embedding pipeline has no active provider');
+  }
+  const storage = new CanonicalRagStorage(this.db);
+  const provider = new CanonicalEmbeddingProviderAdapter(this.embeddingPipeline);
+  this.canonicalModeBackfillService = new CanonicalModeBackfillService(
+    this.db,
+    storage,
+    (embeddingService) => new CanonicalRagIndexer(storage, embeddingService),
+    provider,
+  );
+  return this.canonicalModeBackfillService.backfillFile(modeFileId);
+}
+
+/**
+ * Project persisted historical meeting chunks into canonical RAG.
+ *
+ * Only transcript-derived persisted chunks are projected. Live meeting state
+ * and meeting summaries/transcripts/interactions remain outside this boundary.
+ */
+async projectMeetingCanonical(meetingId: string): Promise<MeetingBackfillResult> {
+  const identity = getCanonicalPipelineEmbeddingIdentity(this.embeddingPipeline);
+  if (!identity) {
+    throw new Error('Canonical meeting RAG projection unavailable: embedding pipeline has no active provider');
+  }
+  const storage = new CanonicalRagStorage(this.db);
+  const provider = new CanonicalEmbeddingProviderAdapter(this.embeddingPipeline);
+  const embeddingService = new CanonicalEmbeddingService(storage, provider);
+  const meetingStorage = new MeetingStorageAdapter(this.db, this.vectorStore);
+  this.canonicalMeetingBackfillService = new CanonicalMeetingBackfillService(
+    this.db,
+    meetingStorage,
+    storage,
+    (canonicalStorage) => new CanonicalRagIndexer(canonicalStorage, embeddingService),
+  );
+  return this.canonicalMeetingBackfillService.backfillMeeting(meetingId);
+}
 initializeEmbeddings(keys: { openaiKey?: string, geminiKey?: string, geminiKeys?: string[], ollamaUrl?: string, providerDataScopes?: ProviderDataScopePolicy, explicitKeyManagement?: boolean }): void {
 const initPromise = this.embeddingPipeline.initialize({
 ...keys,
@@ -1148,6 +1206,13 @@ return { chunkCount: 0 };
 }
 // 3. Save chunks to database
 this.vectorStore.saveChunks(chunks);
+// Canonical migration boundary: only persisted transcript-derived chunks are
+// projected. Summary/AI-interaction/transcript domain storage remains separate.
+try {
+  await this.projectMeetingCanonical(meetingId);
+} catch (error) {
+  console.warn('[RAGManager] Canonical meeting projection failed; legacy meeting RAG remains successful:', error instanceof Error ? error.message : String(error));
+}
 // 4. Save summary if provided
 if (summary) {
 this.vectorStore.saveSummary(meetingId, summary);
