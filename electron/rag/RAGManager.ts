@@ -28,7 +28,7 @@ import { PersonalRagAdapter } from './adapters/PersonalRagAdapter';
 import { KnowledgeRagAdapter } from './adapters/KnowledgeRagAdapter';
 import { extractSafeDocumentText } from '../services/SafeDocumentTextExtractor';
 import { buildDocumentChunks } from '../services/modes/DocumentMap';
-import { isRagEnabled, isRagHybridEnabled, isRagConversationAwareEnabled } from '../intelligence/intelligenceFlags';
+import { isRagEnabled, isRagHybridEnabled, isRagConversationAwareEnabled, isIntelligenceFlagEnabled } from '../intelligence/intelligenceFlags';
 import { beginIndexAttempt, isCurrentIndexAttempt, invalidateIndexAttempt, withCurrentIndexAttempt } from './IndexAttemptRegistry';
 import { PersonalStorageAdapter } from './storage/PersonalStorageAdapter';
 import { CanonicalRagStorage } from './canonical/CanonicalRagStorage';
@@ -38,6 +38,7 @@ import { CanonicalPersonalRagService, type CanonicalPersonalProjectionResult } f
 import { CanonicalModeBackfillService, type ModeBackfillResult } from './canonical/CanonicalModeBackfillService';
 import { CanonicalMeetingBackfillService, type MeetingBackfillResult } from './canonical/CanonicalMeetingBackfillService';
 import { CanonicalRagIndexer } from './canonical/CanonicalRagIndexer';
+import { CanonicalRagShadowService } from './canonical/CanonicalRagShadowService';
 import { ModeStorageAdapter } from './storage/ModeStorageAdapter';
 import { MeetingStorageAdapter } from './storage/MeetingStorageAdapter';
 import type {
@@ -948,6 +949,21 @@ candidatePoolSize,
 results.push(...personalResults);
 } catch (error) {
 console.warn('[RAGManager] Personal adapter retrieval failed:', error);
+}
+}
+// Change 25 Phase 6.3: canonical lexical shadow. This is deliberately placed
+// after all legacy source adapters and before the existing rerank/gate stages.
+// The canonical result set is observe-only and is never merged into `results`.
+if (isIntelligenceFlagEnabled('canonicalRagShadow')) {
+try {
+  const shadow = new CanonicalRagShadowService(new CanonicalRagStorage(this.db));
+  await shadow.observe(normalizedQuery, {
+    sourceTypes: [...effectiveSourceSet],
+    legacyResultCount: results.length,
+  });
+} catch (error) {
+  // Shadow failures must never affect the established retrieval answer path.
+  console.warn('[RAGManager] Canonical lexical RAG shadow failed; legacy retrieval remains unchanged:', error instanceof Error ? error.message : String(error));
 }
 }
 // Final common-layer fusion boundary: source adapters provide candidates,

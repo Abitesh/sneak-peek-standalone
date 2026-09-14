@@ -20,6 +20,12 @@ import type {
   ClaimJobOptions,
   VectorConsistencyReport,
 } from './CanonicalRagTypes';
+import type {
+  CanonicalRagLexicalSearchOptions,
+  CanonicalRagLexicalSearchResult,
+  CanonicalRagVectorSearchOptions,
+  CanonicalRagVectorSearchResult,
+} from './CanonicalRagQueryTypes';
 
 const MAX_VECTOR_DIMENSIONS = 100_000;
 const SUPPORTED_METRIC = 'cosine';
@@ -291,6 +297,152 @@ export class CanonicalRagStorage {
       SELECT * FROM rag_chunks WHERE revision_id = ? ORDER BY chunk_index ASC
     `).all(revisionId) as any[];
     return rows.map((row) => this.mapChunk(row));
+  }
+
+  searchLexical(query: string, options: CanonicalRagLexicalSearchOptions): CanonicalRagLexicalSearchResult[] {
+    const normalizedQuery = query.trim();
+    if (!normalizedQuery) return [];
+    const limit = this.normalizeSearchLimit(options.limit);
+    const filters = ['d.deleted_at IS NULL', 'd.current_revision_id = f.revision_id', 's.status = ?'];
+    const params: unknown[] = [normalizedQuery, 'READY'];
+
+    filters.push('f.source_type = ?');
+    params.push(options.sourceType);
+    if (options.sourceId !== undefined) {
+      filters.push('d.source_id = ?');
+      params.push(options.sourceId);
+    }
+    if (options.scopeId !== undefined) {
+      filters.push('d.scope_id = ?');
+      params.push(options.scopeId);
+    }
+
+    const rows = this.db.prepare(`
+      SELECT
+        c.id, c.document_id, c.revision_id,
+        c.chunk_index, c.text, c.content_hash, c.page_start, c.page_end,
+        c.section, c.heading, c.content_type, c.start_char, c.end_char,
+        c.table_index, c.token_count, c.speaker, c.timestamp_start,
+        c.timestamp_end, c.source_locator, c.metadata_json, c.created_at,
+        d.id AS source_document_id, d.source_type AS source_document_type,
+        d.source_id AS source_document_source_id, d.owner_id AS source_owner_id,
+        d.scope_id AS source_scope_id, d.name AS source_name, d.path AS source_path,
+        d.mime_type AS source_mime_type, d.file_type AS source_file_type,
+        d.size_bytes AS source_size_bytes, d.content_hash AS source_content_hash,
+        d.created_at AS source_created_at, d.updated_at AS source_updated_at,
+        d.current_revision_id AS source_current_revision_id, d.deleted_at AS source_deleted_at,
+        d.metadata_json AS source_metadata_json,
+        bm25(rag_chunks_fts) AS bm25_score
+      FROM rag_chunks_fts AS f
+      JOIN rag_chunks AS c ON c.id = f.chunk_id
+        AND c.document_id = f.document_id
+        AND c.revision_id = f.revision_id
+      JOIN rag_documents AS d ON d.id = f.document_id
+      JOIN rag_document_revisions AS r ON r.id = f.revision_id
+        AND r.document_id = f.document_id
+      JOIN rag_canonical_index_status AS s ON s.document_id = f.document_id
+        AND s.revision_id = f.revision_id
+      WHERE rag_chunks_fts MATCH ?
+        AND ${filters.join(' AND ')}
+      ORDER BY bm25_score ASC, c.chunk_index ASC, c.id ASC
+      LIMIT ?
+    `).all(...params, limit) as any[];
+
+    return rows.map((row) => ({
+      chunk: this.mapChunk(row),
+      document: this.mapSearchDocument(row),
+      score: Number(row.bm25_score),
+    }));
+  }
+
+  searchVector(queryEmbedding: readonly number[], options: CanonicalRagVectorSearchOptions): CanonicalRagVectorSearchResult[] {
+    const limit = this.normalizeSearchLimit(options.limit);
+    const space = this.requireSpace(options.embeddingSpaceId);
+    const vector = validateVector(queryEmbedding, space.dimensions);
+    this.ensureCanonicalVectorTable(space);
+
+    const filters = [
+      'e.embedding_space_id = ?',
+      'd.deleted_at IS NULL',
+      'd.current_revision_id = c.revision_id',
+      's.status = ?',
+      'e.physical_row_key = v.rowid',
+    ];
+    const params: unknown[] = [
+      options.embeddingSpaceId,
+      'READY',
+    ];
+
+    filters.push('d.source_type = ?');
+    params.push(options.sourceType);
+    if (options.sourceId !== undefined) {
+      filters.push('d.source_id = ?');
+      params.push(options.sourceId);
+    }
+    if (options.scopeId !== undefined) {
+      filters.push('d.scope_id = ?');
+      params.push(options.scopeId);
+    }
+
+    const tableName = this.vectorTableName(space.vectorTableKey);
+    const filterSql = filters.filter((filter) => filter !== 'e.physical_row_key = v.rowid').join(' AND ');
+    const query = this.db.prepare(`
+      SELECT
+        c.*,
+        d.id AS source_document_id, d.source_type AS source_document_type,
+        d.source_id AS source_document_source_id, d.owner_id AS source_owner_id,
+        d.scope_id AS source_scope_id, d.name AS source_name, d.path AS source_path,
+        d.mime_type AS source_mime_type, d.file_type AS source_file_type,
+        d.size_bytes AS source_size_bytes, d.content_hash AS source_content_hash,
+        d.created_at AS source_created_at, d.updated_at AS source_updated_at,
+        d.current_revision_id AS source_current_revision_id, d.deleted_at AS source_deleted_at,
+        d.metadata_json AS source_metadata_json,
+        e.embedding_space_id, e.physical_row_key, v.distance
+      FROM (
+        SELECT rowid AS physical_row_key, distance
+        FROM ${tableName}
+        WHERE embedding MATCH ?
+        ORDER BY distance ASC
+        LIMIT ?
+      ) AS v
+      JOIN rag_embeddings AS e ON e.physical_row_key = v.physical_row_key
+      JOIN rag_chunks AS c ON c.id = e.chunk_id
+      JOIN rag_documents AS d ON d.id = c.document_id
+      JOIN rag_document_revisions AS r ON r.id = c.revision_id
+        AND r.document_id = c.document_id
+      JOIN rag_canonical_index_status AS s ON s.document_id = c.document_id
+        AND s.revision_id = c.revision_id
+      WHERE ${filterSql}
+      ORDER BY v.distance ASC, c.chunk_index ASC, c.id ASC
+      LIMIT ?
+    `);
+
+    const totalEmbeddings = Number(
+      (this.db.prepare('SELECT COUNT(*) AS count FROM rag_embeddings WHERE embedding_space_id = ?').get(options.embeddingSpaceId) as { count: number } | undefined)?.count ?? 0,
+    );
+    if (totalEmbeddings === 0) {
+      return [];
+    }
+
+    let candidateLimit = Math.min(totalEmbeddings, Math.max(limit, 20));
+    while (true) {
+      const rows = query.all(
+        Buffer.from(vector.buffer, vector.byteOffset, vector.byteLength),
+        candidateLimit,
+        ...params,
+        limit,
+      ) as any[];
+      if (rows.length >= limit || candidateLimit >= totalEmbeddings) {
+        return rows.map((row) => ({
+          chunk: this.mapChunk(row),
+          document: this.mapSearchDocument(row),
+          embeddingSpaceId: String(row.embedding_space_id),
+          physicalRowKey: Number(row.physical_row_key),
+          distance: Number(row.distance),
+        }));
+      }
+      candidateLimit = Math.min(totalEmbeddings, candidateLimit * 2);
+    }
   }
 
   createEmbeddingSpace(input: EmbeddingSpaceInput): CanonicalRagEmbeddingSpace {
@@ -977,6 +1129,35 @@ export class CanonicalRagStorage {
   private vectorTableExists(space: CanonicalRagEmbeddingSpace): boolean {
     const name = this.vectorTableName(space.vectorTableKey);
     return Boolean(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1").get(name));
+  }
+
+  private normalizeSearchLimit(limit: number | undefined): number {
+    const value = limit ?? 20;
+    if (!Number.isInteger(value) || value <= 0 || value > 200) {
+      throw new Error('Search limit must be an integer in 1..200');
+    }
+    return value;
+  }
+
+  private mapSearchDocument(row: any): CanonicalRagDocument {
+    return {
+      id: String(row.source_document_id),
+      sourceType: String(row.source_document_type),
+      sourceId: String(row.source_document_source_id),
+      ownerId: row.source_owner_id == null ? null : String(row.source_owner_id),
+      scopeId: row.source_scope_id == null ? null : String(row.source_scope_id),
+      name: String(row.source_name),
+      path: row.source_path == null ? null : String(row.source_path),
+      mimeType: row.source_mime_type == null ? null : String(row.source_mime_type),
+      fileType: row.source_file_type == null ? null : String(row.source_file_type),
+      sizeBytes: row.source_size_bytes == null ? null : Number(row.source_size_bytes),
+      contentHash: row.source_content_hash == null ? null : String(row.source_content_hash),
+      createdAt: String(row.source_created_at),
+      updatedAt: String(row.source_updated_at),
+      currentRevisionId: row.source_current_revision_id == null ? null : String(row.source_current_revision_id),
+      deletedAt: row.source_deleted_at == null ? null : String(row.source_deleted_at),
+      metadata: parseJson(row.source_metadata_json),
+    };
   }
 
   private mapDocument(row: any): CanonicalRagDocument {

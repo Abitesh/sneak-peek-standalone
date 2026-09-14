@@ -78,6 +78,7 @@ const EXPECTED_KEYS = [
   'ragLocalRerank',
   'ragRrfFusion',
   'ragSpeculativeRerank',
+  'canonicalRagShadow',
   // OKF document knowledge system flags.
   'okfKnowledgePacks',
   'okfMarkdownExport',
@@ -254,6 +255,8 @@ describe('Phase 14 — intelligence flag settings contract (key + meta surface)'
   });
 
   test('intelligenceFlagMeta exact values for several named flags', () => {
+    assert.deepEqual(intelligenceFlagMeta('canonicalRagShadow'),
+      { setting: 'canonicalRagShadowEnabled', env: 'NATIVELY_CANONICAL_RAG_SHADOW', default: false });
     assert.deepEqual(intelligenceFlagMeta('trace'),
       { setting: 'intelligenceTraceEnabled', env: 'NATIVELY_INTELLIGENCE_TRACE', default: false });
     assert.deepEqual(intelligenceFlagMeta('durableMemoryWindow'),

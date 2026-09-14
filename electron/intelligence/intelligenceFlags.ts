@@ -99,6 +99,8 @@ export type IntelligenceFlagKey =
   // first-token latency can never regress. Default OFF. Requires ragLocalRerank
   // (the reranker itself) to also be on.
   | 'ragSpeculativeRerank'
+  // Change 25 Phase 6.3 — observe-only canonical lexical shadow behind the unified RAG boundary.
+  | 'canonicalRagShadow'
   // ── OKF Hybrid Knowledge System (2026-07-01 autopilot build) ─────────────
   // Generate OKF-compatible (Open Knowledge Format v0.1) "Knowledge Packs"
   // from uploaded reference files — source-attributed concept cards layered
@@ -423,6 +425,8 @@ const FLAGS: Record<IntelligenceFlagKey, FlagSpec> = {
   // Default OFF for stability (2026-07-09); enable explicitly after soak testing
   // the local ONNX pressure profile on packaged builds.
   ragSpeculativeRerank: { env: 'NATIVELY_RAG_SPECULATIVE_RERANK', setting: 'ragSpeculativeRerankEnabled', default: false },
+  // Change 25 Phase 6.3 — lexical-only shadow; OFF by default until parity is proven.
+  canonicalRagShadow: { env: 'NATIVELY_CANONICAL_RAG_SHADOW', setting: 'canonicalRagShadowEnabled', default: false },
   // OKF Hybrid Knowledge System. Was default OFF everywhere for stability
   // (2026-07-09); the underlying issue is resolved (2026-07-14 flag-parity
   // repair) — restored to dev/test/benchmark default-ON (matching

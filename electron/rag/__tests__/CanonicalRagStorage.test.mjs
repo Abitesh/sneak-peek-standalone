@@ -279,3 +279,157 @@ test('vector consistency reports orphan rows in the canonical space', () => {
   assert.equal(report.orphanVectorRows, 1);
   db.close();
 });
+
+test('canonical lexical search filters deleted, superseded, source and scope state', () => {
+  const { db, storage } = makeStorage();
+
+  const current = storage.createDocument({ sourceType: 'personal', sourceId: 'current', scopeId: 'scope-a', name: 'Current' });
+  const currentRevision = storage.createRevision({ documentId: current.id, contentHash: 'current-v1', extractionVersion: 'e', chunkingVersion: 'c', normalizationVersion: 'n' });
+  storage.replaceChunks(current.id, currentRevision.id, [{ chunkIndex: 0, text: 'needle current old', sourceLocator: 'current-old' }]);
+  storage.setStatus(current.id, currentRevision.id, 'EMBEDDING');
+  storage.setStatus(current.id, currentRevision.id, 'READY', { chunkCount: 1, embeddedChunkCount: 0 });
+  storage.activateRevision(current.id, currentRevision.id);
+
+  const activeRevision = storage.createRevision({ documentId: current.id, contentHash: 'current-v2', extractionVersion: 'e', chunkingVersion: 'c', normalizationVersion: 'n' });
+  storage.replaceChunks(current.id, activeRevision.id, [{ chunkIndex: 0, text: 'needle current active', sourceLocator: 'current-active' }]);
+  storage.setStatus(current.id, activeRevision.id, 'EMBEDDING');
+  storage.setStatus(current.id, activeRevision.id, 'READY', { chunkCount: 1, embeddedChunkCount: 0 });
+  storage.activateRevision(current.id, activeRevision.id);
+
+  const deleted = storage.createDocument({ sourceType: 'personal', sourceId: 'deleted', scopeId: 'scope-a', name: 'Deleted' });
+  const deletedRevision = storage.createRevision({ documentId: deleted.id, contentHash: 'deleted-v1', extractionVersion: 'e', chunkingVersion: 'c', normalizationVersion: 'n' });
+  storage.replaceChunks(deleted.id, deletedRevision.id, [{ chunkIndex: 0, text: 'needle deleted', sourceLocator: 'deleted' }]);
+  storage.setStatus(deleted.id, deletedRevision.id, 'EMBEDDING');
+  storage.setStatus(deleted.id, deletedRevision.id, 'READY', { chunkCount: 1, embeddedChunkCount: 0 });
+  storage.activateRevision(deleted.id, deletedRevision.id);
+  db.prepare('UPDATE rag_documents SET deleted_at = ? WHERE id = ?').run(new Date().toISOString(), deleted.id);
+
+  const otherScope = storage.createDocument({ sourceType: 'personal', sourceId: 'other', scopeId: 'scope-b', name: 'Other Scope' });
+  const otherRevision = storage.createRevision({ documentId: otherScope.id, contentHash: 'other-v1', extractionVersion: 'e', chunkingVersion: 'c', normalizationVersion: 'n' });
+  storage.replaceChunks(otherScope.id, otherRevision.id, [{ chunkIndex: 0, text: 'needle other scope', sourceLocator: 'other' }]);
+  storage.setStatus(otherScope.id, otherRevision.id, 'EMBEDDING');
+  storage.setStatus(otherScope.id, otherRevision.id, 'READY', { chunkCount: 1, embeddedChunkCount: 0 });
+  storage.activateRevision(otherScope.id, otherRevision.id);
+
+  const notReady = storage.createDocument({ sourceType: 'personal', sourceId: 'not-ready', scopeId: 'scope-a', name: 'Not Ready' });
+  const notReadyRevision = storage.createRevision({ documentId: notReady.id, contentHash: 'not-ready-v1', extractionVersion: 'e', chunkingVersion: 'c', normalizationVersion: 'n' });
+  storage.replaceChunks(notReady.id, notReadyRevision.id, [{ chunkIndex: 0, text: 'needle not ready', sourceLocator: 'not-ready' }]);
+
+  const differentSource = storage.createDocument({ sourceType: 'mode', sourceId: 'mode-source', scopeId: 'scope-a', name: 'Mode Source' });
+  const differentSourceRevision = storage.createRevision({ documentId: differentSource.id, contentHash: 'mode-v1', extractionVersion: 'e', chunkingVersion: 'c', normalizationVersion: 'n' });
+  storage.replaceChunks(differentSource.id, differentSourceRevision.id, [{ chunkIndex: 0, text: 'needle different source', sourceLocator: 'mode' }]);
+  storage.setStatus(differentSource.id, differentSourceRevision.id, 'EMBEDDING');
+  storage.setStatus(differentSource.id, differentSourceRevision.id, 'READY', { chunkCount: 1, embeddedChunkCount: 0 });
+  storage.activateRevision(differentSource.id, differentSourceRevision.id);
+
+  const results = storage.searchLexical('needle', { sourceType: 'personal', scopeId: 'scope-a', limit: 20 });
+  assert.equal(results.length, 1);
+  assert.equal(results[0].document.id, current.id);
+  assert.equal(results[0].chunk.revisionId, activeRevision.id);
+
+  const sourceFiltered = storage.searchLexical('needle', { sourceType: 'personal', sourceId: 'other', limit: 20 });
+  assert.equal(sourceFiltered.length, 1);
+  assert.equal(sourceFiltered[0].document.id, otherScope.id);
+
+  const notReadyResults = storage.searchLexical('needle', { sourceType: 'personal', scopeId: 'scope-a', limit: 20 });
+  assert.ok(notReadyResults.every((result) => result.document.id !== notReady.id));
+  assert.ok(notReadyResults.every((result) => result.document.sourceType === 'personal'));
+
+  db.close();
+});
+
+test('canonical sqlite-vec search proves MATCH distance ordering LIMIT physical row mapping and lifecycle filtering', () => {
+  const { db, storage } = makeVectorStorage();
+  const space = storage.createEmbeddingSpace({ provider: 'test', model: 'test-model', dimensions: 2, version: '1' });
+  const otherSpace = storage.createEmbeddingSpace({ provider: 'test', model: 'other-model', dimensions: 2, version: '1' });
+
+  const far = storage.createDocument({ sourceType: 'personal', sourceId: 'far', scopeId: 'scope-a', name: 'Far' });
+  const farRevision = storage.createRevision({ documentId: far.id, contentHash: 'far-v1', extractionVersion: 'e', chunkingVersion: 'c', normalizationVersion: 'n' });
+  storage.replaceChunks(far.id, farRevision.id, [{ chunkIndex: 0, text: 'far vector', sourceLocator: 'far' }]);
+  const farChunk = storage.readChunks(farRevision.id)[0];
+  const farEmbedding = storage.storeEmbedding(farChunk.id, space.id, [0, 1]);
+  storage.setStatus(far.id, farRevision.id, 'EMBEDDING');
+  storage.setStatus(far.id, farRevision.id, 'READY', { chunkCount: 1, embeddedChunkCount: 1 });
+  storage.activateRevision(far.id, farRevision.id, [space.id]);
+
+  const near = storage.createDocument({ sourceType: 'personal', sourceId: 'near', scopeId: 'scope-a', name: 'Near' });
+  const nearRevision = storage.createRevision({ documentId: near.id, contentHash: 'near-v1', extractionVersion: 'e', chunkingVersion: 'c', normalizationVersion: 'n' });
+  storage.replaceChunks(near.id, nearRevision.id, [{ chunkIndex: 0, text: 'near vector', sourceLocator: 'near' }]);
+  const nearChunk = storage.readChunks(nearRevision.id)[0];
+  const nearEmbedding = storage.storeEmbedding(nearChunk.id, space.id, [1, 0]);
+  storage.storeEmbedding(nearChunk.id, otherSpace.id, [1, 0]);
+  storage.setStatus(near.id, nearRevision.id, 'EMBEDDING');
+  storage.setStatus(near.id, nearRevision.id, 'READY', { chunkCount: 1, embeddedChunkCount: 1 });
+  storage.activateRevision(near.id, nearRevision.id, [space.id]);
+
+  const superseded = storage.createDocument({ sourceType: 'personal', sourceId: 'superseded', scopeId: 'scope-a', name: 'Superseded' });
+  const oldRevision = storage.createRevision({ documentId: superseded.id, contentHash: 'superseded-v1', extractionVersion: 'e', chunkingVersion: 'c', normalizationVersion: 'n' });
+  storage.replaceChunks(superseded.id, oldRevision.id, [{ chunkIndex: 0, text: 'old revision vector', sourceLocator: 'old' }]);
+  const oldChunk = storage.readChunks(oldRevision.id)[0];
+  storage.storeEmbedding(oldChunk.id, space.id, [1, 0]);
+  storage.setStatus(superseded.id, oldRevision.id, 'EMBEDDING');
+  storage.setStatus(superseded.id, oldRevision.id, 'READY', { chunkCount: 1, embeddedChunkCount: 1 });
+  storage.activateRevision(superseded.id, oldRevision.id, [space.id]);
+
+  const currentRevision = storage.createRevision({ documentId: superseded.id, contentHash: 'superseded-v2', extractionVersion: 'e', chunkingVersion: 'c', normalizationVersion: 'n' });
+  storage.replaceChunks(superseded.id, currentRevision.id, [{ chunkIndex: 0, text: 'current revision vector', sourceLocator: 'current' }]);
+  const currentChunk = storage.readChunks(currentRevision.id)[0];
+  const currentEmbedding = storage.storeEmbedding(currentChunk.id, space.id, [0.9, 0.1]);
+  storage.setStatus(superseded.id, currentRevision.id, 'EMBEDDING');
+  storage.setStatus(superseded.id, currentRevision.id, 'READY', { chunkCount: 1, embeddedChunkCount: 1 });
+  storage.activateRevision(superseded.id, currentRevision.id, [space.id]);
+
+  const notReady = storage.createDocument({ sourceType: 'personal', sourceId: 'not-ready', scopeId: 'scope-a', name: 'Not Ready' });
+  const notReadyRevision = storage.createRevision({ documentId: notReady.id, contentHash: 'not-ready-v1', extractionVersion: 'e', chunkingVersion: 'c', normalizationVersion: 'n' });
+  storage.replaceChunks(notReady.id, notReadyRevision.id, [{ chunkIndex: 0, text: 'not ready vector', sourceLocator: 'not-ready' }]);
+  const notReadyChunk = storage.readChunks(notReadyRevision.id)[0];
+  storage.storeEmbedding(notReadyChunk.id, space.id, [1, 0]);
+
+  const deleted = storage.createDocument({ sourceType: 'personal', sourceId: 'deleted', scopeId: 'scope-a', name: 'Deleted' });
+  const deletedRevision = storage.createRevision({ documentId: deleted.id, contentHash: 'deleted-v1', extractionVersion: 'e', chunkingVersion: 'c', normalizationVersion: 'n' });
+  storage.replaceChunks(deleted.id, deletedRevision.id, [{ chunkIndex: 0, text: 'deleted vector', sourceLocator: 'deleted' }]);
+  const deletedChunk = storage.readChunks(deletedRevision.id)[0];
+  storage.storeEmbedding(deletedChunk.id, space.id, [1, 0]);
+  storage.setStatus(deleted.id, deletedRevision.id, 'EMBEDDING');
+  storage.setStatus(deleted.id, deletedRevision.id, 'READY', { chunkCount: 1, embeddedChunkCount: 1 });
+  storage.activateRevision(deleted.id, deletedRevision.id, [space.id]);
+  db.prepare('UPDATE rag_documents SET deleted_at = ? WHERE id = ?').run(new Date().toISOString(), deleted.id);
+
+  const otherScope = storage.createDocument({ sourceType: 'personal', sourceId: 'other-scope', scopeId: 'scope-b', name: 'Other Scope' });
+  const otherScopeRevision = storage.createRevision({ documentId: otherScope.id, contentHash: 'other-scope-v1', extractionVersion: 'e', chunkingVersion: 'c', normalizationVersion: 'n' });
+  storage.replaceChunks(otherScope.id, otherScopeRevision.id, [{ chunkIndex: 0, text: 'other scope vector', sourceLocator: 'other-scope' }]);
+  const otherScopeChunk = storage.readChunks(otherScopeRevision.id)[0];
+  storage.storeEmbedding(otherScopeChunk.id, space.id, [1, 0]);
+  storage.setStatus(otherScope.id, otherScopeRevision.id, 'EMBEDDING');
+  storage.setStatus(otherScope.id, otherScopeRevision.id, 'READY', { chunkCount: 1, embeddedChunkCount: 1 });
+  storage.activateRevision(otherScope.id, otherScopeRevision.id, [space.id]);
+
+  const results = storage.searchVector([1, 0], { embeddingSpaceId: space.id, sourceType: 'personal', scopeId: 'scope-a', limit: 20 });
+  const resultIds = results.map((result) => result.chunk.id);
+  assert.ok(resultIds.includes(nearChunk.id));
+  assert.ok(resultIds.includes(currentChunk.id));
+  assert.ok(!resultIds.includes(farChunk.id) || results.find((result) => result.chunk.id === nearChunk.id).distance <= results.find((result) => result.chunk.id === farChunk.id).distance);
+  assert.ok(!resultIds.includes(oldChunk.id));
+  assert.ok(!resultIds.includes(notReadyChunk.id));
+  assert.ok(!resultIds.includes(deletedChunk.id));
+  assert.ok(!resultIds.includes(otherScopeChunk.id));
+  assert.ok(results.every((result) => result.embeddingSpaceId === space.id));
+  assert.equal(results.find((result) => result.chunk.id === nearChunk.id).physicalRowKey, Number(nearEmbedding.physicalRowKey));
+  assert.equal(results.find((result) => result.chunk.id === currentChunk.id).physicalRowKey, Number(currentEmbedding.physicalRowKey));
+  assert.equal(results.find((result) => result.chunk.id === nearChunk.id).physicalRowKey, Number(db.prepare('SELECT physical_row_key FROM rag_embeddings WHERE chunk_id = ? AND embedding_space_id = ?').get(nearChunk.id, space.id).physical_row_key));
+  assert.ok(results.every((result) => result.distance >= 0));
+
+  const ordered = storage.searchVector([1, 0], { embeddingSpaceId: space.id, sourceType: 'personal', scopeId: 'scope-a', limit: 2 });
+  assert.equal(ordered.length, 2);
+  assert.equal(ordered[0].chunk.id, nearChunk.id);
+  assert.ok(ordered[0].distance < ordered[1].distance);
+
+  const limited = storage.searchVector([1, 0], { embeddingSpaceId: space.id, sourceType: 'personal', scopeId: 'scope-a', limit: 1 });
+  assert.equal(limited.length, 1);
+  assert.equal(limited[0].chunk.id, nearChunk.id);
+
+  const rawVectorRows = db.prepare(`SELECT rowid AS physical_row_key FROM vec_rag_embeddings_${space.vectorTableKey} WHERE rowid IN (?, ?)`).all(BigInt(Number(nearEmbedding.physicalRowKey)), BigInt(Number(farEmbedding.physicalRowKey)));
+  assert.equal(rawVectorRows.length, 2);
+
+  db.close();
+});
