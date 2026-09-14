@@ -1606,13 +1606,15 @@ return hybridResult.formattedContext;
 }
 // Hybrid unavailable — fall back to lexical + identity block.
 return this.buildRetrievedActiveModeContextBlock(
-query, transcript, tokenBudget, answerType, excludeCustomContext, pinnedModeId, retrievalOptions,
+query, transcript, tokenBudget, answerType, excludeCustomContext, pinnedModeId,
+{ ...(retrievalOptions ?? {}), canonicalShadowAlreadyHandled: true } as ModeRetrievalOptions,
 );
 } catch (err) {
 // Don't let a hybrid outage block a document-grounded answer.
 console.warn('[ModesManager] hybrid forceDocumentGrounding failed, falling back to lexical:', (err as { message?: string })?.message);
 return this.buildRetrievedActiveModeContextBlock(
-query, transcript, tokenBudget, answerType, excludeCustomContext, pinnedModeId, retrievalOptions,
+query, transcript, tokenBudget, answerType, excludeCustomContext, pinnedModeId,
+{ ...(retrievalOptions ?? {}), canonicalShadowAlreadyHandled: true } as ModeRetrievalOptions,
 );
 }
 }
@@ -1655,7 +1657,10 @@ return result.formattedContext;
 } catch (err) {
 console.warn('[ModesManager] hybrid retrieval failed, falling back to lexical:', (err as Error)?.message);
 }
-const lexical = this.buildRetrievedActiveModeContextBlock(query, transcript, tokenBudget, answerType, excludeCustomContext, pinnedModeId, retrievalOptions);
+const lexical = this.buildRetrievedActiveModeContextBlock(
+query, transcript, tokenBudget, answerType, excludeCustomContext, pinnedModeId,
+{ ...(retrievalOptions ?? {}), canonicalShadowAlreadyHandled: true } as ModeRetrievalOptions,
+);
 try {
 const { telemetryService } = require('./telemetry/TelemetryService');
 telemetryService.track({

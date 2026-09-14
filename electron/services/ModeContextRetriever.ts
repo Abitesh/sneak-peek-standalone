@@ -1786,19 +1786,27 @@ export class ModeContextRetriever {
         const hybridQuery = options.forceDocumentGrounding ? `${retrievalQuery}${referentEnrichment}`.trim() : queryText;
         const hasTranscript = !options.forceDocumentGrounding && !!options.transcript && options.transcript.trim().length > 0;
 
-        const result = await this._hybridRetriever!.retrieve({
-            query: hybridQuery,
-            modeId: mode.id,
-            files,
-            tokenBudget: options.tokenBudget,
-            topK: options.topK,
-            hasTranscript,
-            allowRerank: options.allowRerank,
-            // CRITICAL: forward the document-grounding flag so the hybrid retriever
-            // applies the doc-grounded budget/topK upgrade (3600/12) instead of the
-            // default 1800/6 — grounded answers were retrieving too small a window.
-            forceDocumentGrounding: options.forceDocumentGrounding,
-        });
+        let result: HybridContext;
+        try {
+            result = await this._hybridRetriever!.retrieve({
+                query: hybridQuery,
+                modeId: mode.id,
+                files,
+                tokenBudget: options.tokenBudget,
+                topK: options.topK,
+                hasTranscript,
+                allowRerank: options.allowRerank,
+                // CRITICAL: forward the document-grounding flag so the hybrid retriever
+                // applies the doc-grounded budget/topK upgrade (3600/12) instead of the
+                // default 1800/6 — grounded answers were retrieving too small a window.
+                forceDocumentGrounding: options.forceDocumentGrounding,
+            });
+        } catch (error) {
+            if (!options.canonicalShadowAlreadyHandled) {
+                this.observeCanonicalShadow(mode, files, options, 0);
+            }
+            throw error;
+        }
 
         diagLog('retrieveHybrid() return', { usedFallback: result.usedFallback, usedHybrid: result.usedHybrid, chunkCount: result.chunks?.length, hasContext: !!result.formattedContext });
         if (!options.canonicalShadowAlreadyHandled) {

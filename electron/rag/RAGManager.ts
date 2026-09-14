@@ -1251,7 +1251,7 @@ throw new Error('LLM helper not initialized');
 const context = await this.retriever.retrieve(query, { meetingId });
 void observeCanonicalRagShadowIfEnabled(query, {
   sourceTypes: ['meeting'],
-  sourceFilters: { sourceIds: [meetingId], scopeId: meetingId },
+  sourceFilters: { sourceIds: [meetingId] },
   legacyResultCount: context.chunks?.length ?? 0,
 });
 const promptContext = context.status === 'no_relevant_evidence'

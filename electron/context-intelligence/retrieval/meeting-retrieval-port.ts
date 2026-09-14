@@ -94,7 +94,6 @@ export function createMeetingRetrievalPort(input: MeetingPortInput): RetrievalPo
           sourceIds: input.currentMeetingId
             ? [input.currentMeetingId]
             : meetingIds,
-          ...(input.currentMeetingId ? { scopeId: input.currentMeetingId } : {}),
         },
         legacyResultCount: res?.chunks?.length ?? 0,
       });
