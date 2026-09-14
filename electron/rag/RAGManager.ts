@@ -14,6 +14,8 @@ import { LiveRAGIndexer } from './LiveRAGIndexer';
 import { buildRAGPrompt } from './prompts';
 import type { ProviderDataScopePolicy } from '../llm/ProviderRouter';
 import { RagQueryPlanner, type RagQueryPlan, type RagQueryPlanningContext, type RagSourceSelection } from './RagQueryPlanner';
+import { CanonicalRagComparisonService } from './canonical/CanonicalRagComparisonService';
+import type { RagRetrievalComparisonCandidate, RagRetrievalComparisonSourceType } from './canonical/CanonicalRagComparisonTypes';
 import { ConversationMemoryService } from '../intelligence/ConversationMemoryService';
 import type { RAGConversationTurn } from './RAGRetriever';
 import { evaluateRagRelevanceGate } from './RagRelevanceGate';
@@ -696,8 +698,8 @@ meetingId: result.source.sourceType === 'meeting' ? result.source.id : undefined
 page: result.chunk.pageStart,
 },
 documentName: result.source.name,
-pageStart: result.chunk.pageStart,
-pageEnd: result.chunk.pageEnd,
+pageStart: result.chunk.pageStart ?? undefined,
+pageEnd: result.chunk.pageEnd ?? undefined,
 section: result.chunk.section,
 heading: result.chunk.heading,
 documentId: result.chunk.documentId,
@@ -951,9 +953,22 @@ results.push(...personalResults);
 console.warn('[RAGManager] Personal adapter retrieval failed:', error);
 }
 }
-// Change 25 Phase 6.3: canonical lexical shadow. This is deliberately placed
-// after all legacy source adapters and before the existing rerank/gate stages.
-// The canonical result set is observe-only and is never merged into `results`.
+
+// Change 25 Phase 7: canonical lexical retrieval comparison.
+// This is observe-only and independently gated from the Phase 6.3 shadow.
+// It runs after all legacy source adapters and before rerank/gate. The
+// comparison result is diagnostic only; `results` remains legacy-authoritative.
+// Knowledge is intentionally NOT_COMPARABLE. No embeddings are requested.
+await this.compareCanonicalRetrievalIfEnabled(
+  normalizedQuery,
+  results,
+  effectiveSourceSet,
+  options,
+  candidatePoolSize,
+);
+
+// Change 25 Phase 6.3: canonical lexical shadow. This remains independent of
+// Phase 7 comparison and is still observe-only.
 void observeCanonicalRagShadowIfEnabled(normalizedQuery, {
   sourceTypes: [...effectiveSourceSet],
   legacyResultCount: results.length,
@@ -989,6 +1004,172 @@ confidence: Math.max(...finalResults.map(result => Number(result.score) || 0), 0
 * passages to preserve the native-memory safety already used by ModeHybridRetriever.
 * Any failure leaves the pre-rerank result ordering untouched.
 */
+
+private isCanonicalRagComparisonEnabled(): boolean {
+  const raw = String(process.env.NATIVELY_CANONICAL_RAG_COMPARISON ?? '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'on';
+}
+
+/**
+ * Phase 7 observe-only comparison. Canonical lexical retrieval is deliberately
+ * independent of embeddings so comparison cannot trigger a second query
+ * embedding call. Legacy results remain authoritative and are never mutated.
+ */
+private async compareCanonicalRetrievalIfEnabled(
+  query: string,
+  results: RagSearchResult[],
+  effectiveSourceSet: Set<RagSourceSelection>,
+  options: RAGSearchOptions,
+  candidatePoolSize: number,
+): Promise<void> {
+  if (!this.isCanonicalRagComparisonEnabled()) return;
+
+  try {
+    const storage = new CanonicalRagStorage(this.db);
+    const comparison = new CanonicalRagComparisonService();
+
+    const sourceMap: Array<{
+      legacyType: RagSourceSelection;
+      canonicalType: RagRetrievalComparisonSourceType;
+      canonicalSourceType: string;
+      scopeId?: string;
+      sourceId?: string;
+    }> = [
+      {
+        legacyType: 'meeting',
+        canonicalType: 'meeting',
+        canonicalSourceType: 'meeting',
+        sourceId: options.meetingId,
+      },
+      {
+        legacyType: 'mode-reference',
+        canonicalType: 'mode',
+        canonicalSourceType: 'mode',
+        scopeId: options.modeId,
+      },
+      {
+        legacyType: 'personal-files',
+        canonicalType: 'personal',
+        canonicalSourceType: 'personal',
+      },
+      {
+        legacyType: 'knowledge',
+        canonicalType: 'knowledge',
+        canonicalSourceType: 'knowledge',
+      },
+    ];
+
+    for (const source of sourceMap) {
+      if (!effectiveSourceSet.has(source.legacyType)) continue;
+
+      const legacyForSource = results.filter((result) => {
+        const resultSourceType = String((result.source as any)?.sourceType ?? '');
+        return resultSourceType === source.legacyType ||
+          (source.legacyType === 'mode-reference' && resultSourceType === 'mode');
+      });
+
+      // Knowledge has no canonical equivalent yet. Still emit an explicit
+      // NOT_COMPARABLE diagnostic so coverage is visible without a fake query.
+      if (source.canonicalType === 'knowledge') {
+        comparison.compare({
+          path: 'RAGManager.search',
+          sourceType: 'knowledge',
+          legacy: legacyForSource.map((result, index) => this.toCanonicalComparisonCandidate(
+            result,
+            source.canonicalType,
+            index + 1,
+          )),
+          canonical: [],
+          filter: {
+            sourceIdsPresent: false,
+            scopeIdPresent: false,
+            currentRevisionRequired: true,
+            readyRequired: true,
+          },
+        });
+        continue;
+      }
+
+      const limit = Math.max(1, Math.min(200, candidatePoolSize));
+      const canonicalResults = await storage.searchLexical(query, {
+        sourceType: source.canonicalSourceType,
+        sourceId: source.sourceId,
+        scopeId: source.scopeId,
+        limit,
+      });
+
+      comparison.compare({
+        path: 'RAGManager.search',
+        sourceType: source.canonicalType,
+        legacy: legacyForSource.map((result, index) => this.toCanonicalComparisonCandidate(
+          result,
+          source.canonicalType,
+          index + 1,
+        )),
+        canonical: canonicalResults.map((result, index) => ({
+          sourceType: source.canonicalType,
+          sourceId: result.document.sourceId,
+          documentId: result.document.id,
+          revisionId: result.chunk.revisionId,
+          chunkId: result.chunk.id,
+          chunkIndex: result.chunk.chunkIndex,
+          contentHash: result.chunk.contentHash,
+          sourceLocator: result.chunk.sourceLocator ?? undefined,
+          pageStart: result.chunk.pageStart ?? undefined,
+          pageEnd: result.chunk.pageEnd ?? undefined,
+          section: result.chunk.section ?? undefined,
+          heading: result.chunk.heading ?? undefined,
+          legacyChunkId: typeof (result.chunk.metadata as any)?.legacyChunkId === 'string'
+            ? String((result.chunk.metadata as any).legacyChunkId)
+            : undefined,
+          rank: index + 1,
+          score: result.score,
+        })),
+        filter: {
+          sourceIdsPresent: source.sourceId !== undefined,
+          scopeIdPresent: source.scopeId !== undefined,
+          currentRevisionRequired: true,
+          readyRequired: true,
+        },
+      });
+    }
+  } catch (error) {
+    // Comparison is diagnostic only. A canonical read failure must never alter
+    // the legacy retrieval result or make the unified search fail.
+    console.warn(
+      '[RAGManager] Canonical retrieval comparison failed; legacy retrieval remains unchanged:',
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+}
+
+private toCanonicalComparisonCandidate(
+  result: RagSearchResult,
+  sourceType: RagRetrievalComparisonSourceType,
+  rank: number,
+): RagRetrievalComparisonCandidate {
+  const chunk = result.chunk as any;
+  const source = result.source as any;
+  const metadata = chunk?.metadata;
+  return {
+    sourceType,
+    sourceId: String(source?.id ?? source?.sourceId ?? ''),
+    chunkId: chunk?.id !== undefined ? String(chunk.id) : undefined,
+    chunkIndex: Number.isInteger(chunk?.chunkIndex) ? Number(chunk.chunkIndex) : undefined,
+    contentHash: typeof chunk?.contentHash === 'string' ? chunk.contentHash : undefined,
+    sourceLocator: typeof chunk?.sourceLocator === 'string' ? chunk.sourceLocator : undefined,
+    pageStart: Number.isFinite(chunk?.pageStart) ? Number(chunk.pageStart) : undefined,
+    pageEnd: Number.isFinite(chunk?.pageEnd) ? Number(chunk.pageEnd) : undefined,
+    section: typeof chunk?.section === 'string' ? chunk.section : undefined,
+    heading: typeof chunk?.heading === 'string' ? chunk.heading : undefined,
+    legacyChunkId: typeof metadata?.legacyChunkId === 'string'
+      ? metadata.legacyChunkId
+      : (chunk?.id !== undefined ? String(chunk.id) : undefined),
+    rank,
+    score: Number.isFinite(result.score) ? Number(result.score) : undefined,
+  };
+}
+
 private async rerankCanonicalResults(
 query: string,
 results: RagSearchResult[],
