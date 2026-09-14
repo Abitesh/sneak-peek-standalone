@@ -8,6 +8,7 @@
 import { dialog } from 'electron';
 import path from 'path';
 import { getPersonalKnowledgeManager } from './index';
+import { observeCanonicalRagShadowIfEnabled } from '../rag/canonical/CanonicalRagShadowService';
 
 type SafeHandle = (channel: string, handler: (...args: any[]) => any) => void;
 
@@ -79,7 +80,17 @@ export function registerPerson1Ipc(safeHandle: SafeHandle): void {
     safeHandle('personal-files:search', async (_event: unknown, query: string) => {
         if (typeof query !== 'string') return { success: true, results: [] };
         try {
-            return { success: true, results: getPersonalKnowledgeManager().search(query) };
+            const results = getPersonalKnowledgeManager().search(query);
+            void observeCanonicalRagShadowIfEnabled(query, {
+                sourceTypes: ['personal'],
+                sourceFilters: {
+                    sourceIds: Array.from(new Set<string>((results ?? [])
+                        .map((item: any) => String(item?.fileId ?? ''))
+                        .filter((fileId: string) => Boolean(fileId)))),
+                },
+                legacyResultCount: results?.length ?? 0,
+            });
+            return { success: true, results };
         } catch (error) {
             return { success: false, error: errorMessage(error, 'Could not search My Files.'), results: [] };
         }

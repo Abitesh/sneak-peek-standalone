@@ -28,7 +28,7 @@ import { PersonalRagAdapter } from './adapters/PersonalRagAdapter';
 import { KnowledgeRagAdapter } from './adapters/KnowledgeRagAdapter';
 import { extractSafeDocumentText } from '../services/SafeDocumentTextExtractor';
 import { buildDocumentChunks } from '../services/modes/DocumentMap';
-import { isRagEnabled, isRagHybridEnabled, isRagConversationAwareEnabled, isIntelligenceFlagEnabled } from '../intelligence/intelligenceFlags';
+import { isRagEnabled, isRagHybridEnabled, isRagConversationAwareEnabled } from '../intelligence/intelligenceFlags';
 import { beginIndexAttempt, isCurrentIndexAttempt, invalidateIndexAttempt, withCurrentIndexAttempt } from './IndexAttemptRegistry';
 import { PersonalStorageAdapter } from './storage/PersonalStorageAdapter';
 import { CanonicalRagStorage } from './canonical/CanonicalRagStorage';
@@ -38,7 +38,7 @@ import { CanonicalPersonalRagService, type CanonicalPersonalProjectionResult } f
 import { CanonicalModeBackfillService, type ModeBackfillResult } from './canonical/CanonicalModeBackfillService';
 import { CanonicalMeetingBackfillService, type MeetingBackfillResult } from './canonical/CanonicalMeetingBackfillService';
 import { CanonicalRagIndexer } from './canonical/CanonicalRagIndexer';
-import { CanonicalRagShadowService } from './canonical/CanonicalRagShadowService';
+import { observeCanonicalRagShadowIfEnabled } from './canonical/CanonicalRagShadowService';
 import { ModeStorageAdapter } from './storage/ModeStorageAdapter';
 import { MeetingStorageAdapter } from './storage/MeetingStorageAdapter';
 import type {
@@ -954,18 +954,10 @@ console.warn('[RAGManager] Personal adapter retrieval failed:', error);
 // Change 25 Phase 6.3: canonical lexical shadow. This is deliberately placed
 // after all legacy source adapters and before the existing rerank/gate stages.
 // The canonical result set is observe-only and is never merged into `results`.
-if (isIntelligenceFlagEnabled('canonicalRagShadow')) {
-try {
-  const shadow = new CanonicalRagShadowService(new CanonicalRagStorage(this.db));
-  await shadow.observe(normalizedQuery, {
-    sourceTypes: [...effectiveSourceSet],
-    legacyResultCount: results.length,
-  });
-} catch (error) {
-  // Shadow failures must never affect the established retrieval answer path.
-  console.warn('[RAGManager] Canonical lexical RAG shadow failed; legacy retrieval remains unchanged:', error instanceof Error ? error.message : String(error));
-}
-}
+void observeCanonicalRagShadowIfEnabled(normalizedQuery, {
+  sourceTypes: [...effectiveSourceSet],
+  legacyResultCount: results.length,
+});
 // Final common-layer fusion boundary: source adapters provide candidates,
 // then the shared BGE reranker applies the final relevance ordering before
 // the public top-K boundary.
@@ -1257,6 +1249,11 @@ throw new Error('LLM helper not initialized');
 // embeddings into a generic wrapper fallback; lexical retrieval may still be
 // useful, and if nothing survives retrieval the result is explicitly empty.
 const context = await this.retriever.retrieve(query, { meetingId });
+void observeCanonicalRagShadowIfEnabled(query, {
+  sourceTypes: ['meeting'],
+  sourceFilters: { sourceIds: [meetingId], scopeId: meetingId },
+  legacyResultCount: context.chunks?.length ?? 0,
+});
 const promptContext = context.status === 'no_relevant_evidence'
 ? appendRagRetrievalStatus('', context.status)
 : context.formattedContext;
@@ -1294,6 +1291,15 @@ throw new Error('LLM helper not initialized');
 }
 // Retrieve from all meetings. A miss is now a first-class retrieval state.
 const context = await this.retriever.retrieveGlobal(query);
+void observeCanonicalRagShadowIfEnabled(query, {
+  sourceTypes: ['meeting'],
+  sourceFilters: {
+    sourceIds: [...new Set((context.chunks ?? [])
+      .map((chunk) => String((chunk as unknown as Record<string, unknown>).meetingId ?? ''))
+      .filter(Boolean))],
+  },
+  legacyResultCount: context.chunks?.length ?? 0,
+});
 const promptContext = context.status === 'no_relevant_evidence'
 ? appendRagRetrievalStatus('', context.status)
 : context.formattedContext;

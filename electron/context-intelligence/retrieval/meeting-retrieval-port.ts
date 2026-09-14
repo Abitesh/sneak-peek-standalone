@@ -28,6 +28,7 @@
 import type { EvidenceScope, SourceType } from '../contracts/types';
 import type { RetrievalPort } from '../orchestration/orchestrator';
 import { createLegacyRetrievalPort } from './legacy-retrieval-port';
+import { observeCanonicalRagShadowIfEnabled } from '../../rag/canonical/CanonicalRagShadowService';
 
 /** The slice of RAGRetriever this port uses. Structural — no legacy import. */
 export interface MeetingRetrieverLike {
@@ -82,6 +83,20 @@ export function createMeetingRetrievalPort(input: MeetingPortInput): RetrievalPo
         ...(input.currentMeetingId ? { meetingId: input.currentMeetingId } : {}),
         topK: opts.topK,
         maxTokens: input.tokenBudget,
+      });
+
+      const meetingIds = [...new Set((res?.chunks ?? [])
+        .map((c) => String(c.meetingId ?? ''))
+        .filter(Boolean))];
+      void observeCanonicalRagShadowIfEnabled(query, {
+        sourceTypes: ['meeting'],
+        sourceFilters: {
+          sourceIds: input.currentMeetingId
+            ? [input.currentMeetingId]
+            : meetingIds,
+          ...(input.currentMeetingId ? { scopeId: input.currentMeetingId } : {}),
+        },
+        legacyResultCount: res?.chunks?.length ?? 0,
       });
 
       const out = [];

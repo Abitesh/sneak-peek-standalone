@@ -15,6 +15,7 @@ interface ModesManagerLike {
       tokenBudget?: number;
       allowRerank?: boolean;
       forceDocumentGrounding?: boolean;
+      canonicalShadowAlreadyHandled?: boolean;
     },
   ): Promise<any>;
 }
@@ -42,6 +43,7 @@ export class ModeRagAdapter implements RagSourceAdapter {
       ...(options.forceDocumentGrounding !== undefined
         ? { forceDocumentGrounding: options.forceDocumentGrounding }
         : {}),
+      canonicalShadowAlreadyHandled: true,
     });
 
     const rawChunks = rawContext?.chunks ?? rawContext?.snippets ?? [];

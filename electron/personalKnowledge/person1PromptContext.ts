@@ -8,6 +8,7 @@
 import type { AnswerPlan } from '../llm/AnswerPlanner';
 import { isLayerAllowed } from '../llm/contextRoute';
 import { getPersonalKnowledgeManager } from './index';
+import { observeCanonicalRagShadowIfEnabled } from '../rag/canonical/CanonicalRagShadowService';
 
 /**
  * Synchronous retrieval (legacy path for immediate fallback).
@@ -21,7 +22,11 @@ export function getPerson1FileContext(
     if (!isLayerAllowed(plan, 'reference_files')) return '';
 
     try {
-        return getPersonalKnowledgeManager().buildPromptContext(question);
+        const context = getPersonalKnowledgeManager().buildPromptContext(question);
+        void observeCanonicalRagShadowIfEnabled(question, {
+            sourceTypes: ['personal'],
+        });
+        return context;
     } catch (error) {
         console.warn('[Person1] file-context retrieval failed:', error);
         return '';
@@ -42,6 +47,13 @@ export async function getPerson1FileContextAsync(
     try {
         const manager = getPersonalKnowledgeManager();
         const results = await manager.searchRelevantAsync(question, 6);
+        void observeCanonicalRagShadowIfEnabled(question, {
+            sourceTypes: ['personal'],
+            sourceFilters: {
+                sourceIds: Array.from(new Set<string>(results.map((item: any) => String(item?.fileId ?? '')).filter((fileId: string) => Boolean(fileId)))),
+            },
+            legacyResultCount: results.length,
+        });
         if (!results.length) return '';
 
         let used = 0;

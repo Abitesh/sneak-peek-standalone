@@ -6,6 +6,7 @@ import type { EvidenceScope, SourceType } from '../contracts/types';
 import type { RetrievalPort } from '../orchestration/orchestrator';
 import type { LegacyChunk } from './legacy-adapter';
 import { createLegacyRetrievalPort } from './legacy-retrieval-port';
+import { observeCanonicalRagShadowIfEnabled } from '../../rag/canonical/CanonicalRagShadowService';
 
 export interface PersonalFileSearchLike {
   listFiles(): Array<{ id: string; fileName?: string }>;
@@ -57,6 +58,13 @@ export function createPersonalFileRetrievalPort(
     retrieve: async (query): Promise<LegacyChunk[]> => {
       const items = await (manager.searchRelevantAsync?.(query, options.topK ?? 20)
         ?? Promise.resolve(manager.searchRelevant?.(query, options.topK ?? 20) ?? manager.search(query, options.topK ?? 20)));
+      void observeCanonicalRagShadowIfEnabled(query, {
+        sourceTypes: ['personal'],
+        sourceFilters: {
+          sourceIds: [...new Set(items.map((item) => String(item.fileId ?? '')).filter(Boolean))],
+        },
+        legacyResultCount: items.length,
+      });
       if (process.env.NATIVELY_CONTEXT_TRACE === '1') {
         console.log('[PersonalKnowledgeRetrieval]', {
           query,

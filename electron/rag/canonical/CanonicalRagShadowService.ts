@@ -1,16 +1,24 @@
 // electron/rag/canonical/CanonicalRagShadowService.ts
-// Change 25 Phase 6.3: observe-only lexical shadow for the canonical RAG store.
+// Change 25 Phase 6.3/6.4: observe-only lexical shadow for the canonical RAG store.
 // This service never embeds, writes, reranks, gates, or mutates legacy results.
 
 import { CanonicalRagStorage } from './CanonicalRagStorage';
 import type { CanonicalRagLexicalSearchResult } from './CanonicalRagQueryTypes';
+import { DatabaseManager } from '../../db/DatabaseManager';
+import { isIntelligenceFlagEnabled } from '../../intelligence/intelligenceFlags';
 
 export type CanonicalRagShadowSourceType = 'meeting' | 'mode' | 'personal';
+
+export interface CanonicalRagShadowSourceFilter {
+  sourceIds?: readonly string[];
+  scopeId?: string;
+}
 
 export interface CanonicalRagShadowOptions {
   sourceTypes?: readonly string[];
   limit?: number;
   legacyResultCount?: number;
+  sourceFilters?: CanonicalRagShadowSourceFilter;
 }
 
 export interface CanonicalRagShadowDiagnostic {
@@ -52,6 +60,12 @@ export class CanonicalRagShadowService {
     const startedAt = nowMs();
     const sourceTypes = normalizeSourceTypes(options.sourceTypes);
     const limit = Math.max(1, Math.min(50, options.limit ?? 20));
+    const sourceIds = [...new Set((options.sourceFilters?.sourceIds ?? [])
+      .map(id => String(id ?? '').trim())
+      .filter(Boolean))];
+    const scopeId = options.sourceFilters?.scopeId
+      ? String(options.sourceFilters.scopeId).trim()
+      : undefined;
     let canonicalResultCount = 0;
 
     try {
@@ -70,11 +84,24 @@ export class CanonicalRagShadowService {
       }
 
       for (const sourceType of sourceTypes) {
-        const results: CanonicalRagLexicalSearchResult[] = this.storage.searchLexical(normalizedQuery, {
-          sourceType,
-          limit,
-        });
-        canonicalResultCount += results.length;
+        if (sourceIds.length > 0) {
+          for (const sourceId of sourceIds) {
+            const results: CanonicalRagLexicalSearchResult[] = this.storage.searchLexical(normalizedQuery, {
+              sourceType,
+              sourceId,
+              ...(scopeId ? { scopeId } : {}),
+              limit,
+            });
+            canonicalResultCount += results.length;
+          }
+        } else {
+          const results: CanonicalRagLexicalSearchResult[] = this.storage.searchLexical(normalizedQuery, {
+            sourceType,
+            ...(scopeId ? { scopeId } : {}),
+            limit,
+          });
+          canonicalResultCount += results.length;
+        }
       }
 
       const diagnostic: CanonicalRagShadowDiagnostic = {
@@ -109,5 +136,31 @@ export class CanonicalRagShadowService {
 
   static resetDiagnostics(): void {
     diagnostics.length = 0;
+  }
+}
+
+/**
+ * Shared Phase 6.4 boundary helper.
+ * It is deliberately observe-only: callers never receive canonical results,
+ * and a shadow failure can never affect the legacy retrieval path.
+ */
+export async function observeCanonicalRagShadowIfEnabled(
+  query: string,
+  options: CanonicalRagShadowOptions = {},
+): Promise<CanonicalRagShadowDiagnostic | null> {
+  if (!isIntelligenceFlagEnabled('canonicalRagShadow')) return null;
+
+  try {
+    const db = DatabaseManager.getInstance().getDb();
+    if (!db) return null;
+
+    const service = new CanonicalRagShadowService(new CanonicalRagStorage(db));
+    return await service.observe(query, options);
+  } catch (error) {
+    console.warn(
+      '[CanonicalRagShadow] boundary observation failed; legacy retrieval remains unchanged:',
+      error instanceof Error ? error.message : String(error),
+    );
+    return null;
   }
 }

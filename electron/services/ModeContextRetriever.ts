@@ -4,6 +4,7 @@ import { ModeHybridRetriever, ModeRetrievedContext as HybridContext } from './mo
 import { VectorStore } from '../rag/VectorStore';
 import { EmbeddingPipeline } from '../rag/EmbeddingPipeline';
 import { DatabaseManager } from '../db/DatabaseManager';
+import { observeCanonicalRagShadowIfEnabled } from '../rag/canonical/CanonicalRagShadowService';
 // Imported from the leaf module (not the ../llm barrel) to avoid a require cycle.
 import { classifyCustomContext, selectCustomContextForAnswer } from '../llm/customContextClassifier';
 import type { AnswerType } from '../llm/AnswerPlanner';
@@ -106,6 +107,8 @@ export interface RetrieveOptions extends ModeRetrievalOptions {
      * never gated on a (cold) reranker load. Default false.
      */
     allowRerank?: boolean;
+    /** Internal duplicate guard: unified RAGManager.search() already observed this mode retrieval. */
+    canonicalShadowAlreadyHandled?: boolean;
 }
 
 const DEFAULT_TOKEN_BUDGET = 1800;
@@ -823,6 +826,22 @@ export class ModeContextRetriever {
     private _hybridRetriever: ModeHybridRetriever | null = null;
     private _sharedEmbeddingPipeline: EmbeddingPipeline | null = null;
 
+    private observeCanonicalShadow(
+        mode: Mode,
+        files: ModeReferenceFile[],
+        options: RetrieveOptions,
+        legacyResultCount: number,
+    ): void {
+        if (options.canonicalShadowAlreadyHandled) return;
+        void observeCanonicalRagShadowIfEnabled(options.query, {
+            sourceTypes: ['mode'],
+            sourceFilters: {
+                sourceIds: files.map(file => String(file.id ?? '')).filter(Boolean),
+            },
+            legacyResultCount,
+        });
+    }
+
     retrieve(mode: Mode, files: ModeReferenceFile[], options: RetrieveOptions): ModeRetrievedContext {
         const hasReferenceFiles = files.some(file => file.content.trim());
         // RC5 (Profile Intelligence production-fix round 2, 2026-07-05): with
@@ -837,6 +856,7 @@ export class ModeContextRetriever {
         // are a legitimate retrieval source with no files present.
         const hasRetrievableCustomContext = !options.excludeCustomContext && !!(mode.customContext || '').trim();
         if (!hasReferenceFiles && !hasRetrievableCustomContext) {
+            this.observeCanonicalShadow(mode, files, options, 0);
             return { snippets: [], formattedContext: '', usedFallback: false };
         }
         const forceDocumentGrounding = options.forceDocumentGrounding === true && hasReferenceFiles;
@@ -932,6 +952,7 @@ export class ModeContextRetriever {
         // circuit to the fallback path explicitly unless a document-grounded
         // custom mode supplied a compact identity block.
         if (queryWords.size === 0 && !documentIdentityBlock) {
+            this.observeCanonicalShadow(mode, files, options, 0);
             return { snippets: [], formattedContext: '', usedFallback: true };
         }
 
@@ -1511,6 +1532,7 @@ export class ModeContextRetriever {
                             finalChunks.push('  </snippet>');
                         }
                         finalChunks.push('</active_mode_retrieved_context>');
+                        this.observeCanonicalShadow(mode, files, options, retrySelected.length);
                         return {
                             snippets: retrySelected,
                             formattedContext: finalChunks.join('\n'),
@@ -1533,6 +1555,7 @@ export class ModeContextRetriever {
                     });
                 }
             }
+            this.observeCanonicalShadow(mode, files, options, 0);
             return { snippets: [], formattedContext: '', usedFallback: true };
         }
 
@@ -1625,6 +1648,7 @@ export class ModeContextRetriever {
         const confidenceReference = Math.max(adaptiveThreshold * 2.5, 1e-6);
         const topScoreConfidence = Math.max(0, Math.min(1, topRawScore / confidenceReference));
 
+        this.observeCanonicalShadow(mode, files, options, selected.length);
         return {
             snippets: selected,
             formattedContext: lines.join('\n'),
@@ -1729,6 +1753,9 @@ export class ModeContextRetriever {
                 reason: 'db_unavailable',
                 modeId: mode.id,
             });
+            if (!options.canonicalShadowAlreadyHandled) {
+                this.observeCanonicalShadow(mode, files, options, 0);
+            }
             return { chunks: [], formattedContext: '', usedFallback: true, usedHybrid: false };
         }
 
@@ -1774,6 +1801,9 @@ export class ModeContextRetriever {
         });
 
         diagLog('retrieveHybrid() return', { usedFallback: result.usedFallback, usedHybrid: result.usedHybrid, chunkCount: result.chunks?.length, hasContext: !!result.formattedContext });
+        if (!options.canonicalShadowAlreadyHandled) {
+            this.observeCanonicalShadow(mode, files, options, result.chunks?.length ?? 0);
+        }
         return result;
     }
 
