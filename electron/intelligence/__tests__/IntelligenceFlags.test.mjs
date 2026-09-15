@@ -22,6 +22,7 @@ const ENV_KEYS = [
   'NATIVELY_HINDSIGHT_LIVE_RECALL', 'NATIVELY_HINDSIGHT_POST_MEETING_RETAIN',
   'NATIVELY_RAG_CONFIDENCE_GATE', 'NATIVELY_RAG_LOCAL_RERANK', 'NATIVELY_RAG_RRF_FUSION', 'NATIVELY_RAG_SPECULATIVE_RERANK',
   'NATIVELY_CANONICAL_RAG_SHADOW',
+  'NATIVELY_CANONICAL_RAG_READ',
   'NATIVELY_OKF_KNOWLEDGE_PACKS', 'NATIVELY_OKF_MARKDOWN_EXPORT', 'NATIVELY_OKF_HYBRID_RETRIEVAL',
   'NATIVELY_OKF_GRAPH_EXPANSION', 'NATIVELY_OKF_KNOWLEDGE_UI', 'NATIVELY_OKF_USER_EDITABLE_CARDS',
   'NATIVELY_OKF_PROFILE_PACKS', 'NATIVELY_OKF_PROFILE_HYBRID_RETRIEVAL', 'NATIVELY_OKF_PROFILE_MARKDOWN_EXPORT',
@@ -62,6 +63,7 @@ const ALL_FLAG_KEYS = [
   'hindsightMemory', 'hindsightLiveRecall', 'hindsightPostMeetingRetain',
   'ragConfidenceGate', 'ragLocalRerank', 'ragRrfFusion', 'ragSpeculativeRerank',
   'canonicalRagShadow',
+  'canonicalRagRead',
   'okfKnowledgePacks', 'okfMarkdownExport', 'okfHybridRetrieval', 'okfGraphExpansion',
   'okfKnowledgeUi', 'okfUserEditableCards',
   'okfProfilePacks', 'okfProfileHybridRetrieval', 'okfProfileMarkdownExport',
@@ -167,6 +169,14 @@ describe('intelligenceFlags', () => {
     __resetIntelligenceFlagsCache();
     assert.equal(isIntelligenceFlagEnabled('canonicalRagShadow'), true);
     assert.equal(isIntelligenceFlagEnabled('ragRrfFusion'), false);
+  });
+
+  test('canonicalRagRead is OFF by default and can be enabled independently from shadow', () => {
+    assert.equal(isIntelligenceFlagEnabled('canonicalRagRead'), false);
+    process.env.NATIVELY_CANONICAL_RAG_READ = '1';
+    __resetIntelligenceFlagsCache();
+    assert.equal(isIntelligenceFlagEnabled('canonicalRagRead'), true);
+    assert.equal(isIntelligenceFlagEnabled('canonicalRagShadow'), false);
   });
 
   test('env override turns a flag ON', () => {

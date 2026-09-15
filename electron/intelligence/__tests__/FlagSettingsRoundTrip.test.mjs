@@ -79,6 +79,7 @@ const EXPECTED_KEYS = [
   'ragRrfFusion',
   'ragSpeculativeRerank',
   'canonicalRagShadow',
+  'canonicalRagRead',
   // OKF document knowledge system flags.
   'okfKnowledgePacks',
   'okfMarkdownExport',
@@ -191,6 +192,8 @@ const ALL_ENV_VARS = [
   'NATIVELY_RAG_LOCAL_RERANK',
   'NATIVELY_RAG_RRF_FUSION',
   'NATIVELY_RAG_SPECULATIVE_RERANK',
+  'NATIVELY_CANONICAL_RAG_SHADOW',
+  'NATIVELY_CANONICAL_RAG_READ',
   'NATIVELY_OKF_KNOWLEDGE_PACKS',
   'NATIVELY_OKF_MARKDOWN_EXPORT',
   'NATIVELY_OKF_HYBRID_RETRIEVAL',
@@ -257,6 +260,8 @@ describe('Phase 14 — intelligence flag settings contract (key + meta surface)'
   test('intelligenceFlagMeta exact values for several named flags', () => {
     assert.deepEqual(intelligenceFlagMeta('canonicalRagShadow'),
       { setting: 'canonicalRagShadowEnabled', env: 'NATIVELY_CANONICAL_RAG_SHADOW', default: false });
+    assert.deepEqual(intelligenceFlagMeta('canonicalRagRead'),
+      { setting: 'canonicalRagReadEnabled', env: 'NATIVELY_CANONICAL_RAG_READ', default: false });
     assert.deepEqual(intelligenceFlagMeta('trace'),
       { setting: 'intelligenceTraceEnabled', env: 'NATIVELY_INTELLIGENCE_TRACE', default: false });
     assert.deepEqual(intelligenceFlagMeta('durableMemoryWindow'),
@@ -349,6 +354,17 @@ describe('Phase 14 — ENV override resolution chain (the mechanism the UI/IPC r
       assert.equal(isIntelligenceFlagEnabled('conversationMemoryV2'), false, `"${off}" → false`);
     }
     delete process.env.NATIVELY_CONVERSATION_MEMORY_V2;
+  });
+
+  test('canonicalRagRead env override is independent from canonicalRagShadow', () => {
+    assert.equal(isIntelligenceFlagEnabled('canonicalRagRead'), false);
+    process.env.NATIVELY_CANONICAL_RAG_READ = 'on';
+    __resetIntelligenceFlagsCache();
+    assert.equal(isIntelligenceFlagEnabled('canonicalRagRead'), true);
+    assert.equal(isIntelligenceFlagEnabled('canonicalRagShadow'), false);
+    delete process.env.NATIVELY_CANONICAL_RAG_READ;
+    __resetIntelligenceFlagsCache();
+    assert.equal(isIntelligenceFlagEnabled('canonicalRagRead'), false);
   });
 
   test('env override is PER-FLAG (toggling one does not affect another)', () => {

@@ -30,7 +30,7 @@ import { PersonalRagAdapter } from './adapters/PersonalRagAdapter';
 import { KnowledgeRagAdapter } from './adapters/KnowledgeRagAdapter';
 import { extractSafeDocumentText } from '../services/SafeDocumentTextExtractor';
 import { buildDocumentChunks } from '../services/modes/DocumentMap';
-import { isRagEnabled, isRagHybridEnabled, isRagConversationAwareEnabled } from '../intelligence/intelligenceFlags';
+import { isRagEnabled, isRagHybridEnabled, isRagConversationAwareEnabled, isIntelligenceFlagEnabled, isRagRerankEnabled } from '../intelligence/intelligenceFlags';
 import { beginIndexAttempt, isCurrentIndexAttempt, invalidateIndexAttempt, withCurrentIndexAttempt } from './IndexAttemptRegistry';
 import { PersonalStorageAdapter } from './storage/PersonalStorageAdapter';
 import { CanonicalRagStorage } from './canonical/CanonicalRagStorage';
@@ -41,6 +41,7 @@ import { CanonicalModeBackfillService, type ModeBackfillResult } from './canonic
 import { CanonicalMeetingBackfillService, type MeetingBackfillResult } from './canonical/CanonicalMeetingBackfillService';
 import { CanonicalRagIndexer } from './canonical/CanonicalRagIndexer';
 import { observeCanonicalRagShadowIfEnabled } from './canonical/CanonicalRagShadowService';
+import { CanonicalRagReadService } from './canonical/CanonicalRagReadService';
 import { ModeStorageAdapter } from './storage/ModeStorageAdapter';
 import { MeetingStorageAdapter } from './storage/MeetingStorageAdapter';
 import type {
@@ -900,35 +901,100 @@ Math.min(candidatePoolSize, Math.min(1000, options.rerankCandidatePoolSize ?? ca
 );
 const tokenBudget = Math.max(1, options.tokenBudget ?? 1800);
 const results: RagSearchResult[] = [];
+const canonicalReadEnabled =
+  isIntelligenceFlagEnabled('canonicalRagRead') &&
+  isRagRerankEnabled() &&
+  options.allowRerank !== false;
+const canonicalRead = canonicalReadEnabled
+? new CanonicalRagReadService(new CanonicalRagStorage(this.db))
+: null;
+const canonicalReadFallbacks: Array<{
+  sourceType: 'meeting' | 'mode' | 'personal';
+  fallback: () => Promise<RagSearchResult[]>;
+}> = [];
+
 if (effectiveSourceSet.has('meeting')) {
 try {
-const meetingResults = await this.meetingAdapter.retrieve({
+const meetingResults = canonicalRead
+? await canonicalRead.readSource({
+query: normalizedQuery,
+sourceType: 'meeting',
+sourceId: options.meetingId,
+limit: candidatePoolSize,
+fallback: () => this.meetingAdapter.retrieve({
 query: normalizedQuery,
 options,
 candidatePoolSize,
 tokenBudget,
 conversation,
-});
-results.push(...meetingResults);
-} catch (error) {
-console.warn('[RAGManager] Meeting adapter retrieval failed:', error);
-}
-}
-if (effectiveSourceSet.has('mode-reference')) {
-try {
-const modeResults = await this.modeAdapter.retrieve({
+}),
+})
+: { results: await this.meetingAdapter.retrieve({
 query: normalizedQuery,
 options,
 candidatePoolSize,
 tokenBudget,
-});
-results.push(...modeResults);
+conversation,
+}), usedCanonical: false, fallbackReason: 'disabled' as const };
+results.push(...meetingResults.results);
+if (canonicalRead && meetingResults.usedCanonical) {
+  canonicalReadFallbacks.push({
+    sourceType: 'meeting',
+    fallback: () => this.meetingAdapter.retrieve({
+      query: normalizedQuery,
+      options,
+      candidatePoolSize,
+      tokenBudget,
+      conversation,
+    }),
+  });
+}
 } catch (error) {
-console.warn('[RAGManager] Mode adapter retrieval failed:', error);
+console.warn('[RAGManager] Meeting retrieval failed:', error);
 }
 }
+
+if (effectiveSourceSet.has('mode-reference')) {
+try {
+const modeResults = canonicalRead
+? await canonicalRead.readSource({
+query: normalizedQuery,
+sourceType: 'mode',
+scopeId: options.modeId,
+limit: candidatePoolSize,
+fallback: () => this.modeAdapter.retrieve({
+query: normalizedQuery,
+options,
+candidatePoolSize,
+tokenBudget,
+}),
+})
+: { results: await this.modeAdapter.retrieve({
+query: normalizedQuery,
+options,
+candidatePoolSize,
+tokenBudget,
+}), usedCanonical: false, fallbackReason: 'disabled' as const };
+results.push(...modeResults.results);
+if (canonicalRead && modeResults.usedCanonical) {
+  canonicalReadFallbacks.push({
+    sourceType: 'mode',
+    fallback: () => this.modeAdapter.retrieve({
+      query: normalizedQuery,
+      options,
+      candidatePoolSize,
+      tokenBudget,
+    }),
+  });
+}
+} catch (error) {
+console.warn('[RAGManager] Mode retrieval failed:', error);
+}
+}
+
 if (effectiveSourceSet.has('knowledge')) {
 try {
+// Knowledge has no canonical Change 25 read equivalent.
 const knowledgeResults = await this.knowledgeAdapter.retrieve({
 query: normalizedQuery,
 options,
@@ -941,19 +1007,42 @@ results.push(...knowledgeResults);
 console.warn('[RAGManager] Knowledge adapter retrieval failed:', error);
 }
 }
+
 if (effectiveSourceSet.has('personal-files')) {
 try {
-const personalResults = await this.personalAdapter.retrieve({
+const personalResults = canonicalRead
+? await canonicalRead.readSource({
+query: normalizedQuery,
+sourceType: 'personal',
+limit: candidatePoolSize,
+fallback: () => this.personalAdapter.retrieve({
 query: normalizedQuery,
 options,
 candidatePoolSize,
-});
-results.push(...personalResults);
+}),
+})
+: { results: await this.personalAdapter.retrieve({
+query: normalizedQuery,
+options,
+candidatePoolSize,
+}), usedCanonical: false, fallbackReason: 'disabled' as const };
+results.push(...personalResults.results);
+if (canonicalRead && personalResults.usedCanonical) {
+  canonicalReadFallbacks.push({
+    sourceType: 'personal',
+    fallback: () => this.personalAdapter.retrieve({
+      query: normalizedQuery,
+      options,
+      candidatePoolSize,
+    }),
+  });
+}
 } catch (error) {
-console.warn('[RAGManager] Personal adapter retrieval failed:', error);
+console.warn('[RAGManager] Personal retrieval failed:', error);
 }
 }
 
+if (!canonicalReadEnabled) {
 // Change 25 Phase 7: canonical lexical retrieval comparison.
 // This is observe-only and independently gated from the Phase 6.3 shadow.
 // It runs after all legacy source adapters and before rerank/gate. The
@@ -973,16 +1062,44 @@ void observeCanonicalRagShadowIfEnabled(normalizedQuery, {
   sourceTypes: [...effectiveSourceSet],
   legacyResultCount: results.length,
 });
+} else {
+  // Canonical reads are now authoritative for the selected document sources.
+  // Do not run the observe-only comparison/shadow against the same canonical
+  // results; that would duplicate the canonical query without adding signal.
+}
 // Final common-layer fusion boundary: source adapters provide candidates,
 // then the shared BGE reranker applies the final relevance ordering before
 // the public top-K boundary.
 if (options.allowRerank !== false) {
+try {
 const reranked = await this.rerankCanonicalResults(
 normalizedQuery,
 results,
 rerankCandidatePoolSize,
+canonicalReadEnabled && canonicalReadFallbacks.length > 0,
 );
 results.splice(0, results.length, ...reranked);
+} catch (error) {
+if (canonicalReadEnabled && canonicalReadFallbacks.length > 0) {
+  for (const entry of canonicalReadFallbacks) {
+    for (let index = results.length - 1; index >= 0; index -= 1) {
+      if (results[index]?.source?.sourceType === entry.sourceType) {
+        results.splice(index, 1);
+      }
+    }
+    try {
+      results.push(...await entry.fallback());
+    } catch (fallbackError) {
+      console.warn(
+        `[RAGManager] ${entry.sourceType} legacy fallback after canonical rerank failure failed:`,
+        fallbackError,
+      );
+    }
+  }
+} else {
+  console.warn('[RAGManager] Canonical rerank failure without canonical fallback source:', error);
+}
+}
 }
 results.sort((a, b) => b.score - a.score);
 const finalResults = this.gateCanonicalResults(results.slice(0, topK), normalizedQuery);
@@ -1174,8 +1291,10 @@ private async rerankCanonicalResults(
 query: string,
 results: RagSearchResult[],
 candidatePoolSize: number,
+forceSingleResult = false,
 ): Promise<RagSearchResult[]> {
-if (results.length < 2) return results;
+if (results.length === 0) return results;
+if (results.length < 2 && !forceSingleResult) return results;
 let enabled = false;
 try {
 const { isRagRerankEnabled } = require('../intelligence/intelligenceFlags') as typeof import('../intelligence/intelligenceFlags');
@@ -1223,6 +1342,7 @@ ranked.sort((a, b) => b.score - a.score);
 return ranked;
 } catch (error) {
 console.warn('[RAGManager] Local rerank failed; keeping unified retrieval order:', error);
+if (forceSingleResult) throw error;
 return results;
 }
 }
@@ -1363,7 +1483,7 @@ const dimensions = this.embeddingPipeline.getActiveDimensions();
 if (providerName && dimensions) {
 // Stamps provider/dims only — NOT embedding_space. Space is owned by the
 // re-index sweep so a NULL-space legacy row can't be mislabeled as the
-// active space (which would skip re-index → silent garbage).
+// active space (which would skip re-index  silent garbage).
 this.vectorStore.backfillEmbeddingProviderMetadata(providerName, dimensions);
 }
 }
@@ -1538,7 +1658,7 @@ await this.embeddingPipeline.processQueue();
 isMeetingProcessed(meetingId: string): boolean {
 return this.vectorStore.hasEmbeddings(meetingId);
 }
-// ─── JIT RAG: Live Meeting Indexing ──────────────────────────────
+//  JIT RAG: Live Meeting Indexing 
 /**
 * Start JIT indexing for a live meeting.
 * Call when a meeting session begins.
@@ -1763,7 +1883,7 @@ await this._runReindex();
 }
 /**
 * Automatically re-index meetings whose embedding space differs from the
-* active one (e.g. after the gemini-embedding-001 → gemini-embedding-2 bump).
+* active one (e.g. after the gemini-embedding-001  gemini-embedding-2 bump).
 *
 * Design:
 * - Triggered off the incompatible COUNT (not lastSpace != activeSpace) so a
@@ -1846,7 +1966,7 @@ this._reindexInFlight = true;
 this._emitReindex('embedding:reindex-started', { count, space: activeSpace });
 console.log(`[RAGManager] Re-indexing ${count} meeting(s) into space ${activeSpace}...`);
 try {
-// ── Phase 1: requeue ── snapshot the worklist; clear+queue each meeting atomically.
+//  Phase 1: requeue  snapshot the worklist; clear+queue each meeting atomically.
 const meetingIds = this.vectorStore.getMeetingIdsNeedingReindex(activeSpace);
 const total = meetingIds.length;
 for (const meetingId of meetingIds) {
@@ -1867,7 +1987,7 @@ await new Promise(r => setTimeout(r, RAGManager.REINDEX_LIVE_RECHECK_MS));
 await this.embeddingPipeline.requeueMeetingForReindex(meetingId);
 }
 console.log(`[RAGManager] Re-index: requeued ${total} meeting(s). Awaiting background embedding...`);
-// ── Phase 2: await actual embedding ── the requeue above only QUEUED the work;
+//  Phase 2: await actual embedding  the requeue above only QUEUED the work;
 // the meetings have NULL embeddings (excluded from search) until the background
 // processQueue drains. Report TRUE progress off the queue depth so the UI doesn't
 // claim "complete" while past meetings are still unsearchable.
