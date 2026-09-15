@@ -945,6 +945,16 @@ originalQuery,
 options.sessionId,
 planningContext,
 );
+// Change 29: skip document retrieval for generative/chitchat prompts unless
+// the caller explicitly selected sources or forced grounding.
+if (
+  !queryPlan.needsDocumentEvidence
+  && !options.forceDocumentGrounding
+  && !options.selectedSources
+  && !options.source
+) {
+  return { status: 'no_relevant_evidence', results: [], confidence: 0 };
+}
 const normalizedQuery = queryPlan.retrievalQuery;
 const legacySourceSelection: RagSourceSelection[] | undefined = options.source
 ? options.source === 'meeting'

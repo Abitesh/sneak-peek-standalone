@@ -32,6 +32,8 @@ export interface RagQueryPlanningContext {
  hasMeeting?: boolean;
 }
 
+export type RagRetrievalMode = 'skip' | 'retrieve';
+
 export interface RagQueryPlan {
  originalQuery: string;
  retrievalQuery: string;
@@ -39,6 +41,9 @@ export interface RagQueryPlan {
  wasRewritten: boolean;
  reason?: 'referent' | 'conversation_context';
  sourceReason?: 'meeting' | 'personal' | 'mode' | 'follow_up' | 'conversation' | 'default';
+ /** False when the prompt does not need document/meeting evidence (Change 29). */
+ needsDocumentEvidence: boolean;
+ retrievalMode: RagRetrievalMode;
 }
 
 function clean(text: string): string {
@@ -49,10 +54,16 @@ function stripReferentAnnotation(text: string): string {
  return clean(text).replace(/\s*\(referring to:\s*[^)]*\)\s*$/i, '').trim();
 }
 
+function isFollowUpStub(query: string): boolean {
+ const q = clean(query);
+ return /^(?:please\s+)?(?:elaborate|continue|expand|go (?:on|deeper)|tell me more|more detail)\b/i.test(q);
+}
+
 function isReferential(query: string): boolean {
  const q = clean(query);
+ if (isFollowUpStub(q)) return true;
  return /^(?:and\s+)?(?:how|why|when|where|what|who|which|can|could|would|does|did|is|are|was|were|tell|explain|expand|elaborate|go)\b/i.test(q)
- && /\b(?:it|this|that|those|they|them|also|then|so|more|further|change|changed|different|difference|why|how)\b/i.test(q);
+ && /\b(?:it|this|that|those|they|them|also|then|so|more|further|change|changed|different|difference|why|how|elaborate|continue|deeper)\b/i.test(q);
 }
 
 function isConversationOnly(query: string): boolean {
@@ -75,6 +86,40 @@ function isPersonalQuery(query: string): boolean {
 function isModeReferenceQuery(query: string): boolean {
  const q = clean(query);
  return /\b(?:annual report|quarterly report|report|reference file|reference files|uploaded document|uploaded file|document|documents|paper|specification|specs|policy|manual|handbook|presentation|slides|dataset|research|whitepaper)\b/i.test(q);
+}
+
+const DOCUMENT_SOURCES = new Set<RagSourceSelection>([
+ 'mode-reference',
+ 'personal-files',
+ 'meeting',
+ 'knowledge',
+]);
+
+function isGenerativeOrChitchat(query: string): boolean {
+ const q = clean(query);
+ if (!q) return true;
+ if (/^(?:please\s+)?(?:write|draft|compose|create|make|generate|invent|brainstorm)\b/i.test(q)) return true;
+ if (/^(?:tell me a joke|say something funny)\b/i.test(q)) return true;
+ if (/^(?:hi|hello|hey|thanks|thank you|good (?:morning|afternoon|evening|night)|ok|okay)\b[.!?]*$/i.test(q)) return true;
+ return false;
+}
+
+function planRetrievalNeed(
+ query: string,
+ sources: readonly RagSourceSelection[],
+): { needsDocumentEvidence: boolean; retrievalMode: RagRetrievalMode; sources: RagSourceSelection[] } {
+ if (isMeetingQuery(query) || isPersonalQuery(query) || isModeReferenceQuery(query)) {
+  return { needsDocumentEvidence: true, retrievalMode: 'retrieve', sources: [...sources] };
+ }
+ if (isGenerativeOrChitchat(query)) {
+  return { needsDocumentEvidence: false, retrievalMode: 'skip', sources: [] };
+ }
+ const needsDocumentEvidence = sources.some((source) => DOCUMENT_SOURCES.has(source));
+ return {
+  needsDocumentEvidence,
+  retrievalMode: needsDocumentEvidence ? 'retrieve' : 'skip',
+  sources: needsDocumentEvidence ? [...sources] : sources.filter((source) => source === 'conversation'),
+ };
 }
 
 function inferPreviousSource(state: ConversationState | null): RagSourceSelection | null {
@@ -203,6 +248,8 @@ export class RagQueryPlanner {
  sources: [],
  wasRewritten: false,
  sourceReason: 'default',
+ needsDocumentEvidence: false,
+ retrievalMode: 'skip',
  };
  }
 
@@ -238,13 +285,16 @@ export class RagQueryPlanner {
  }
 
  const selection = selectSources(original, state, context);
+ const retrieval = planRetrievalNeed(original, selection.sources);
  return {
  originalQuery: original,
  retrievalQuery,
- sources: selection.sources,
+ sources: retrieval.sources,
  wasRewritten,
  ...(reason ? { reason } : {}),
  sourceReason: selection.sourceReason,
+ needsDocumentEvidence: retrieval.needsDocumentEvidence,
+ retrievalMode: retrieval.retrievalMode,
  };
  }
 }
