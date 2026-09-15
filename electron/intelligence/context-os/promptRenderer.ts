@@ -12,6 +12,7 @@ import {
   buildRenderedEvidenceManifest,
   type RenderedEvidenceManifest,
 } from './renderedEvidenceManifest';
+import { citationForEvidenceItem } from '../../rag/RagCitation';
 
 export function escapeXml(value: string): string {
   return String(value ?? '')
@@ -129,14 +130,13 @@ export function renderEvidencePackWithManifest(pack: EvidencePack): RenderedEvid
   );
 
   for (const item of factual) {
-    const markerEntry = item.citation
-      ? Object.values(manifest.citationMarkers).find(
-          (entry) => entry.evidenceId === item.evidenceId,
-        )
-      : undefined;
+    const citation = citationForEvidenceItem(item);
+    const markerEntry = Object.values(manifest.citationMarkers).find(
+      (entry) => entry.evidenceId === item.evidenceId,
+    );
 
     const provenance = [
-      item.citation !== undefined ? ` citation_id="${escapeXml(item.citation.citationId)}"` : '',
+      ` citation_id="${escapeXml(citation.citationId)}"`,
       markerEntry !== undefined ? ` citation_marker="${escapeXml(markerEntry.marker)}"` : '',
       item.sourceType !== undefined ? ` source_type="${escapeXml(item.sourceType)}"` : '',
       ` source_id="${escapeXml(item.sourceId)}"`,

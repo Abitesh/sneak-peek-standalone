@@ -75,3 +75,29 @@ export function buildStableRagCitation(input: {
     sourceType: input.sourceType,
   });
 }
+
+export function citationForEvidenceItem(item: {
+  citation?: RagCitation;
+  evidenceId: string;
+  sourceId: string;
+  documentId?: string;
+  documentName?: string;
+  chunkId?: string;
+  pointer?: { chunkId?: string; section?: string; page?: number; fileId?: string };
+  pageStart?: number;
+  pageEnd?: number;
+  section?: string;
+  sourceType?: string;
+  sourceKind?: string;
+}): RagCitation {
+  if (item.citation?.citationId) return item.citation;
+  return buildStableRagCitation({
+    documentId: item.documentId || item.pointer?.fileId || item.sourceId,
+    documentName: item.documentName || item.pointer?.section || item.sourceId,
+    chunkId: item.chunkId || item.pointer?.chunkId || item.evidenceId,
+    pageStart: item.pageStart ?? item.pointer?.page,
+    pageEnd: item.pageEnd,
+    section: item.section,
+    sourceType: item.sourceType || item.sourceKind || 'unknown',
+  });
+}

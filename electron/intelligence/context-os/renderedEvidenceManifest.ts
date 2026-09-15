@@ -5,6 +5,7 @@
 import type { TurnEvidenceKind } from '../../llm/turnSourceDecision';
 import type { EvidenceItem, EvidencePack } from './evidencePack';
 import type { RagCitation, RagCitationMarker } from '../../rag/RagCitation';
+import { citationForEvidenceItem } from '../../rag/RagCitation';
 export type RenderedEvidenceFamily =
 | 'reference_files'
 | 'resume'
@@ -75,19 +76,18 @@ for (const item of pack.items) {
 if (item.authority !== 'evidence' || seenIds.has(item.evidenceId)) continue;
 seenIds.add(item.evidenceId);
 evidenceIds.push(item.evidenceId);
-if (item.citation) {
-const citationId = item.citation.citationId.trim();
+const citation = citationForEvidenceItem(item);
+const citationId = citation.citationId.trim();
 if (citationId && !seenCitationIds.has(citationId)) {
-evidenceCitations[citationId] = item.citation;
+evidenceCitations[citationId] = citation;
 const marker = `S${Object.keys(citationMarkers).length + 1}`;
 citationMarkers[marker] = {
 marker,
 evidenceId: item.evidenceId,
 citationId,
-citation: item.citation,
+citation,
 };
 seenCitationIds.add(citationId);
-}
 }
 evidenceProvenance[item.evidenceId] = {
 sourceId: item.sourceId,
