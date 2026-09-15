@@ -14,6 +14,7 @@ import { LiveRAGIndexer } from './LiveRAGIndexer';
 import { buildRAGPrompt } from './prompts';
 import type { ProviderDataScopePolicy } from '../llm/ProviderRouter';
 import { applyLocalPrivateRagAnswers, applyLocalPrivateRagScopes, readLocalPrivateRagMode } from './localPrivateRagMode';
+import { dedupeRagSearchResults } from './dedupeRagSearchResults';
 import { RagQueryPlanner, type RagQueryPlan, type RagQueryPlanningContext, type RagSourceSelection } from './RagQueryPlanner';
 import { CanonicalRagComparisonService } from './canonical/CanonicalRagComparisonService';
 import type { RagRetrievalComparisonCandidate, RagRetrievalComparisonSourceType } from './canonical/CanonicalRagComparisonTypes';
@@ -916,6 +917,11 @@ metadata: {
 },
 });
 }
+// Change 28: search() is the universal retrieval engine.
+// Query → RagQueryPlanner (prep + sources) → per-source adapters /
+// CanonicalRagReadService (vector + FTS) → dedupeRagSearchResults →
+// shared BGE rerank → relevance gate → RagSearchResult[].
+// Adapters stay specialized. Fusion is concat + union-by-chunk-id, not RRF.
 async search(query: string, options: RAGSearchOptions = {}): Promise<RAGRetrievalResponse> {
 const originalQuery = String(query ?? '').trim();
 if (!originalQuery) return { status: 'no_relevant_evidence', results: [], confidence: 0 };
@@ -1149,8 +1155,9 @@ void observeCanonicalRagShadowIfEnabled(normalizedQuery, {
   // results; that would duplicate the canonical query without adding signal.
 }
 // Final common-layer fusion boundary: source adapters provide candidates,
-// then the shared BGE reranker applies the final relevance ordering before
-// the public top-K boundary.
+// then cross-source union-by-chunk-id, then the shared BGE reranker, then
+// the public top-K / relevance gate.
+results.splice(0, results.length, ...dedupeRagSearchResults(results));
 if (options.allowRerank !== false) {
 try {
 const reranked = await this.rerankCanonicalResults(
@@ -1177,6 +1184,7 @@ if (canonicalReadEnabled && canonicalReadFallbacks.length > 0) {
       );
     }
   }
+  results.splice(0, results.length, ...dedupeRagSearchResults(results));
 } else {
   console.warn('[RAGManager] Canonical rerank failure without canonical fallback source:', error);
 }
