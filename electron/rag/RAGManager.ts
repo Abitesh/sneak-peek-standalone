@@ -34,7 +34,8 @@ import { PersonalRagAdapter } from './adapters/PersonalRagAdapter';
 import { KnowledgeRagAdapter } from './adapters/KnowledgeRagAdapter';
 import { extractSafeDocumentText } from '../services/SafeDocumentTextExtractor';
 import { buildDocumentChunks } from '../services/modes/DocumentMap';
-import { isRagEnabled, isRagHybridEnabled, isRagConversationAwareEnabled, isIntelligenceFlagEnabled, isRagRerankEnabled, shouldWriteLegacyRagChunks } from '../intelligence/intelligenceFlags';
+import { isRagEnabled, isRagHybridEnabled, isRagConversationAwareEnabled, isIntelligenceFlagEnabled, isRagRerankEnabled, isRagConfidenceGateEnabled, shouldWriteLegacyRagChunks } from '../intelligence/intelligenceFlags';
+import { admitCanonicalRagHit } from './admitCanonicalRagHit';
 import type { CanonicalChunkInput } from './canonical/CanonicalRagTypes';
 import { beginIndexAttempt, isCurrentIndexAttempt, invalidateIndexAttempt, withCurrentIndexAttempt } from './IndexAttemptRegistry';
 import { PersonalStorageAdapter } from './storage/PersonalStorageAdapter';
@@ -760,9 +761,12 @@ return undefined;
 private gateCanonicalResults(
 results: RagSearchResult[],
 query: string,
+spaceKey?: string | null,
 ): RagSearchResult[] {
 if (!results.length) return [];
-const evidenceItems = results.map((result, index) => ({
+const admitted = results.filter((result) => admitCanonicalRagHit(result, spaceKey));
+if (!admitted.length) return [];
+const evidenceItems = admitted.map((result, index) => ({
 evidenceId: `rag-manager:${String(result.chunk.id ?? index)}`,
 sourceKind: result.source.sourceType,
 sourceId: result.source.id,
@@ -794,13 +798,21 @@ final: result.score,
 },
 reasonIncluded: 'retrieval',
 })) as unknown as EvidenceItem[];
+const ranked = [...admitted].sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0));
 const decision = evaluateRagRelevanceGate({
 items: evidenceItems,
 requestedProperty: 'unknown',
 isSynthesis: true,
+...(isRagConfidenceGateEnabled() ? {
+retrievalConfidence: {
+topScore: Number(ranked[0]?.score) || 0,
+secondScore: Number(ranked[1]?.score) || 0,
+candidateCount: admitted.length,
+},
+} : {}),
 });
 if (!decision.passed) return [];
-const relevantResults = results.filter((result) =>
+const relevantResults = admitted.filter((result) =>
 hasQuestionSpecificRelevance(query, [result.chunk as any], this.retriever.detectIntent(query)),
 );
 if (!relevantResults.length) return [];
@@ -1197,7 +1209,9 @@ if (canonicalReadEnabled && canonicalReadFallbacks.length > 0) {
 }
 }
 results.sort((a, b) => b.score - a.score);
-const finalResults = this.gateCanonicalResults(results.slice(0, topK), normalizedQuery);
+let spaceKey: string | null = null;
+try { spaceKey = this.embeddingPipeline?.getActiveSpaceKey?.() ?? null; } catch { spaceKey = null; }
+const finalResults = this.gateCanonicalResults(results.slice(0, topK), normalizedQuery, spaceKey);
 if (finalResults.length === 0) {
 return { status: 'no_relevant_evidence', results: [], confidence: 0 };
 }

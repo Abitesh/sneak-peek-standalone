@@ -51,10 +51,10 @@ test('Change 16: deferred retrieval cannot bypass the final no-evidence decision
 
 test('Change 16: unified manager gates canonical results before returning them', () => {
   const source = read(managerPath);
-  assert.match(source, /private gateCanonicalResults\(\s*results: RagSearchResult\[\],\s*query: string,\s*\)/);
+  assert.match(source, /private gateCanonicalResults\(\s*results: RagSearchResult\[\],\s*query: string,/);
   assert.match(source, /evaluateRagRelevanceGate\(/);
   assert.match(source, /hasQuestionSpecificRelevance\(/);
-  assert.match(source, /const finalResults = this\.gateCanonicalResults\(results\.slice\(0, topK\), normalizedQuery\)/);
+  assert.match(source, /const finalResults = this\.gateCanonicalResults\(results\.slice\(0, topK\), normalizedQuery/);
   assert.match(source, /return \{ status: 'no_relevant_evidence', results: \[\], confidence: 0 \};/);
 });
 
