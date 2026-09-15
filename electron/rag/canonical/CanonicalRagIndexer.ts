@@ -9,6 +9,7 @@
 import { randomUUID } from 'node:crypto';
 import { CanonicalEmbeddingService } from './CanonicalEmbeddingService';
 import type {
+  CanonicalChunkInput,
   CanonicalRagIndexJob,
   CanonicalRagIndexStatus,
 } from './CanonicalRagTypes';
@@ -34,6 +35,23 @@ export interface CanonicalIndexRunResult {
 
 const DEFAULT_WORKER_PREFIX = 'canonical-indexer';
 
+export interface CanonicalSourceCorpusInput {
+  sourceType: string;
+  sourceId: string;
+  name: string;
+  contentHash: string;
+  chunks: readonly CanonicalChunkInput[];
+  extractionVersion: string;
+  chunkingVersion: string;
+  normalizationVersion: string;
+  path?: string | null;
+  mimeType?: string | null;
+  fileType?: string | null;
+  scopeId?: string | null;
+  sizeBytes?: number | null;
+  metadata?: Record<string, unknown>;
+}
+
 /**
  * Runs the canonical indexing lifecycle for one already-materialized revision.
  * Extraction and source-specific chunking are intentionally outside this
@@ -44,6 +62,58 @@ export class CanonicalRagIndexer {
     private readonly storage: CanonicalRagStorage,
     private readonly embeddingService: CanonicalEmbeddingService,
   ) {}
+
+  /**
+   * Change 25 Phase 9: index an in-memory canonical corpus without reading
+   * legacy tables. Used when canonical reads are already authoritative so new
+   * documents do not need a legacy write first.
+   */
+  async indexSourceCorpus(
+    input: CanonicalSourceCorpusInput,
+    options: CanonicalIndexRunOptions = {},
+  ): Promise<CanonicalIndexRunResult> {
+    if (!input.chunks.length) throw new Error('Canonical source corpus requires chunks');
+
+    const document = this.storage.createDocument({
+      sourceType: input.sourceType,
+      sourceId: input.sourceId,
+      name: input.name,
+      path: input.path ?? null,
+      mimeType: input.mimeType ?? null,
+      fileType: input.fileType ?? null,
+      scopeId: input.scopeId ?? null,
+      sizeBytes: input.sizeBytes ?? null,
+      contentHash: input.contentHash,
+      metadata: input.metadata ?? {},
+    });
+
+    this.storage.updateDocument(document.id, {
+      name: input.name,
+      path: input.path ?? document.path,
+      mimeType: input.mimeType ?? document.mimeType,
+      fileType: input.fileType ?? document.fileType,
+      sizeBytes: input.sizeBytes ?? document.sizeBytes,
+      contentHash: input.contentHash,
+      metadata: { ...document.metadata, ...(input.metadata ?? {}) },
+    });
+
+    const revision = this.storage.createRevision({
+      documentId: document.id,
+      contentHash: input.contentHash,
+      extractionVersion: input.extractionVersion,
+      chunkingVersion: input.chunkingVersion,
+      normalizationVersion: input.normalizationVersion,
+      extractionState: 'EXTRACTED',
+      metadata: input.metadata ?? {},
+    });
+
+    const existingStatus = this.storage.getStatus(document.id, revision.id);
+    if (!existingStatus || !['READY', 'EMBEDDING'].includes(existingStatus.status)) {
+      this.storage.replaceChunks(document.id, revision.id, input.chunks);
+    }
+
+    return this.indexRevision(revision.id, { ...options, activate: options.activate ?? true });
+  }
 
   async indexRevision(
     revisionId: string,
@@ -67,7 +137,12 @@ export class CanonicalRagIndexer {
         : this.embeddingService.ensureEmbeddingSpace();
       try {
         this.verifyReady(document.id, revision.id, space.id);
-        return this.result(document.id, revision.id, space.id, true, false);
+        let activated = document.currentRevisionId === revision.id;
+        if (!activated && options.activate !== false) {
+          this.storage.activateRevision(document.id, revision.id, [space.id]);
+          activated = true;
+        }
+        return this.result(document.id, revision.id, space.id, true, activated);
       } catch {
         // READY is retained only when the requested embedding space is also
         // ready. A new/repair space re-enters the embedding stage explicitly.

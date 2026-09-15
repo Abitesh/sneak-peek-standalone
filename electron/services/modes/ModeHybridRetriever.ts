@@ -9,6 +9,7 @@ import Database from 'better-sqlite3';
 import { buildDocumentMap, buildDocumentChunks, resolveTargetSections, sectionAwareChunksFromMap, selectTableOfContentsEntries, sentenceAwareWindows, tabularChunks, type DocumentMapChunk } from './DocumentMap';
 import { wordsOf } from './lexicalTokens';
 import { CanonicalModeIndexStatusAdapter } from '../../rag/canonical/CanonicalModeIndexStatusAdapter';
+import { shouldWriteLegacyRagChunks } from '../../intelligence/intelligenceFlags';
 // Round-8 (seminar-fix-2): use the SHARED 6-clause evidence rule so the hybrid
 // (live) path gives the model the SAME completeness + off-topic-redirect guidance
 // as the lexical path. Previously formatContext had a stale 1-sentence copy.
@@ -553,6 +554,7 @@ emitIngestDebug('failed', 0, e instanceof Error ? e.message : String(e));
 }
 }
 private persistChunks(fileId: string, chunks: DocumentMapChunk[], embeddings: number[][] | null, space: string | null): void {
+if (!shouldWriteLegacyRagChunks()) return; // ponytail: leftover legacy rows stay until Change 45
 try {
 const del = this.db.prepare('DELETE FROM mode_reference_chunks WHERE file_id = ?');
 const ins = this.db.prepare(`

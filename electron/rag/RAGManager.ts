@@ -30,7 +30,8 @@ import { PersonalRagAdapter } from './adapters/PersonalRagAdapter';
 import { KnowledgeRagAdapter } from './adapters/KnowledgeRagAdapter';
 import { extractSafeDocumentText } from '../services/SafeDocumentTextExtractor';
 import { buildDocumentChunks } from '../services/modes/DocumentMap';
-import { isRagEnabled, isRagHybridEnabled, isRagConversationAwareEnabled, isIntelligenceFlagEnabled, isRagRerankEnabled } from '../intelligence/intelligenceFlags';
+import { isRagEnabled, isRagHybridEnabled, isRagConversationAwareEnabled, isIntelligenceFlagEnabled, isRagRerankEnabled, shouldWriteLegacyRagChunks } from '../intelligence/intelligenceFlags';
+import type { CanonicalChunkInput } from './canonical/CanonicalRagTypes';
 import { beginIndexAttempt, isCurrentIndexAttempt, invalidateIndexAttempt, withCurrentIndexAttempt } from './IndexAttemptRegistry';
 import { PersonalStorageAdapter } from './storage/PersonalStorageAdapter';
 import { CanonicalRagStorage } from './canonical/CanonicalRagStorage';
@@ -39,7 +40,7 @@ import { CanonicalEmbeddingProviderAdapter, getCanonicalPipelineEmbeddingIdentit
 import { CanonicalPersonalRagService, type CanonicalPersonalProjectionResult } from './canonical/CanonicalPersonalRagService';
 import { CanonicalModeBackfillService, type ModeBackfillResult } from './canonical/CanonicalModeBackfillService';
 import { CanonicalMeetingBackfillService, type MeetingBackfillResult } from './canonical/CanonicalMeetingBackfillService';
-import { CanonicalRagIndexer } from './canonical/CanonicalRagIndexer';
+import { CanonicalRagIndexer, type CanonicalIndexRunResult, type CanonicalSourceCorpusInput } from './canonical/CanonicalRagIndexer';
 import { observeCanonicalRagShadowIfEnabled } from './canonical/CanonicalRagShadowService';
 import { CanonicalRagReadService } from './canonical/CanonicalRagReadService';
 import { ModeStorageAdapter } from './storage/ModeStorageAdapter';
@@ -248,6 +249,34 @@ rerankCandidatePoolSize?: number;
 tokenBudget?: number;
 allowRerank?: boolean;
 forceDocumentGrounding?: boolean;
+}
+function toCanonicalDocumentChunks(chunks: Array<{
+  chunkIndex: number;
+  text: string;
+  pageStart?: number;
+  pageEnd?: number;
+  section?: string;
+  heading?: string;
+  contentType?: string;
+  tableIndex?: number;
+  startOffset?: number;
+  endOffset?: number;
+  metadata?: Record<string, unknown>;
+}>): CanonicalChunkInput[] {
+  return chunks.map((chunk) => ({
+    chunkIndex: chunk.chunkIndex,
+    text: chunk.text,
+    pageStart: chunk.pageStart ?? null,
+    pageEnd: chunk.pageEnd ?? null,
+    section: chunk.section ?? null,
+    heading: chunk.heading ?? null,
+    contentType: chunk.contentType ?? null,
+    tableIndex: chunk.tableIndex ?? null,
+    startChar: chunk.startOffset ?? null,
+    endChar: chunk.endOffset ?? null,
+    sourceLocator: `${chunk.chunkIndex}`,
+    metadata: chunk.metadata ?? {},
+  }));
 }
 export class RAGManager {
 private readonly indexStatusListeners = new Set<(snapshot: RagIndexStatusSnapshot) => void>();
@@ -534,6 +563,48 @@ const metadata = {
 ...(extractedPageCount !== undefined ? { extractedPageCount } : {}),
 contentHash,
 };
+if (!shouldWriteLegacyRagChunks()) {
+  try {
+    writeStatus('EMBEDDING', { chunkCount: chunks.length, embeddedChunkCount: 0, totalPageCount: pageCount, extractedPageCount });
+    const indexed = await this.indexCanonicalCorpus({
+      sourceType: input.sourceType,
+      sourceId: documentId,
+      name: fileName || documentId,
+      contentHash,
+      path: input.filePath ?? null,
+      mimeType: typeof input.metadata?.mimeType === 'string' ? input.metadata.mimeType : null,
+      fileType: typeof input.metadata?.fileType === 'string' ? input.metadata.fileType : null,
+      scopeId: input.sourceType === 'mode' && typeof input.metadata?.modeId === 'string' ? input.metadata.modeId : null,
+      metadata,
+      chunks: toCanonicalDocumentChunks(chunks),
+      extractionVersion: 'document-map-v1',
+      chunkingVersion: 'document-map-v1',
+      normalizationVersion: 'document-normalization-v1',
+    });
+    if (indexed.complete) {
+      this.clearDocumentIndexForReplacement(documentId, input.sourceType);
+      writeStatus('READY', {
+        chunkCount: indexed.chunkCount,
+        embeddedChunkCount: indexed.embeddedChunkCount,
+        totalPageCount: pageCount,
+        extractedPageCount,
+      });
+      if (input.sourceType === 'mode') {
+        dbManager.updateModeReferenceIndexState(documentId, contentHash, indexed.chunkCount, 'ready', indexed.embeddingSpaceId);
+      }
+      return {
+        documentId,
+        sourceType: input.sourceType,
+        chunkCount: indexed.chunkCount,
+        embeddedChunkCount: indexed.embeddedChunkCount,
+        status: 'ready',
+      };
+    }
+    console.warn(`[RAGManager] Canonical-primary index incomplete for ${documentId}; falling back to legacy writes`);
+  } catch (error) {
+    console.warn('[RAGManager] Canonical-primary index failed; falling back to legacy writes:', error instanceof Error ? error.message : String(error));
+  }
+}
 let persistedChunkIds: Array<number | string>;
 if (input.sourceType === 'mode') {
 dbManager.updateModeReferenceIndexState(documentId, contentHash, chunks.length, 'indexing', null);
@@ -1385,6 +1456,17 @@ getEmbeddingPipeline(): EmbeddingPipeline {
 return this.embeddingPipeline;
 }
 
+private async indexCanonicalCorpus(input: CanonicalSourceCorpusInput): Promise<CanonicalIndexRunResult> {
+  const identity = getCanonicalPipelineEmbeddingIdentity(this.embeddingPipeline);
+  if (!identity) {
+    throw new Error('Canonical-primary index unavailable: embedding pipeline has no active provider');
+  }
+  const storage = new CanonicalRagStorage(this.db);
+  const provider = new CanonicalEmbeddingProviderAdapter(this.embeddingPipeline);
+  const embeddingService = new CanonicalEmbeddingService(storage, provider);
+  return new CanonicalRagIndexer(storage, embeddingService).indexSourceCorpus(input);
+}
+
 /**
  * Project one legacy personal file into the canonical RAG backend.
  *
@@ -1513,7 +1595,46 @@ if (chunks.length === 0) {
 console.log(`[RAGManager] No chunks to save for meeting ${meetingId}`);
 return { chunkCount: 0 };
 }
-// 3. Save chunks to database
+// 3. Persist searchable transcript chunks. When canonical reads are
+// authoritative, write canonical first and skip legacy chunk rows if that
+// succeeds. Meeting summaries stay on the existing meeting store.
+let wroteLegacyChunks = true;
+if (!shouldWriteLegacyRagChunks()) {
+  try {
+    const indexed = await this.indexCanonicalCorpus({
+      sourceType: 'meeting',
+      sourceId: meetingId,
+      name: `Meeting ${meetingId}`,
+      contentHash: crypto.createHash('sha256').update(chunks.map((chunk) => chunk.text).join('\u001f')).digest('hex'),
+      metadata: {
+        searchableProjection: 'transcript-chunks',
+        legacyMeetingId: meetingId,
+      },
+      chunks: chunks.map((chunk) => ({
+        chunkIndex: chunk.chunkIndex,
+        text: chunk.text,
+        speaker: chunk.speaker,
+        timestampStart: chunk.startMs,
+        timestampEnd: chunk.endMs,
+        tokenCount: chunk.tokenCount,
+        contentType: 'meeting-transcript-chunk',
+        sourceLocator: `meeting:${meetingId}:chunk:${chunk.chunkIndex}`,
+        metadata: { legacyMeetingId: meetingId, searchableProjection: 'transcript-chunk' },
+      })),
+      extractionVersion: 'meeting-transcript-v1',
+      chunkingVersion: 'meeting-transcript-v1',
+      normalizationVersion: 'meeting-transcript-v1',
+    });
+    if (indexed.complete) {
+      wroteLegacyChunks = false;
+    } else {
+      console.warn(`[RAGManager] Canonical-primary meeting index incomplete for ${meetingId}; falling back to legacy chunk writes`);
+    }
+  } catch (error) {
+    console.warn('[RAGManager] Canonical-primary meeting index failed; falling back to legacy chunk writes:', error instanceof Error ? error.message : String(error));
+  }
+}
+if (wroteLegacyChunks) {
 this.vectorStore.saveChunks(chunks);
 // Canonical migration boundary: only persisted transcript-derived chunks are
 // projected. Summary/AI-interaction/transcript domain storage remains separate.
@@ -1522,13 +1643,18 @@ try {
 } catch (error) {
   console.warn('[RAGManager] Canonical meeting projection failed; legacy meeting RAG remains successful:', error instanceof Error ? error.message : String(error));
 }
+}
 // 4. Save summary if provided
 if (summary) {
 this.vectorStore.saveSummary(meetingId, summary);
 }
-// 5. Queue for embedding (background processing)
-if (this.embeddingPipeline.isReady()) {
+// 5. Queue for embedding (background processing). In-meeting live chunks still
+// write to the existing meeting store; this queue is only for persisted
+// historical meeting rows.
+if (wroteLegacyChunks && this.embeddingPipeline.isReady()) {
 await this.embeddingPipeline.queueMeeting(meetingId);
+} else if (!wroteLegacyChunks) {
+console.log(`[RAGManager] Canonical-primary meeting index skipped legacy chunk writes for ${meetingId}`);
 } else {
 console.log(`[RAGManager] Embeddings not ready, chunks saved without embeddings`);
 }

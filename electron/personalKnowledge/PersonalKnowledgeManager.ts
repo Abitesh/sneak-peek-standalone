@@ -17,6 +17,7 @@ import { extractSafeDocumentText } from '../services/SafeDocumentTextExtractor';
 import { buildDocumentChunks, type DocumentMapChunk } from '../services/modes/DocumentMap';
 import type { EmbeddingPipeline } from '../rag/EmbeddingPipeline';
 import type { RAGManager } from '../rag/RAGManager';
+import { shouldWriteLegacyRagChunks } from '../intelligence/intelligenceFlags';
 import { VectorStore } from '../rag/VectorStore';
 import { invalidateIndexAttempt } from '../rag/IndexAttemptRegistry';
 export type PersonalFileType = 'resume' | 'job_description' | 'general';
@@ -430,9 +431,10 @@ const existing = this.db.prepare(
 ).get(contentHash) as { id?: string } | undefined;
 if (existing?.id) {
   // A duplicate-content upload must still repair a missing/incomplete canonical
-  // projection. Canonical projection is idempotent, while legacy storage remains
-  // authoritative for the early-return decision.
-  if (this.ragManager) {
+  // projection while dual-write is active. Phase 9 skips this when canonical
+  // reads are authoritative because indexDocument already wrote canonical
+  // storage and legacy chunks may be absent.
+  if (this.ragManager && shouldWriteLegacyRagChunks()) {
     try {
       await this.ragManager.projectPersonalFileCanonical(existing.id);
     } catch (error) {
@@ -549,7 +551,9 @@ try { await fs.promises.unlink(storedPath); } catch { /* best effort */ }
 throw error;
 }
 try {
+if (shouldWriteLegacyRagChunks()) {
 await this.ragManager.projectPersonalFileCanonical(id);
+}
 } catch (error) {
 console.warn('[PersonalKnowledgeManager] Canonical personal RAG projection failed; legacy ingestion remains successful:', error instanceof Error ? error.message : String(error));
 }

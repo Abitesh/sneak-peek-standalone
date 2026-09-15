@@ -85,9 +85,54 @@ test('universal indexer is idempotent once the revision is READY', async () => {
   const second = await indexer.indexRevision(revision.id, { workerId: 'indexer-test' });
 
   assert.equal(second.complete, true);
+  assert.equal(second.activated, true);
   assert.equal(second.embeddingSpaceId, first.embeddingSpaceId);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM rag_index_jobs WHERE revision_id = ?').get(revision.id).n, jobsBefore);
   assert.equal(storage.readDocument(document.id).currentRevisionId, revision.id);
+  db.close();
+});
+
+test('indexSourceCorpus materializes a document, indexes it, and activates READY without legacy rows', async () => {
+  const db = makeDb();
+  const storage = new CanonicalRagStorage(db);
+  const indexer = makeIndexer(storage);
+
+  const result = await indexer.indexSourceCorpus({
+    sourceType: 'personal',
+    sourceId: 'direct-file-1',
+    name: 'notes.txt',
+    contentHash: 'hash-direct',
+    extractionVersion: 'extract-v1',
+    chunkingVersion: 'chunk-v1',
+    normalizationVersion: 'norm-v1',
+    chunks: [
+      { chunkIndex: 0, text: 'direct canonical chunk one', sourceLocator: '0' },
+      { chunkIndex: 1, text: 'direct canonical chunk two', sourceLocator: '1' },
+    ],
+  });
+
+  assert.equal(result.complete, true);
+  assert.equal(result.activated, true);
+  assert.equal(result.chunkCount, 2);
+  const document = storage.readDocumentBySource('personal', 'direct-file-1');
+  assert.equal(document.name, 'notes.txt');
+  assert.equal(document.currentRevisionId, result.revisionId);
+  assert.equal(storage.getStatus(document.id, result.revisionId).status, 'READY');
+  const again = await indexer.indexSourceCorpus({
+    sourceType: 'personal',
+    sourceId: 'direct-file-1',
+    name: 'notes.txt',
+    contentHash: 'hash-direct',
+    extractionVersion: 'extract-v1',
+    chunkingVersion: 'chunk-v1',
+    normalizationVersion: 'norm-v1',
+    chunks: [
+      { chunkIndex: 0, text: 'direct canonical chunk one', sourceLocator: '0' },
+      { chunkIndex: 1, text: 'direct canonical chunk two', sourceLocator: '1' },
+    ],
+  });
+  assert.equal(again.complete, true);
+  assert.equal(again.activated, true);
   db.close();
 });
 

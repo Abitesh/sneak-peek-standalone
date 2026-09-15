@@ -3,7 +3,7 @@ import test from 'node:test';
 
 const flags = await import(new URL('../../../dist-electron/electron/intelligence/intelligenceFlags.js', import.meta.url).href);
 
-const { intelligenceFlagMeta, isIntelligenceFlagEnabled, __resetIntelligenceFlagsCache } = flags;
+const { intelligenceFlagMeta, isIntelligenceFlagEnabled, shouldWriteLegacyRagChunks, __resetIntelligenceFlagsCache } = flags;
 const READ_ENV = 'NATIVELY_CANONICAL_RAG_READ';
 const SHADOW_ENV = 'NATIVELY_CANONICAL_RAG_SHADOW';
 const ORIGINAL_ENV = new Map([
@@ -54,4 +54,11 @@ test('canonicalRagShadow does not enable canonicalRagRead', () => {
 test('canonicalRagRead environment state is isolated between tests', () => {
   assert.equal(isIntelligenceFlagEnabled('canonicalRagRead'), false);
   assert.equal(isIntelligenceFlagEnabled('canonicalRagShadow'), false);
+});
+
+test('legacy RAG chunk writes stay on until canonical reads are authoritative', () => {
+  assert.equal(shouldWriteLegacyRagChunks(), true);
+  process.env[READ_ENV] = 'on';
+  __resetIntelligenceFlagsCache();
+  assert.equal(shouldWriteLegacyRagChunks(), false);
 });

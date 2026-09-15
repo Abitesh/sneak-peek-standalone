@@ -586,6 +586,16 @@ function readSettingOverride(key: IntelligenceFlagKey): boolean | null {
 }
 
 /**
+ * Change 25 Phase 9: stop legacy RAG chunk/embedding writes only where that is
+ * safe — when canonical reads are already the production authority. Default
+ * remains dual-write. Live meetings, Knowledge, summaries, and file rows are
+ * not gated here.
+ */
+export function shouldWriteLegacyRagChunks(): boolean {
+  return !isIntelligenceFlagEnabled('canonicalRagRead');
+}
+
+/**
  * Resolve a single intelligence flag. env override wins, then settings opt-in,
  * then the flag's documented default. Never throws.
  */
