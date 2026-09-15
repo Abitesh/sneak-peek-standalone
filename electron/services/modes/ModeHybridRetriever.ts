@@ -8,6 +8,7 @@ import { EmbeddingPipeline } from '../../rag/EmbeddingPipeline';
 import Database from 'better-sqlite3';
 import { buildDocumentMap, buildDocumentChunks, resolveTargetSections, sectionAwareChunksFromMap, selectTableOfContentsEntries, sentenceAwareWindows, tabularChunks, type DocumentMapChunk } from './DocumentMap';
 import { wordsOf } from './lexicalTokens';
+import { CanonicalModeIndexStatusAdapter } from '../../rag/canonical/CanonicalModeIndexStatusAdapter';
 // Round-8 (seminar-fix-2): use the SHARED 6-clause evidence rule so the hybrid
 // (live) path gives the model the SAME completeness + off-topic-redirect guidance
 // as the lexical path. Previously formatContext had a stale 1-sentence copy.
@@ -323,6 +324,18 @@ console.warn('[ModeHybridRetriever] Failed to create index state table:', e);
 */
 private getIndexState(fileId: string): ModeReferenceIndexState | null {
 try {
+const activeSpace = this.embeddingPipeline.getActiveSpaceKey?.() ?? null;
+const canonical = new CanonicalModeIndexStatusAdapter(this.db).resolve(fileId, { activeEmbeddingSpace: activeSpace });
+if (canonical) {
+return {
+fileId: canonical.fileId,
+fileHash: canonical.fileHash,
+indexedAt: canonical.indexedAt,
+chunkCount: canonical.chunkCount,
+status: canonical.status as ModeReferenceIndexStatus,
+embeddingSpace: canonical.embeddingSpace ?? null,
+};
+}
 const row = this.db.prepare(
 'SELECT file_id, file_hash, indexed_at, chunk_count, status, embedding_space FROM mode_reference_index_state WHERE file_id = ?'
 ).get(fileId) as any;
