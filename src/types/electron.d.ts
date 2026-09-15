@@ -693,6 +693,9 @@ onMeetingRetentionChanged: (callback: (retention: 'forever' | '7d' | '30d' | 'ne
 getProviderDataScopes: () => Promise<{ transcript?: boolean; screenshots?: boolean; reference_files?: boolean; profile_history?: boolean; embeddings?: boolean; post_call_summary?: boolean }>;
 setProviderDataScopes: (scopes: { transcript?: boolean; screenshots?: boolean; reference_files?: boolean; profile_history?: boolean; embeddings?: boolean; post_call_summary?: boolean }) => Promise<{ success: boolean; error?: string }>;
 onProviderDataScopesChanged: (callback: (scopes: { transcript?: boolean; screenshots?: boolean; reference_files?: boolean; profile_history?: boolean; embeddings?: boolean; post_call_summary?: boolean }) => void) => () => void;
+getLocalPrivateRagMode: () => Promise<'off' | 'local-retrieval' | 'full-local'>;
+setLocalPrivateRagMode: (mode: 'off' | 'local-retrieval' | 'full-local') => Promise<{ success: boolean; error?: string }>;
+onLocalPrivateRagModeChanged: (callback: (mode: 'off' | 'local-retrieval' | 'full-local') => void) => () => void;
 getScreenUnderstandingMode: () => Promise<'vision_first' | 'vision_only' | 'private_vision'>;
 setScreenUnderstandingMode: (mode: 'vision_first' | 'vision_only' | 'private_vision') => Promise<{ success: boolean; error?: string }>;
 onScreenUnderstandingModeChanged: (callback: (mode: 'vision_first' | 'vision_only' | 'private_vision') => void) => () => void;

@@ -128,6 +128,10 @@ export interface AppSettings {
         // allowed; only the cloud path consults this (local py/js never sends).
         code_execution?: boolean;
     };
+    // Change 27 — local/private RAG overlay. Does not mutate providerDataScopes.
+    // off = cloud retrieval allowed; local-retrieval = Mode A (local embed, cloud LLM);
+    // full-local = Mode B (local embed + local LLM).
+    localPrivateRagMode?: 'off' | 'local-retrieval' | 'full-local';
     // Kill-switch for verified code execution (running model code against test
     // cases in a sandbox after the answer). Default ON; set false to disable at
     // runtime without a redeploy. Also overridable by env NATIVELY_CODE_VERIFY=off.

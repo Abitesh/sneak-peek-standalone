@@ -2130,6 +2130,7 @@ export const AIProvidersSettings: React.FC<AIProvidersSettingsProps> = ({
 
     // --- Cloud Provider Data Scopes (fail-closed cloud share controls) ---
     const [providerDataScopes, setProviderDataScopes] = useState<{ transcript?: boolean; screenshots?: boolean; reference_files?: boolean; profile_history?: boolean; embeddings?: boolean; post_call_summary?: boolean }>({});
+    const [localPrivateRagMode, setLocalPrivateRagMode] = useState<'off' | 'local-retrieval' | 'full-local'>('off');
 
     // `screenUnderstandingMode` is one enum with three values, but it answers two
     // independent user questions. Presenting it as three radios forced the user to
@@ -2782,6 +2783,17 @@ export const AIProvidersSettings: React.FC<AIProvidersSettingsProps> = ({
     useEffect(() => {
         if (window.electronAPI?.onProviderDataScopesChanged) {
             const unsubscribe = window.electronAPI.onProviderDataScopesChanged(setProviderDataScopes);
+            return () => unsubscribe();
+        }
+    }, []);
+
+    useEffect(() => {
+        window.electronAPI?.getLocalPrivateRagMode?.().then(setLocalPrivateRagMode).catch(() => { });
+    }, []);
+
+    useEffect(() => {
+        if (window.electronAPI?.onLocalPrivateRagModeChanged) {
+            const unsubscribe = window.electronAPI.onLocalPrivateRagModeChanged(setLocalPrivateRagMode);
             return () => unsubscribe();
         }
     }, []);
@@ -4487,6 +4499,49 @@ export const AIProvidersSettings: React.FC<AIProvidersSettingsProps> = ({
                 </div>
             </div>
 
+            <div className="space-y-5">
+                <div>
+                    <h3 className="text-sm font-bold aip-hero mb-1">{t('Local / private RAG')}</h3>
+                    <p className="text-xs aip-muted mb-2">{t('Retrieval and answering can use different providers. Local retrieval never sends documents to a cloud embedder.')}</p>
+                </div>
+                <div className="aip-card p-5">
+                    <label className="block aip-label mb-1" htmlFor="local-private-rag-mode">
+                        {t('RAG privacy mode')}
+                    </label>
+                    <select
+                        id="local-private-rag-mode"
+                        value={localPrivateRagMode}
+                        onChange={async (e) => {
+                            const previous = localPrivateRagMode;
+                            const next = e.target.value as 'off' | 'local-retrieval' | 'full-local';
+                            setLocalPrivateRagMode(next);
+                            try {
+                                const res = await window.electronAPI?.setLocalPrivateRagMode?.(next);
+                                if (res && res.success === false) {
+                                    setLocalPrivateRagMode(previous);
+                                    console.warn('[AIProviders] local-private RAG mode was not saved:', res.error);
+                                }
+                            } catch (err) {
+                                setLocalPrivateRagMode(previous);
+                                console.warn('[AIProviders] local-private RAG mode write failed:', err);
+                            }
+                        }}
+                        className="aip-input"
+                    >
+                        <option value="off">{t('Cloud retrieval allowed')}</option>
+                        <option value="local-retrieval">{t('Local retrieval, cloud answers')}</option>
+                        <option value="full-local">{t('Everything on this device')}</option>
+                    </select>
+                    <p className="text-[10px] aip-muted mt-1">
+                        {localPrivateRagMode === 'full-local'
+                            ? t('Embeddings, search, and answers stay on this device. Requires a local LLM such as Ollama.')
+                            : localPrivateRagMode === 'local-retrieval'
+                                ? t('Documents are embedded locally. Cloud models may still answer using retrieved text.')
+                                : t('Cloud embeddings are allowed when Cloud embeddings is on.')}
+                    </p>
+                </div>
+            </div>
+
             {/* Cloud Provider Data Scopes — fail-closed cloud share controls.
                 Was six equal-weight rows of bare nouns, each growing a WRAPPED second
                 line when switched off, plus a permanent footnote restating what those
@@ -4547,7 +4602,8 @@ export const AIProvidersSettings: React.FC<AIProvidersSettingsProps> = ({
                                 })()}
                                 <div className="ml-auto shrink-0">
                                     <AipSwitch
-                                        checked={allowed}
+                                        checked={key === 'embeddings' && localPrivateRagMode !== 'off' ? false : allowed}
+                                        hardDisabled={key === 'embeddings' && localPrivateRagMode !== 'off'}
                                         label={`${t('Allow')} ${label} ${t('to cloud providers')}`}
                                         onChange={() => {
                                             const next = { ...providerDataScopes, [key]: !allowed };

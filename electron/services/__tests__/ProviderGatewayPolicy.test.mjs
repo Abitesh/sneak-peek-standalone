@@ -91,11 +91,12 @@ test('Embedding provider resolver fails closed when embeddings scope is denied',
   assert.match(src, /assertProviderDataScopes\('gemini_embeddings', \['embeddings'\], config\.providerDataScopes\)/);
 });
 
-test('RAGManager forwards providerDataScopes from config and runtime keys', () => {
+test('RAGManager overlays local-private RAG onto providerDataScopes without dropping the stored policy', () => {
   const src = read('electron/rag/RAGManager.ts');
 
   assert.match(src, /providerDataScopes\?: ProviderDataScopePolicy/);
-  assert.match(src, /providerDataScopes: config\.providerDataScopes/);
+  assert.match(src, /applyLocalPrivateRagScopes\(config\.providerDataScopes, readLocalPrivateRagMode\(\)\)/);
+  assert.match(src, /applyLocalPrivateRagScopes\(keys\.providerDataScopes, readLocalPrivateRagMode\(\)\)/);
 });
 
 test('SettingsManager exposes providerDataScopes setting', () => {

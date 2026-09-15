@@ -13,6 +13,7 @@ import { RAGRetriever, hasQuestionSpecificRelevance, type RagRetrievalResponse a
 import { LiveRAGIndexer } from './LiveRAGIndexer';
 import { buildRAGPrompt } from './prompts';
 import type { ProviderDataScopePolicy } from '../llm/ProviderRouter';
+import { applyLocalPrivateRagAnswers, applyLocalPrivateRagScopes, readLocalPrivateRagMode } from './localPrivateRagMode';
 import { RagQueryPlanner, type RagQueryPlan, type RagQueryPlanningContext, type RagSourceSelection } from './RagQueryPlanner';
 import { CanonicalRagComparisonService } from './canonical/CanonicalRagComparisonService';
 import type { RagRetrievalComparisonCandidate, RagRetrievalComparisonSourceType } from './canonical/CanonicalRagComparisonTypes';
@@ -415,7 +416,7 @@ openaiKey: config.openaiKey,
 geminiKey: config.geminiKey,
 geminiKeys: config.geminiKeys,
 ollamaUrl: config.ollamaUrl,
-providerDataScopes: config.providerDataScopes,
+providerDataScopes: applyLocalPrivateRagScopes(config.providerDataScopes, readLocalPrivateRagMode()),
 explicitKeyManagement: config.explicitKeyManagement,
 }).then(() => {
 this.configurePersonalKnowledge();
@@ -1449,6 +1450,7 @@ return this.search(query, options);
 */
 setLLMHelper(llmHelper: LLMHelper): void {
 this.llmHelper = llmHelper;
+applyLocalPrivateRagAnswers(llmHelper);
 }
 /**
 * The retriever, for callers that need typed chunks rather than a formatted
@@ -1583,6 +1585,7 @@ async projectMeetingCanonical(meetingId: string): Promise<MeetingBackfillResult>
 initializeEmbeddings(keys: { openaiKey?: string, geminiKey?: string, geminiKeys?: string[], ollamaUrl?: string, providerDataScopes?: ProviderDataScopePolicy, explicitKeyManagement?: boolean }): void {
 const initPromise = this.embeddingPipeline.initialize({
 ...keys,
+providerDataScopes: applyLocalPrivateRagScopes(keys.providerDataScopes, readLocalPrivateRagMode()),
 explicitKeyManagement: keys.explicitKeyManagement,
 });
 // After init, backfill embedding_provider on meetings that have embedded chunks

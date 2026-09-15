@@ -337,11 +337,9 @@ describe('streamWithCodexCli refuses before any byte leaves', () => {
 
   // SCOPE OF THE TWO TESTS BELOW — read before trusting them.
   //
-  // They set `isLocalOnlyMode` on the instance DIRECTLY, because nothing in the
-  // shipped app ever turns it on: `setLocalOnlyMode()` has no production caller
-  // (grep finds only its definition at LLMHelper.ts:1108 and test files), so
-  // the field is permanently false and these throws cannot fire in production
-  // today.
+  // They set `isLocalOnlyMode` on the instance DIRECTLY in some tests. Production
+  // wiring is Change 27: `applyLocalPrivateRagAnswers` / `setLocalOnlyMode` for
+  // full-local RAG. These tests still assert Codex respects that same flag.
   //
   // So these are CONSISTENCY tests, not privacy guarantees: they assert Codex
   // carries the same local-only boundary as the eight other cloud providers, so

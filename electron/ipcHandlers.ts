@@ -16,6 +16,7 @@ import { formatEnvelopeForPrompt } from './services/browser-context/formatEnvelo
 import { BrowserMetadataClassifierService } from './services/browser-context/BrowserMetadataClassifierService';
 import type { BrowserContextCategory, SafeWebsiteMetadata } from './services/browser-context/types';
 import { SettingsManager } from './services/SettingsManager';
+import { applyLocalPrivateRagAnswers, isLocalPrivateRagMode, parseLocalPrivateRagMode } from './rag/localPrivateRagMode';
 import { ProviderStatusRegistry } from './services/ProviderStatusRegistry';
 import { SkillsManager } from './services/SkillsManager';
 import { SAFE_DOCUMENT_EXTENSIONS } from './services/SafeDocumentTextExtractor';
@@ -6094,6 +6095,37 @@ if (!win.isDestroyed()) {
 // seeds its next write from this, so echoing a partial payload would
 // reintroduce the erasure one turn later.
 win.webContents.send('provider-data-scopes-changed', merged);
+}
+});
+return { success: true };
+});
+safeHandle('get-local-private-rag-mode', async () => {
+return parseLocalPrivateRagMode(SettingsManager.getInstance().get('localPrivateRagMode'));
+});
+safeHandle('set-local-private-rag-mode', async (_, mode: unknown) => {
+if (!isLocalPrivateRagMode(mode)) {
+return { success: false, error: 'invalid_mode' };
+}
+const settings = SettingsManager.getInstance();
+if (!settings.set('localPrivateRagMode', mode)) {
+return { success: false, error: 'settings_store_degraded' };
+}
+const llmHelper = appState.processingHelper?.getLLMHelper?.();
+if (llmHelper) applyLocalPrivateRagAnswers(llmHelper, mode);
+const ragManager = appState.getRAGManager?.();
+if (ragManager) {
+const { CredentialsManager } = require('./services/CredentialsManager');
+const cm = CredentialsManager.getInstance();
+ragManager.initializeEmbeddings({
+openaiKey: cm.getOpenaiApiKey() || process.env.OPENAI_API_KEY || undefined,
+geminiKey: cm.getGeminiApiKey() || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || undefined,
+ollamaUrl: process.env.OLLAMA_URL || 'http://localhost:11434',
+providerDataScopes: settings.get('providerDataScopes'),
+});
+}
+BrowserWindow.getAllWindows().forEach((win) => {
+if (!win.isDestroyed()) {
+win.webContents.send('local-private-rag-mode-changed', mode);
 }
 });
 return { success: true };

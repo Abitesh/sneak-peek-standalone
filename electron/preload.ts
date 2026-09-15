@@ -956,6 +956,9 @@ embeddings?: boolean;
 post_call_summary?: boolean;
 }) => void,
 ) => () => void;
+getLocalPrivateRagMode: () => Promise<'off' | 'local-retrieval' | 'full-local'>;
+setLocalPrivateRagMode: (mode: 'off' | 'local-retrieval' | 'full-local') => Promise<{ success: boolean; error?: string }>;
+onLocalPrivateRagModeChanged: (callback: (mode: 'off' | 'local-retrieval' | 'full-local') => void) => () => void;
 getScreenUnderstandingMode: () => Promise<'vision_first' | 'vision_only' | 'private_vision'>;
 setScreenUnderstandingMode: (
 mode: 'vision_first' | 'vision_only' | 'private_vision',
@@ -2573,6 +2576,15 @@ const subscription = (_: any, scopes: any) => callback(scopes);
 ipcRenderer.on('provider-data-scopes-changed', subscription);
 return () => {
 ipcRenderer.removeListener('provider-data-scopes-changed', subscription);
+};
+},
+getLocalPrivateRagMode: () => ipcRenderer.invoke('get-local-private-rag-mode'),
+setLocalPrivateRagMode: (mode: 'off' | 'local-retrieval' | 'full-local') => ipcRenderer.invoke('set-local-private-rag-mode', mode),
+onLocalPrivateRagModeChanged: (callback: (mode: 'off' | 'local-retrieval' | 'full-local') => void) => {
+const subscription = (_: any, mode: 'off' | 'local-retrieval' | 'full-local') => callback(mode);
+ipcRenderer.on('local-private-rag-mode-changed', subscription);
+return () => {
+ipcRenderer.removeListener('local-private-rag-mode-changed', subscription);
 };
 },
 getScreenUnderstandingMode: () => ipcRenderer.invoke('get-screen-understanding-mode'),
