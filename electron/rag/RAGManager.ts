@@ -921,7 +921,8 @@ metadata: {
 // Query → RagQueryPlanner (prep + sources) → per-source adapters /
 // CanonicalRagReadService (vector + FTS) → dedupeRagSearchResults →
 // shared BGE rerank → relevance gate → RagSearchResult[].
-// Adapters stay specialized. Fusion is concat + union-by-chunk-id, not RRF.
+// Adapters stay specialized. Cross-source fusion is concat + union-by-chunk-id.
+// Canonical FTS+vector RRF is CanonicalRagReadService + ragRrfFusion (default off).
 async search(query: string, options: RAGSearchOptions = {}): Promise<RAGRetrievalResponse> {
 const originalQuery = String(query ?? '').trim();
 if (!originalQuery) return { status: 'no_relevant_evidence', results: [], confidence: 0 };

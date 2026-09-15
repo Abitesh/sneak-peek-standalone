@@ -32,6 +32,7 @@ export interface RagSearchResult {
   semanticScore?: number;
   lexicalScore?: number;
   rerankScore?: number;
+  rrfScore?: number;
   source: RagDocument;
 }
 

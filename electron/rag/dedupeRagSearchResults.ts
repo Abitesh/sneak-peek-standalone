@@ -16,7 +16,8 @@ function mergeScores(winner: RagSearchResult, other: RagSearchResult): RagSearch
 
 /**
  * Cross-source candidate collapse for RAGManager.search.
- * // ponytail: union-by-chunk-id until Change 32 RRF
+ * Canonical FTS+vector RRF lives in CanonicalRagReadService behind ragRrfFusion.
+ * // ponytail: search() stays union-by-chunk-id; do not activate disconnected RRF here
  */
 export function dedupeRagSearchResults(results: readonly RagSearchResult[]): RagSearchResult[] {
   const best = new Map<string, RagSearchResult>();

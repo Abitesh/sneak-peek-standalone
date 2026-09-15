@@ -256,3 +256,77 @@ test('keeps lexical hits when vector search throws', async () => {
   assert.equal(result.usedCanonical, true);
   assert.equal(result.results[0].chunk.text, 'canonical text');
 });
+
+function lexicalHit(id, text) {
+  const base = canonicalResult();
+  return {
+    ...base,
+    score: 1,
+    chunk: { ...base.chunk, id, text },
+  };
+}
+
+function vectorHit(id, text, distance) {
+  return {
+    ...lexicalHit(id, text),
+    embeddingSpaceId: 'space-a',
+    physicalRowKey: 1,
+    distance,
+  };
+}
+
+function hybridService() {
+  return new CanonicalRagReadService({
+    async searchLexical() {
+      return [lexicalHit('chunk-a', 'alpha'), lexicalHit('chunk-b', 'bravo')];
+    },
+    searchVector() {
+      return [vectorHit('chunk-c', 'charlie', 0.05), vectorHit('chunk-a', 'alpha', 0.2)];
+    },
+  });
+}
+
+const RRF_FLAG = 'NATIVELY_RAG_RRF_FUSION';
+
+test('Change 32 flag off keeps union-by-chunk-id order and does not invent rrfScore', async () => {
+  const previous = process.env[RRF_FLAG];
+  delete process.env[RRF_FLAG];
+  try {
+    const result = await hybridService().readSource({
+      query: 'hello',
+      sourceType: 'personal',
+      limit: 8,
+      queryEmbedding: [1, 0],
+      embeddingSpaceId: 'space-a',
+      fallback: async () => legacyResult(),
+    });
+    assert.deepEqual(result.results.map((row) => row.chunk.id), ['chunk-a', 'chunk-b', 'chunk-c']);
+    assert.equal(result.results[0].semanticScore, -0.2);
+    assert.equal(result.results.some((row) => row.rrfScore != null), false);
+  } finally {
+    if (previous === undefined) delete process.env[RRF_FLAG];
+    else process.env[RRF_FLAG] = previous;
+  }
+});
+
+test('Change 32 flag on fuses lexical and vector ranks with existing fuseRanked', async () => {
+  const previous = process.env[RRF_FLAG];
+  process.env[RRF_FLAG] = '1';
+  try {
+    const result = await hybridService().readSource({
+      query: 'hello',
+      sourceType: 'personal',
+      limit: 8,
+      queryEmbedding: [1, 0],
+      embeddingSpaceId: 'space-a',
+      fallback: async () => legacyResult(),
+    });
+    assert.deepEqual(result.results.map((row) => row.chunk.id), ['chunk-a', 'chunk-c', 'chunk-b']);
+    assert.ok(result.results[0].rrfScore > result.results[1].rrfScore);
+    assert.ok(result.results[1].rrfScore > result.results[2].rrfScore);
+    assert.equal(result.results[0].semanticScore, -0.2);
+  } finally {
+    if (previous === undefined) delete process.env[RRF_FLAG];
+    else process.env[RRF_FLAG] = previous;
+  }
+});
