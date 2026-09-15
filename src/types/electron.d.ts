@@ -441,6 +441,8 @@ searchInMeeting: (query: string) => Promise<{ enabled: boolean; results: any[] }
 generateLectureNotes: (opts?: { title?: string; course?: string }) => Promise<{ enabled: boolean; notes: any }>
 generateDiagram: (text?: string) => Promise<{ enabled: boolean; diagram: any }>
 getIntelligenceFlags: () => Promise<Array<{ key: string; enabled: boolean; setting: string; env: string; default: boolean }>>
+getRagSettings: () => Promise<Array<{ key: string; enabled: boolean; setting: string; env: string; default: boolean; legacy?: string; envForced?: boolean }>>
+setRagSetting: (key: string, value: boolean | null) => Promise<{ success: boolean; enabled?: boolean; error?: string }>
 setIntelligenceFlag: (key: string, value: boolean | null) => Promise<{ success: boolean; enabled?: boolean; error?: string }>
 getContextDebugConfig: () => Promise<{ level: 'off' | 'standard' | 'verbose'; levelSource: 'environment' | 'setting' | 'default'; contentInclusion: boolean; storedLevel?: 'off' | 'standard' | 'verbose'; logDirectory?: string | null; currentFile?: string | null; error?: string }>
 setContextDebugLevel: (level: 'off' | 'standard' | 'verbose') => Promise<{ ok: boolean; error?: string }>
@@ -494,7 +496,7 @@ onSessionReset: (callback: () => void) => () => void;
 // Streaming listeners
 streamGeminiChat: (message: string, imagePaths?: string[], context?: string, options?: { skipSystemPrompt?: boolean, ignoreKnowledgeMode?: boolean }) => Promise<void>
 onGeminiStreamToken: (callback: (token: string, meta?: { streamId?: number }) => void) => () => void
-onGeminiStreamDone: (callback: (data?: { finalText?: string; streamId?: number }) => void) => () => void
+onGeminiStreamDone: (callback: (data?: { finalText?: string; streamId?: number; citationMarkers?: Record<string, { marker: string; evidenceId: string; citationId: string; citation: { citationId: string; documentId: string; documentName: string; chunkId: string; pageStart?: number; pageEnd?: number; section?: string; sourceType: string } }> }) => void) => () => void
 onGeminiStreamError: (callback: (error: string, meta?: { streamId?: number | null; source?: string }) => void) => () => void;
 // NOTE: onSkillsChanged broadcast subscription was removed. Skills are
 // toggled only via delete; the picker refreshes on Settings unmount, and
