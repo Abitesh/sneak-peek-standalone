@@ -84,6 +84,10 @@ test('IPC persists localPrivateRagMode without mutating stored providerDataScope
   assert.doesNotMatch(setBlock, /settings\.set\('providerDataScopes'/);
   assert.match(setBlock, /applyLocalPrivateRagAnswers/);
   assert.match(setBlock, /initializeEmbeddings/);
+  assert.ok(
+    setBlock.indexOf("settings.set('localPrivateRagMode'") < setBlock.indexOf('initializeEmbeddings'),
+    'mode must persist before embedding reinit so MiniLM pin is read',
+  );
   assert.match(setBlock, /local-private-rag-mode-changed/);
 });
 
@@ -116,4 +120,35 @@ test('Change 27 does not stop Mode status writers or invent a second RAG pipelin
   assert.match(mode, /private ensureIndexTable\(/);
   const helper = read('electron/rag/localPrivateRagMode.ts');
   assert.doesNotMatch(helper, /class LocalPrivateRagPipeline/);
+});
+
+test('local-retrieval and full-local force bundled MiniLM even when Ollama would be available', () => {
+  const resolver = read('electron/rag/EmbeddingProviderResolver.ts');
+  const resolveStart = resolver.indexOf('static async resolve(config: AppAPIConfig)');
+  const ollamaPush = resolver.indexOf('new OllamaEmbeddingProvider', resolveStart);
+  const bundledGate = resolver.indexOf('config.bundledLocalEmbeddings', resolveStart);
+  assert.ok(bundledGate >= 0 && bundledGate < ollamaPush, 'bundled MiniLM must win before Ollama is constructed');
+  assert.match(resolver.slice(bundledGate, ollamaPush), /new LocalEmbeddingProvider\(\)/);
+  assert.match(resolver.slice(bundledGate, ollamaPush), /return local;/);
+  const rag = read('electron/rag/RAGManager.ts');
+  assert.match(rag, /bundledLocalEmbeddings:\s*wantsLocalRetrieval\(/);
+  const pipeline = read('electron/rag/EmbeddingPipeline.ts');
+  assert.match(pipeline, /this\.bundledLocalEmbeddings = Boolean\(config\.bundledLocalEmbeddings\)/);
+  assert.match(pipeline, /this\.bundledLocalEmbeddings && fallback\.name !== 'local'/);
+  const queryEmbed = pipeline.slice(pipeline.indexOf('async getEmbeddingForQuery('), pipeline.indexOf('get localDimensions()'));
+  assert.match(queryEmbed, /canUseEmbeddingFallback\(/);
+});
+
+test('RAG answers use provider-neutral dispatch, not a hard-wired Gemini stream', () => {
+  const src = read('electron/rag/RAGManager.ts');
+  assert.doesNotMatch(src, /streamChatWithGemini\(/);
+  assert.match(src, /streamChatWithOutcome\(/);
+  const meeting = src.slice(src.indexOf('async *queryMeeting('), src.indexOf('async *queryGlobal('));
+  const ragAnswerStart = src.indexOf('private async *streamRagAnswer(');
+  assert.ok(ragAnswerStart > 0, 'streamRagAnswer must exist');
+  const ragAnswer = src.slice(ragAnswerStart, src.indexOf('async *query('));
+  assert.match(meeting, /streamRagAnswer\(/);
+  assert.match(src.slice(src.indexOf('async *queryGlobal('), ragAnswerStart), /streamRagAnswer\(/);
+  assert.match(ragAnswer, /streamChatWithOutcome\(/);
+  assert.match(ragAnswer, /abortSignal/);
 });

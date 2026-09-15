@@ -42,6 +42,7 @@ export class EmbeddingPipeline {
     private initPromise: Promise<void> | null = null;
     /** Tracks the config used in the most recent successful initialize() call to enable idempotency. */
     private _lastConfig: AppAPIConfig | null = null;
+    private bundledLocalEmbeddings = false;
 
     constructor(db: Database.Database, vectorStore: VectorStore) {
         this.db = db;
@@ -91,7 +92,8 @@ export class EmbeddingPipeline {
             norm(prev.geminiEmbeddingModel) !== norm(next.geminiEmbeddingModel) ||
             (prev.geminiEmbeddingDims || 0) !== (next.geminiEmbeddingDims || 0) ||
             normScopes(prev.providerDataScopes) !== normScopes(next.providerDataScopes) ||
-            Boolean(prev.explicitKeyManagement) !== Boolean(next.explicitKeyManagement)
+            Boolean(prev.explicitKeyManagement) !== Boolean(next.explicitKeyManagement) ||
+            Boolean(prev.bundledLocalEmbeddings) !== Boolean(next.bundledLocalEmbeddings)
         );
     }
 
@@ -103,6 +105,7 @@ export class EmbeddingPipeline {
         // first real fallback/query use through embed()/embedQuery().
         this.fallbackProvider = new LocalEmbeddingProvider();
         console.log(`[EmbeddingPipeline] Local fallback provider registered for lazy load (${this.fallbackProvider.dimensions}d)`);
+        this.bundledLocalEmbeddings = Boolean(config.bundledLocalEmbeddings);
 
         // Resolve primary provider before touching the local model. If the primary is
         // local, the resolver's instance becomes both primary and fallback so the model
@@ -569,7 +572,7 @@ export class EmbeddingPipeline {
             return { embedding, space, provider: active.name, dimensions: active.dimensions };
         } catch (primaryError) {
             const fallback = this.fallbackProvider;
-            if (!fallback || fallback === active) throw primaryError;
+            if (!this.canUseEmbeddingFallback(fallback, active)) throw primaryError;
             console.warn(
                 `[EmbeddingPipeline] Primary single embedding failed via ${active.name}; ` +
                 `falling back to ${fallback.name}:`,
@@ -633,7 +636,7 @@ export class EmbeddingPipeline {
             // (local-only mode where `this.provider === this.fallbackProvider`),
             // re-running the same call would silently double-embed and re-trigger
             // the same timeout. Surface the original failure instead.
-            if (!fallback || fallback === this.provider) throw primaryError;
+            if (!this.canUseEmbeddingFallback(fallback, active)) throw primaryError;
             console.warn(
                 `[EmbeddingPipeline] Primary batch embedding failed via ${this.provider?.name ?? 'unknown'}; ` +
                 `falling back to ${fallback.name}:`,
@@ -785,7 +788,7 @@ export class EmbeddingPipeline {
             return await runQuery(provider, 'live-query');
         } catch (primaryError) {
             const fallback = this.fallbackProvider;
-            if (!fallback || fallback === provider) throw primaryError;
+            if (!this.canUseEmbeddingFallback(fallback, provider)) throw primaryError;
             console.warn(
                 `[EmbeddingPipeline] Primary query embedding failed via ${provider.name}; ` +
                 `falling back to ${fallback.name}:`,
@@ -851,6 +854,16 @@ export class EmbeddingPipeline {
             console.warn('[EmbeddingPipeline] Local query embed failed:', e?.message || e);
             return null;
         }
+    }
+
+    private canUseEmbeddingFallback(
+        fallback: IEmbeddingProvider | null,
+        primary: IEmbeddingProvider | null,
+    ): fallback is IEmbeddingProvider {
+        if (!fallback || fallback === primary) return false;
+        // ponytail: MiniLM-only private mode must not promote Ollama/cloud on embed failure.
+        if (this.bundledLocalEmbeddings && fallback.name !== 'local') return false;
+        return true;
     }
 
     /**

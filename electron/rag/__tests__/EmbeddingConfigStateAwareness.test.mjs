@@ -48,6 +48,7 @@ describe('EmbeddingPipeline config state-awareness', () => {
     assert.match(block, /normList\(prev\.geminiKeys\)\s*!==\s*normList\(next\.geminiKeys\)/, 'Gemini key-pool shrink/removal must reinitialize');
     assert.match(block, /providerDataScopes/, 'data-scope changes affect provider choice and must reinitialize');
     assert.match(block, /explicitKeyManagement/, 'Settings-managed key removal must not be masked by env fallback');
+    assert.match(block, /bundledLocalEmbeddings/, 'local-private MiniLM pin must reinitialize');
   });
 });
 

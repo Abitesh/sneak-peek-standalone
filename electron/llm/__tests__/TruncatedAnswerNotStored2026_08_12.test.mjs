@@ -100,15 +100,16 @@ describe('the sentinel is strictly internal', () => {
   });
 
   test('the sentinel is not emitted by generators consumed directly', () => {
-    // streamChatWithGemini is consumed by RAGManager WITHOUT passing through
-    // streamChat, so a sentinel yielded there would leak into its output.
+    // streamChatWithGemini must not yield the sentinel — RAGManager used to
+    // consume it directly. RAG now uses streamChatWithOutcome; this method
+    // still must not leak the sentinel if other callers consume it.
     const start = llmSrc.indexOf('public async * streamChatWithGemini(');
     const end = llmSrc.indexOf('private async *streamVisionWithFallback(', start);
     assert.ok(start > 0 && end > start, 'could not bound streamChatWithGemini');
     assert.doesNotMatch(
       llmSrc.slice(start, end),
       /yield LLMHelper\.TRUNCATION_SENTINEL/,
-      'streamChatWithGemini must not yield the sentinel — RAGManager consumes it directly',
+      'streamChatWithGemini must not yield the sentinel',
     );
   });
 });

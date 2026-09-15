@@ -13,7 +13,7 @@ import { RAGRetriever, hasQuestionSpecificRelevance, type RagRetrievalResponse a
 import { LiveRAGIndexer } from './LiveRAGIndexer';
 import { buildRAGPrompt } from './prompts';
 import type { ProviderDataScopePolicy } from '../llm/ProviderRouter';
-import { applyLocalPrivateRagAnswers, applyLocalPrivateRagScopes, readLocalPrivateRagMode } from './localPrivateRagMode';
+import { applyLocalPrivateRagAnswers, applyLocalPrivateRagScopes, readLocalPrivateRagMode, wantsLocalRetrieval } from './localPrivateRagMode';
 import { dedupeRagSearchResults } from './dedupeRagSearchResults';
 import { RagQueryPlanner, type RagQueryPlan, type RagQueryPlanningContext, type RagSourceSelection } from './RagQueryPlanner';
 import { CanonicalRagComparisonService } from './canonical/CanonicalRagComparisonService';
@@ -412,14 +412,14 @@ this.knowledgeAdapter = new KnowledgeRagAdapter();
 // Register only the coordinator before provider initialization. Embedding
 // services are wired after initialize() so existing backfill behavior is kept.
 this.configurePersonalKnowledgeCoordinator();
-this.embeddingPipeline.initialize({
+this.embeddingPipeline.initialize(this.embeddingInitConfig({
 openaiKey: config.openaiKey,
 geminiKey: config.geminiKey,
 geminiKeys: config.geminiKeys,
 ollamaUrl: config.ollamaUrl,
-providerDataScopes: applyLocalPrivateRagScopes(config.providerDataScopes, readLocalPrivateRagMode()),
+providerDataScopes: config.providerDataScopes,
 explicitKeyManagement: config.explicitKeyManagement,
-}).then(() => {
+})).then(() => {
 this.configurePersonalKnowledge();
 // Backfill provider metadata for meetings that were embedded before the
 // embedding_provider column was written (or where the write failed silently).
@@ -1590,12 +1590,24 @@ async projectMeetingCanonical(meetingId: string): Promise<MeetingBackfillResult>
   );
   return this.canonicalMeetingBackfillService.backfillMeeting(meetingId);
 }
-initializeEmbeddings(keys: { openaiKey?: string, geminiKey?: string, geminiKeys?: string[], ollamaUrl?: string, providerDataScopes?: ProviderDataScopePolicy, explicitKeyManagement?: boolean }): void {
-const initPromise = this.embeddingPipeline.initialize({
+private embeddingInitConfig(keys: {
+openaiKey?: string;
+geminiKey?: string;
+geminiKeys?: string[];
+ollamaUrl?: string;
+providerDataScopes?: ProviderDataScopePolicy;
+explicitKeyManagement?: boolean;
+}) {
+const mode = readLocalPrivateRagMode();
+return {
 ...keys,
-providerDataScopes: applyLocalPrivateRagScopes(keys.providerDataScopes, readLocalPrivateRagMode()),
+providerDataScopes: applyLocalPrivateRagScopes(keys.providerDataScopes, mode),
+bundledLocalEmbeddings: wantsLocalRetrieval(mode),
 explicitKeyManagement: keys.explicitKeyManagement,
-});
+};
+}
+initializeEmbeddings(keys: { openaiKey?: string, geminiKey?: string, geminiKeys?: string[], ollamaUrl?: string, providerDataScopes?: ProviderDataScopePolicy, explicitKeyManagement?: boolean }): void {
+const initPromise = this.embeddingPipeline.initialize(this.embeddingInitConfig(keys));
 // After init, backfill embedding_provider on meetings that have embedded chunks
 // but a NULL metadata column (common for meetings embedded before this metadata
 // write was introduced, or where the write silently failed).
@@ -1739,23 +1751,7 @@ const promptContext = context.status === 'no_relevant_evidence'
 // grounded evidence was found and prevents unsupported facts being presented
 // as document-derived.
 const prompt = buildRAGPrompt(query, promptContext, 'meeting', context.intent);
-// Stream response
-const streamOutcome: { incomplete?: boolean } = {};
-const stream = this.llmHelper.streamChatWithGemini(prompt, undefined, undefined, true, undefined, streamOutcome);
-for await (const chunk of raceGeneratorWithDeadline(stream, RAG_STREAM_STALL_MS)) {
-if (abortSignal?.aborted) break;
-yield chunk;
-}
-// F7 (code-review 2026-08-14): surface an incomplete stream to the
-// reader. Without this, a capped or post-commit-failed stream ended
-// normally, ipcHandlers sent rag:stream-complete, and the renderer
-// finalized a mid-sentence bubble as a complete answer that then
-// entered conversation state. The coda makes the truncation VISIBLE
-// in the rendered/persisted answer (skipped on user abort — that is
-// a cancellation, not a truncation).
-if (streamOutcome.incomplete && !abortSignal?.aborted) {
-yield '\n\n_(Answer incomplete \u2014 the model stream ended early.)_';
-}
+yield* this.streamRagAnswer(prompt, abortSignal);
 }
 /**
 * Query across all meetings (global search)
@@ -1784,21 +1780,30 @@ const promptContext = context.status === 'no_relevant_evidence'
 // Build prompt with intent hint and an explicit no-evidence instruction when
 // retrieval found nothing relevant.
 const prompt = buildRAGPrompt(query, promptContext, 'global', context.intent);
-// Stream response
-const streamOutcome: { incomplete?: boolean } = {};
-const stream = this.llmHelper.streamChatWithGemini(prompt, undefined, undefined, true, undefined, streamOutcome);
+yield* this.streamRagAnswer(prompt, abortSignal);
+}
+private async *streamRagAnswer(prompt: string, abortSignal?: AbortSignal): AsyncGenerator<string, void, unknown> {
+if (!this.llmHelper) {
+throw new Error('LLM helper not initialized');
+}
+// Change 27: retrieval stays MiniLM-local in private modes; answers go through
+// the selected provider. streamChatWithOutcome honors isLocalOnlyMode (full-local
+// → Ollama/local) and the user's cloud default (local-retrieval hybrid).
+const { stream, outcome } = this.llmHelper.streamChatWithOutcome(
+prompt,
+undefined,
+undefined,
+undefined,
+true,
+true,
+[],
+abortSignal,
+);
 for await (const chunk of raceGeneratorWithDeadline(stream, RAG_STREAM_STALL_MS)) {
 if (abortSignal?.aborted) break;
 yield chunk;
 }
-// F7 (code-review 2026-08-14): surface an incomplete stream to the
-// reader. Without this, a capped or post-commit-failed stream ended
-// normally, ipcHandlers sent rag:stream-complete, and the renderer
-// finalized a mid-sentence bubble as a complete answer that then
-// entered conversation state. The coda makes the truncation VISIBLE
-// in the rendered/persisted answer (skipped on user abort — that is
-// a cancellation, not a truncation).
-if (streamOutcome.incomplete && !abortSignal?.aborted) {
+if (outcome.truncated && !abortSignal?.aborted) {
 yield '\n\n_(Answer incomplete \u2014 the model stream ended early.)_';
 }
 }

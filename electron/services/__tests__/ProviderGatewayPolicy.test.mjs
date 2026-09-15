@@ -95,8 +95,8 @@ test('RAGManager overlays local-private RAG onto providerDataScopes without drop
   const src = read('electron/rag/RAGManager.ts');
 
   assert.match(src, /providerDataScopes\?: ProviderDataScopePolicy/);
-  assert.match(src, /applyLocalPrivateRagScopes\(config\.providerDataScopes, readLocalPrivateRagMode\(\)\)/);
-  assert.match(src, /applyLocalPrivateRagScopes\(keys\.providerDataScopes, readLocalPrivateRagMode\(\)\)/);
+  assert.match(src, /applyLocalPrivateRagScopes\(keys\.providerDataScopes, mode\)/);
+  assert.match(src, /bundledLocalEmbeddings:\s*wantsLocalRetrieval\(mode\)/);
 });
 
 test('SettingsManager exposes providerDataScopes setting', () => {

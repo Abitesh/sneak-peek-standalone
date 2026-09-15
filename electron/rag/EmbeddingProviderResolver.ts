@@ -24,6 +24,11 @@ export interface AppAPIConfig {
    * silently keep it alive and make the UI lie about provider availability.
    */
   explicitKeyManagement?: boolean;
+  /**
+   * Change 27: local-retrieval / full-local must use bundled MiniLM, not Ollama.
+   * Ollama is a local-network service, not the bundled on-device embedder.
+   */
+  bundledLocalEmbeddings?: boolean;
 }
 
 export class EmbeddingProviderResolver {
@@ -90,6 +95,12 @@ export class EmbeddingProviderResolver {
    * Local model is the unconditional fallback — always last.
    */
   static async resolve(config: AppAPIConfig): Promise<IEmbeddingProvider> {
+    if (config.bundledLocalEmbeddings) {
+      const local = new LocalEmbeddingProvider();
+      console.log(`[EmbeddingProviderResolver] local-private RAG: bundled MiniLM (${local.dimensions}d, lazy load)`);
+      return local;
+    }
+
     const candidates: IEmbeddingProvider[] = [];
 
     let embeddingsDenied = false;
