@@ -23,6 +23,7 @@ import type { RagRetrievalComparisonCandidate, RagRetrievalComparisonSourceType 
 import { ConversationMemoryService } from '../intelligence/ConversationMemoryService';
 import type { RAGConversationTurn } from './RAGRetriever';
 import { toRagEvidenceItems, toRagSearchResponse } from './buildRagEvidencePack';
+import { buildRagContext } from './RagContextBuilder';
 import { evaluateRagRelevanceGate } from './RagRelevanceGate';
 import type { EvidencePack } from '../intelligence/context-os/evidencePack';
 import type { EvidenceScope, SourceType } from '../context-intelligence/contracts/types';
@@ -223,6 +224,7 @@ export interface RAGRetrievalResponse extends RagRetrieverResponse<RagSearchResu
   originalQuery?: string;
   retrievalQuery?: string;
   pack?: EvidencePack;
+  prompt?: string;
 }
 export interface RAGManagerConfig {
 db: Database.Database;
@@ -1451,6 +1453,19 @@ sessionId?: string,
 context: RagQueryPlanningContext = {},
 ): RagQueryPlan {
 return this.queryPlanner.plan(String(query ?? '').trim(), sessionId, context);
+}
+/**
+ * Change 38: conversation + retrieved evidence for the prompt.
+ * Memory is not loaded here — Hindsight is not document RAG.
+ */
+async buildContext(query: string, options: RAGSearchOptions = {}): Promise<RAGRetrievalResponse> {
+  const response = await this.search(query, options);
+  if (!response.pack) return response;
+  const conversation = isRagConversationAwareEnabled()
+    ? this.getConversationForRetrieval(options.sessionId, options.conversation)
+    : undefined;
+  const { prompt } = buildRagContext({ pack: response.pack, conversation });
+  return { ...response, prompt };
 }
 /**
 * Alias for callers that use retrieval terminology. Kept intentionally thin so
