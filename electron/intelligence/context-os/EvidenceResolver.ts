@@ -49,7 +49,7 @@ TurnContextContract,
 import { allowsEvidence, allowsRetrieval } from './types';
 import type { EvidenceItem, EvidencePack, RejectedEvidenceItem } from './evidencePack';
 import { textCanProveProperty } from './requestedProperty';
-import { buildRagCitation } from '../../rag/RagCitation';
+import { buildStableRagCitation } from '../../rag/RagCitation';
 import type { RAGSearchOptions, RagSearchResult } from '../../rag/RAGManager';
 import { evaluateRagRelevanceGate } from '../../rag/RagRelevanceGate';
 // Type-only (erased at runtime). The DI ports below described a structural
@@ -449,11 +449,10 @@ const canProve = textCanProveProperty(s.card.body, requestedProperty)
 && matchesRequestedField(question, s.card.body, requestedProperty);
 return {
 evidenceId: `${turnId}:okf:${i}`,
-citation: buildRagCitation({
-citationId: `cite_${turnId}_okf_${i}`.replace(/[^A-Za-z0-9_-]/g, '_'),
+citation: buildStableRagCitation({
 documentId: s.fileId,
 documentName: s.card.title,
-chunkId: `${s.fileId}:card:${i}`,
+chunkId: `${s.fileId}:card:${s.card.id ?? i}`,
 section: s.card.sourceSections?.[0],
 sourceType: 'mode',
 }),
@@ -683,8 +682,7 @@ const canProve = textCanProveProperty(c.text, requestedProperty)
 && matchesRequestedField(question, c.text, requestedProperty);
 return {
 evidenceId: `${turnId}:hybrid:${i}`,
-citation: buildRagCitation({
-citationId: `cite_${turnId}_hybrid_${i}`.replace(/[^A-Za-z0-9_-]/g, '_'),
+citation: buildStableRagCitation({
 documentId: c.documentId ?? c.sourceId,
 documentName: c.documentName ?? c.fileName,
 chunkId: c.chunkId ?? `${c.sourceId}:${c.chunkIndex}`,

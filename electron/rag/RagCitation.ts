@@ -45,3 +45,33 @@ chunkId: input.chunkId,
 sourceType: input.sourceType,
 };
 }
+
+function sanitizeCitationPart(value: string): string {
+  return String(value ?? '').replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 80) || 'unknown';
+}
+
+/** Stable across retrieval → evidence → prompt → IPC. Not turn-index based. */
+export function stableRagCitationId(sourceType: string, documentId: string, chunkId: string): string {
+  return `cite_${sanitizeCitationPart(sourceType)}_${sanitizeCitationPart(documentId)}_${sanitizeCitationPart(chunkId)}`;
+}
+
+export function buildStableRagCitation(input: {
+  documentId: string;
+  documentName: string;
+  chunkId: string;
+  sourceType: string;
+  pageStart?: number;
+  pageEnd?: number;
+  section?: string;
+}): RagCitation {
+  return buildRagCitation({
+    citationId: stableRagCitationId(input.sourceType, input.documentId, input.chunkId),
+    documentId: input.documentId,
+    documentName: input.documentName,
+    chunkId: input.chunkId,
+    pageStart: input.pageStart,
+    pageEnd: input.pageEnd,
+    section: input.section,
+    sourceType: input.sourceType,
+  });
+}

@@ -1,46 +1,60 @@
 import { randomUUID } from 'crypto';
 import { deriveEvidenceSufficiency } from '../intelligence/context-os/evidenceSufficiency';
 import type { EvidenceItem, EvidencePack } from '../intelligence/context-os/evidencePack';
+import { buildStableRagCitation } from './RagCitation';
 import type { RagSearchResult } from './storage/RagStorageTypes';
 import type { RagRetrievalStatus } from './RAGRetriever';
 
 export function toRagEvidenceItems(results: readonly RagSearchResult[]): EvidenceItem[] {
-  return results.map((result, index) => ({
-    evidenceId: `rag-manager:${String(result.chunk.id ?? index)}`,
-    sourceKind: result.source.sourceType as EvidenceItem['sourceKind'],
-    sourceId: result.source.id,
-    sourceOwner: 'unknown' as const,
-    authority: 'evidence' as const,
-    trustLevel: 'retrieved',
-    text: result.chunk.text,
-    pointer: {
-      chunkId: result.chunk.id,
-      fileId: result.source.sourceType === 'personal' ? result.source.id : undefined,
-      meetingId: result.source.sourceType === 'meeting' ? result.source.id : undefined,
-      page: result.chunk.pageStart,
+  return results.map((result, index) => {
+    const documentId = result.chunk.documentId || result.source.id;
+    const chunkId = result.chunk.id || `${documentId}:${index}`;
+    return {
+      evidenceId: `rag-manager:${String(result.chunk.id ?? index)}`,
+      citation: buildStableRagCitation({
+        documentId,
+        documentName: result.source.name,
+        chunkId,
+        sourceType: result.source.sourceType,
+        pageStart: result.chunk.pageStart,
+        pageEnd: result.chunk.pageEnd,
+        section: result.chunk.section,
+      }),
+      sourceKind: result.source.sourceType as EvidenceItem['sourceKind'],
+      sourceId: result.source.id,
+      sourceOwner: 'unknown' as const,
+      authority: 'evidence' as const,
+      trustLevel: 'retrieved',
+      text: result.chunk.text,
+      pointer: {
+        chunkId: result.chunk.id,
+        fileId: result.source.sourceType === 'personal' ? result.source.id : undefined,
+        meetingId: result.source.sourceType === 'meeting' ? result.source.id : undefined,
+        page: result.chunk.pageStart,
+        section: result.chunk.section,
+      },
+      documentName: result.source.name,
+      pageStart: result.chunk.pageStart ?? undefined,
+      pageEnd: result.chunk.pageEnd ?? undefined,
       section: result.chunk.section,
-    },
-    documentName: result.source.name,
-    pageStart: result.chunk.pageStart ?? undefined,
-    pageEnd: result.chunk.pageEnd ?? undefined,
-    section: result.chunk.section,
-    heading: result.chunk.heading,
-    documentId: result.chunk.documentId,
-    chunkId: result.chunk.id,
-    sourceType: result.source.sourceType === 'meeting' || result.source.sourceType === 'mode' || result.source.sourceType === 'personal'
-      ? result.source.sourceType
-      : undefined,
-    retrievalScore: result.score,
-    rerankScore: result.rerankScore,
-    supports: { property: 'unknown' as const },
-    score: {
-      lexical: result.lexicalScore,
-      vector: result.semanticScore,
-      rerank: result.rerankScore,
-      final: result.score,
-    },
-    reasonIncluded: 'retrieval',
-  }));
+      heading: result.chunk.heading,
+      documentId: result.chunk.documentId,
+      chunkId: result.chunk.id,
+      sourceType: result.source.sourceType === 'meeting' || result.source.sourceType === 'mode' || result.source.sourceType === 'personal'
+        ? result.source.sourceType
+        : undefined,
+      retrievalScore: result.score,
+      rerankScore: result.rerankScore,
+      supports: { property: 'unknown' as const },
+      score: {
+        lexical: result.lexicalScore,
+        vector: result.semanticScore,
+        rerank: result.rerankScore,
+        final: result.score,
+      },
+      reasonIncluded: 'retrieval',
+    };
+  });
 }
 
 export function buildRagEvidencePack(input: {

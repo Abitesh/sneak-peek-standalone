@@ -17,6 +17,7 @@
 import type { ScoredChunk } from '../../rag/VectorStore';
 import type { EvidenceItem, RejectedEvidenceItem } from './evidencePack';
 import { previewText } from './evidencePack';
+import { buildStableRagCitation } from '../../rag/RagCitation';
 import { textCanProveProperty } from './requestedProperty';
 import { capabilityFor, type TurnContextContract } from './types';
 
@@ -86,8 +87,16 @@ export function meetingChunksToEvidenceItems(input: {
     }
 
     const canProve = textCanProveProperty(c.text, contract.requestedProperty);
+    const meetingId = String(c.meetingId ?? '');
+    const chunkId = `${meetingId}:${c.chunkIndex}`;
     items.push({
       evidenceId: `${contract.turnId}:meeting_rag:${idx++}`,
+      citation: buildStableRagCitation({
+        documentId: meetingId || 'meeting',
+        documentName: meetingId || 'meeting',
+        chunkId,
+        sourceType: 'meeting',
+      }),
       sourceKind: 'meeting_rag_chunk',
       sourceId: `${c.meetingId}:${c.chunkIndex}`,
       sourceOwner: 'meeting_rag',
