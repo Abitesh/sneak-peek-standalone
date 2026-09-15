@@ -30,6 +30,11 @@ export interface RagQueryPlanningContext {
  hasPersonalFiles?: boolean;
  /** Whether a meeting scope is active/available for transcript retrieval. */
  hasMeeting?: boolean;
+ /**
+  * Change 30: conversation-state-store is referent resolution, not evidence.
+  * When false, skip store reads. Default true so isolated planner tests still rewrite.
+  */
+ conversationAware?: boolean;
 }
 
 export type RagRetrievalMode = 'skip' | 'retrieve';
@@ -258,7 +263,7 @@ export class RagQueryPlanner {
  let wasRewritten = false;
  let reason: RagQueryPlan['reason'];
 
- if (sessionId) {
+ if (sessionId && context.conversationAware !== false) {
  try {
  state = getConversationState(sessionId);
  if (state) {

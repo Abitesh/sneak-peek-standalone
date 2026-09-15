@@ -939,6 +939,9 @@ hasPersonalFiles: Boolean(personalKnowledge),
 // keep the meeting source available to the planner. The final query's
 // intent still decides whether it is actually selected.
 hasMeeting: true,
+// Change 30: conversation-state-store (referents) is not ConversationMemoryService
+// (recent turns) and not Hindsight (long-term memory).
+conversationAware: isRagConversationAwareEnabled(),
 };
 const queryPlan: RagQueryPlan = this.queryPlanner.plan(
 originalQuery,
