@@ -31,6 +31,7 @@ release
 demo.mp4
 tmp
 .cursorrules
+.cursor/
 .windsurfrules
 change.md
 # nativelyapi is a separate git repo — exclude from parent repo tracking
