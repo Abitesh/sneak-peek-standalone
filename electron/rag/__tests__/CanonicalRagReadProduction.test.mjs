@@ -86,6 +86,21 @@ test('RAGManager production search consumes canonicalRagRead', () => {
   assert.match(searchSource, /canonicalRead\.readSource/);
 });
 
+test('Change 26: canonical search embeds the query once through the existing pipeline and pins one embedding space', () => {
+  const embedSource = RAGManager.prototype.resolveCanonicalQueryEmbedding.toString();
+  assert.match(searchSource, /resolveCanonicalQueryEmbedding/);
+  assert.match(searchSource, /queryEmbedding/);
+  assert.match(searchSource, /embeddingSpaceId/);
+  assert.match(embedSource, /getEmbeddingForQuery/);
+  assert.match(embedSource, /findEmbeddingSpace/);
+  assert.match(embedSource, /getActiveSpaceKey\(\) !== capturedSpace/);
+  assert.doesNotMatch(
+    searchSource,
+    /new (Gemini|OpenAI|Ollama|Local)EmbeddingProvider/,
+    'BUG: Change 26 must not rebuild the provider system inside RAGManager.search.',
+  );
+});
+
 test('canonical read is source-local and Knowledge remains on its existing adapter', () => {
   assert.match(searchSource, /sourceType:\s*['"]meeting['"]/);
   assert.match(searchSource, /sourceType:\s*['"]mode['"]/);

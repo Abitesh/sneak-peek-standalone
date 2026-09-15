@@ -7,13 +7,13 @@
  * identity plus a generic embedding provider and persists vectors through
  * CanonicalRagStorage.
  *
- * It is intentionally not wired into production RAG callers yet. Existing
- * source-specific pipelines remain unchanged until parity/migration work proves
- * this backend safe to activate.
+ * Production callers reach it through RAGManager (canonical-primary index and
+ * backfill). Provider selection stays in EmbeddingProviderResolver.
  */
 
 import type { CanonicalRagEmbeddingSpace } from './CanonicalRagTypes';
 import { CanonicalRagStorage } from './CanonicalRagStorage';
+import { embeddingSpaceKey } from '../embeddingSpace';
 
 export interface SourceIndependentEmbeddingProvider {
   readonly provider: string;
@@ -71,6 +71,11 @@ export class CanonicalEmbeddingService {
     }
 
     return this.storage.createEmbeddingSpace({
+      id: `${embeddingSpaceKey({
+        name: this.provider.provider,
+        model: this.provider.model,
+        dimensions: this.provider.dimensions,
+      })}:${this.provider.version}`,
       provider: this.provider.provider,
       model: this.provider.model,
       dimensions: this.provider.dimensions,

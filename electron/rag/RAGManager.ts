@@ -979,6 +979,12 @@ const canonicalReadEnabled =
 const canonicalRead = canonicalReadEnabled
 ? new CanonicalRagReadService(new CanonicalRagStorage(this.db))
 : null;
+const canonicalQueryEmbed = canonicalRead
+  ? await this.resolveCanonicalQueryEmbedding(normalizedQuery)
+  : null;
+const canonicalEmbedFields = canonicalQueryEmbed
+  ? { queryEmbedding: canonicalQueryEmbed.embedding, embeddingSpaceId: canonicalQueryEmbed.embeddingSpaceId }
+  : {};
 const canonicalReadFallbacks: Array<{
   sourceType: 'meeting' | 'mode' | 'personal';
   fallback: () => Promise<RagSearchResult[]>;
@@ -992,6 +998,7 @@ query: normalizedQuery,
 sourceType: 'meeting',
 sourceId: options.meetingId,
 limit: candidatePoolSize,
+...canonicalEmbedFields,
 fallback: () => this.meetingAdapter.retrieve({
 query: normalizedQuery,
 options,
@@ -1033,6 +1040,7 @@ query: normalizedQuery,
 sourceType: 'mode',
 scopeId: options.modeId,
 limit: candidatePoolSize,
+...canonicalEmbedFields,
 fallback: () => this.modeAdapter.retrieve({
 query: normalizedQuery,
 options,
@@ -1086,6 +1094,7 @@ const personalResults = canonicalRead
 query: normalizedQuery,
 sourceType: 'personal',
 limit: candidatePoolSize,
+...canonicalEmbedFields,
 fallback: () => this.personalAdapter.retrieve({
 query: normalizedQuery,
 options,
@@ -1454,6 +1463,37 @@ return this.retriever;
 }
 getEmbeddingPipeline(): EmbeddingPipeline {
 return this.embeddingPipeline;
+}
+
+/**
+ * Change 26: one query embedding for every canonical source, in one space.
+ * Skip vector search if the pipeline is missing, the space is unknown, the
+ * fallback provider flipped mid-call, or dimensions do not match.
+ */
+private async resolveCanonicalQueryEmbedding(query: string): Promise<{ embedding: number[]; embeddingSpaceId: string } | null> {
+  try {
+    if (typeof this.embeddingPipeline?.getActiveCanonicalEmbeddingIdentity !== 'function') return null;
+    const identity = getCanonicalPipelineEmbeddingIdentity(this.embeddingPipeline);
+    if (!identity) return null;
+    const space = new CanonicalRagStorage(this.db).findEmbeddingSpace({
+      provider: identity.provider,
+      model: identity.model,
+      dimensions: identity.dimensions,
+      version: identity.version,
+    });
+    if (!space) return null;
+    const capturedSpace = identity.space;
+    const embedding = await this.embeddingPipeline.getEmbeddingForQuery(query);
+    if (this.embeddingPipeline.getActiveSpaceKey() !== capturedSpace) return null;
+    if (!Array.isArray(embedding) || embedding.length !== identity.dimensions) return null;
+    return { embedding, embeddingSpaceId: space.id };
+  } catch (error) {
+    console.warn(
+      '[RAGManager] Canonical query embedding skipped:',
+      error instanceof Error ? error.message : String(error),
+    );
+    return null;
+  }
 }
 
 private async indexCanonicalCorpus(input: CanonicalSourceCorpusInput): Promise<CanonicalIndexRunResult> {

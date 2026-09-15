@@ -137,6 +137,32 @@ describe('CanonicalModeIndexStatusAdapter: lifecycle and semantics', () => {
     dbIncomplete.close();
   });
 
+  test('READY space identity uses embeddingSpaceKey so models/ prefixes match the live pipeline', () => {
+    const db = makeDb();
+    const docId = 'doc-models-prefix';
+    const revisionId = 'rev-models-prefix';
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO rag_documents (
+        id, source_type, source_id, owner_id, scope_id, name, path, mime_type, file_type,
+        size_bytes, content_hash, created_at, updated_at, current_revision_id, deleted_at, metadata_json
+      ) VALUES (?, 'mode', 'file-models', NULL, NULL, 'doc.pdf', NULL, 'application/pdf', 'pdf', 123, 'hash', ?, ?, NULL, NULL, '{}')
+    `).run(docId, now, now);
+    db.prepare(`INSERT INTO rag_document_revisions (id, document_id, revision_number, content_hash, extraction_version, chunking_version, normalization_version, extraction_state, created_at, superseded_at, metadata_json) VALUES (?, ?, 1, 'hash', 'v1', 'v1', 'v1', 'EXTRACTED', ?, NULL, '{}')`).run(revisionId, docId, now);
+    db.prepare('UPDATE rag_documents SET current_revision_id = ? WHERE id = ?').run(revisionId, docId);
+    db.prepare(`INSERT INTO rag_embedding_spaces (id, provider, model, dimensions, metric, version, created_at, retired_at, vector_table_key, metadata_json) VALUES ('space-uuid', 'gemini', 'models/gemini-embedding-001', 768, 'cosine', 'pipeline-v1', ?, NULL, 1, '{}')`).run(now);
+    db.prepare(`INSERT INTO rag_chunks (id, document_id, revision_id, chunk_index, text, content_hash, page_start, page_end, section, heading, content_type, start_char, end_char, table_index, token_count, speaker, timestamp_start, timestamp_end, source_locator, metadata_json, created_at) VALUES ('chunk-models', ?, ?, 0, 'alpha', 'hash', 1, 1, NULL, NULL, 'text', 0, 5, NULL, 10, NULL, NULL, NULL, NULL, '{}', ?)`).run(docId, revisionId, now);
+    db.prepare(`INSERT INTO rag_embeddings (id, chunk_id, embedding_space_id, physical_row_key, vector, created_at, metadata_json) VALUES ('emb-models', 'chunk-models', 'space-uuid', 1, ?, ?, '{}')`).run(Buffer.from(new Float32Array([1, 2, 3]).buffer), now);
+    db.prepare(`INSERT INTO rag_canonical_index_status (document_id, revision_id, status, chunk_count, embedded_chunk_count, extracted_page_count, total_page_count, error_code, error_message, updated_at) VALUES (?, ?, 'READY', 1, 1, NULL, NULL, NULL, NULL, ?)`).run(docId, revisionId, Date.now());
+
+    const state = new CanonicalModeIndexStatusAdapter(db).resolve('file-models', {
+      activeEmbeddingSpace: 'gemini:gemini-embedding-001:768',
+    });
+    assert.equal(state?.status, 'ready');
+    assert.equal(state?.embeddingSpace, 'gemini:gemini-embedding-001:768');
+    db.close();
+  });
+
   test('READY resolves to ready only when the embedding space matches and returns null without a canonical embedding space', () => {
     const dbReady = makeDb();
     seedModeDocument(dbReady, { status: 'READY', chunkCount: 2, embeddingSpace: 'gemini:embedding-001:768', embeddedChunkCount: 2 });

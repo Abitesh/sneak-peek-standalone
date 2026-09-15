@@ -121,6 +121,17 @@ test('embedding spaces are dimension-specific by full compatibility tuple', () =
   db.close();
 });
 
+test('findEmbeddingSpace looks up by identity and does not insert', () => {
+  const { db, storage } = makeStorage();
+  assert.equal(storage.findEmbeddingSpace({ provider: 'x', model: 'm', dimensions: 2, version: '1' }), null);
+  const created = storage.createEmbeddingSpace({ provider: 'x', model: 'm', dimensions: 2, version: '1' });
+  const found = storage.findEmbeddingSpace({ provider: 'x', model: 'm', dimensions: 2, version: '1' });
+  assert.equal(found?.id, created.id);
+  assert.equal(storage.findEmbeddingSpace({ provider: 'x', model: 'm', dimensions: 2, version: 'other' }), null);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM rag_embedding_spaces').get().n, 1);
+  db.close();
+});
+
 test('invalid vectors are rejected before persistence', () => {
   const { db, storage } = makeVectorStorage();
   const { chunk } = seedRevision(storage, 'vec');

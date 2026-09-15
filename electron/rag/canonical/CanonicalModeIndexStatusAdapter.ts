@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { embeddingSpaceKey } from '../embeddingSpace';
 
 export type CanonicalModeStatus =
   | 'pending'
@@ -94,7 +95,11 @@ export class CanonicalModeIndexStatusAdapter {
     `).get(revisionId) as { provider: string; model: string; dimensions: number } | undefined;
 
     if (!row) return null;
-    return `${row.provider}:${row.model}:${row.dimensions}`;
+    return embeddingSpaceKey({
+      name: row.provider,
+      model: row.model,
+      dimensions: row.dimensions,
+    });
   }
 
   private mapStatus(

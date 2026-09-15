@@ -174,3 +174,85 @@ test('does not invoke canonical storage for an empty query', async () => {
   assert.equal(result.usedCanonical, true);
   assert.equal(result.fallbackReason, null);
 });
+
+test('vector hits in the query embedding space count as canonical coverage without a lexical match', async () => {
+  let vectorCalls = 0;
+  const service = new CanonicalRagReadService({
+    async searchLexical() { return []; },
+    searchVector(queryEmbedding, options) {
+      vectorCalls += 1;
+      assert.deepEqual(queryEmbedding, [1, 0]);
+      assert.equal(options.embeddingSpaceId, 'space-a');
+      assert.equal(options.sourceType, 'mode');
+      return [{
+        ...canonicalResult(),
+        embeddingSpaceId: 'space-a',
+        physicalRowKey: 1,
+        distance: 0.1,
+      }];
+    },
+  });
+
+  const result = await service.readSource({
+    query: 'hello',
+    sourceType: 'mode',
+    limit: 8,
+    queryEmbedding: [1, 0],
+    embeddingSpaceId: 'space-a',
+    fallback: async () => legacyResult(),
+  });
+
+  assert.equal(vectorCalls, 1);
+  assert.equal(result.usedCanonical, true);
+  assert.equal(result.fallbackReason, null);
+  assert.equal(result.results[0].chunk.text, 'canonical text');
+  assert.equal(result.results[0].semanticScore, -0.1);
+});
+
+test('does not search vectors without an embedding space, and never mixes a second space into the query', async () => {
+  let vectorCalls = 0;
+  const service = new CanonicalRagReadService({
+    async searchLexical() { return [canonicalResult()]; },
+    searchVector() { vectorCalls += 1; return []; },
+  });
+
+  const lexicalOnly = await service.readSource({
+    query: 'hello',
+    sourceType: 'personal',
+    limit: 8,
+    fallback: async () => legacyResult(),
+  });
+
+  assert.equal(vectorCalls, 0);
+  assert.equal(lexicalOnly.usedCanonical, true);
+
+  await service.readSource({
+    query: 'hello',
+    sourceType: 'personal',
+    limit: 8,
+    queryEmbedding: [1, 0],
+    embeddingSpaceId: 'space-a',
+    fallback: async () => legacyResult(),
+  });
+
+  assert.equal(vectorCalls, 1);
+});
+
+test('keeps lexical hits when vector search throws', async () => {
+  const service = new CanonicalRagReadService({
+    async searchLexical() { return [canonicalResult()]; },
+    searchVector() { throw new Error('vec0 unavailable'); },
+  });
+
+  const result = await service.readSource({
+    query: 'hello',
+    sourceType: 'personal',
+    limit: 8,
+    queryEmbedding: [1, 0],
+    embeddingSpaceId: 'space-a',
+    fallback: async () => legacyResult(),
+  });
+
+  assert.equal(result.usedCanonical, true);
+  assert.equal(result.results[0].chunk.text, 'canonical text');
+});

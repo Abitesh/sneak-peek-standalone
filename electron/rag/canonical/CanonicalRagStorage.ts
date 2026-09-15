@@ -445,18 +445,23 @@ export class CanonicalRagStorage {
     }
   }
 
+  findEmbeddingSpace(input: Pick<EmbeddingSpaceInput, 'provider' | 'model' | 'dimensions' | 'version'> & { metric?: EmbeddingSpaceInput['metric'] }): CanonicalRagEmbeddingSpace | null {
+    const row = this.db.prepare(`
+      SELECT * FROM rag_embedding_spaces
+      WHERE provider = ? AND model = ? AND dimensions = ? AND metric = ? AND version = ?
+      LIMIT 1
+    `).get(input.provider, input.model, input.dimensions, input.metric ?? SUPPORTED_METRIC, input.version) as any;
+    return row ? this.mapSpace(row) : null;
+  }
+
   createEmbeddingSpace(input: EmbeddingSpaceInput): CanonicalRagEmbeddingSpace {
     assertPositiveInteger(input.dimensions, 'Embedding dimensions');
     if ((input.metric ?? SUPPORTED_METRIC) !== SUPPORTED_METRIC) {
       throw new Error(`Unsupported embedding metric: ${input.metric}`);
     }
 
-    const existing = this.db.prepare(`
-      SELECT * FROM rag_embedding_spaces
-      WHERE provider = ? AND model = ? AND dimensions = ? AND metric = ? AND version = ?
-      LIMIT 1
-    `).get(input.provider, input.model, input.dimensions, input.metric ?? SUPPORTED_METRIC, input.version) as any;
-    if (existing) return this.mapSpace(existing);
+    const existing = this.findEmbeddingSpace(input);
+    if (existing) return existing;
 
     const id = input.id ?? randomUUID();
     const keyRow = this.db.prepare(`

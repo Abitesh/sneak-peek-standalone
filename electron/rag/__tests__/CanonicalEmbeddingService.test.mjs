@@ -77,6 +77,7 @@ test('reuses one embedding space across independent documents', async () => {
   const b = await service.embedRevision(second.revision.id);
 
   assert.equal(a.embeddingSpaceId, b.embeddingSpaceId);
+  assert.equal(a.embeddingSpaceId, 'test-provider:test-model:2:1');
   assert.equal(storage.listEmbeddingSpaces().length, 1);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM rag_embeddings').get().n, 6);
   db.close();
@@ -94,6 +95,21 @@ test('embedding model change creates a new space without changing chunk identity
   assert.notEqual(a.embeddingSpaceId, b.embeddingSpaceId);
   assert.equal(storage.readChunks(revision.id).length, 3);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM rag_embeddings').get().n, 6);
+  db.close();
+});
+
+test('provider version bump creates a new space without colliding on the embedding-space id', async () => {
+  const { db, storage } = makeStorage();
+  const { revision } = seedRevision(storage, 'version-bump');
+  const first = new CanonicalEmbeddingService(storage, provider({ version: 'pipeline-v1' }));
+  const second = new CanonicalEmbeddingService(storage, provider({ version: 'pipeline-v2' }));
+
+  const a = await first.embedRevision(revision.id);
+  const b = await second.embedRevision(revision.id);
+
+  assert.equal(a.embeddingSpaceId, 'test-provider:test-model:2:pipeline-v1');
+  assert.equal(b.embeddingSpaceId, 'test-provider:test-model:2:pipeline-v2');
+  assert.equal(storage.listEmbeddingSpaces().length, 2);
   db.close();
 });
 
