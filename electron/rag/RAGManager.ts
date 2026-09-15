@@ -972,6 +972,7 @@ const selectedSources = Array.isArray(options.selectedSources)
 ? [...new Set(options.selectedSources)]
 : (legacySourceSelection ?? queryPlan.sources);
 const sourceSet = new Set<RagSourceSelection>(selectedSources);
+// Change 31: profile / long-term memory are not document RAG adapters.
 const conversation = sourceSet.has('conversation') && isRagConversationAwareEnabled()
 ? this.getConversationForRetrieval(options.sessionId, options.conversation)
 : undefined;

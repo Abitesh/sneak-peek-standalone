@@ -22,6 +22,8 @@ export type RagSourceSelection =
  | 'meeting'
  | 'conversation'
  | 'knowledge';
+// Change 31: profile and long-term memory are Context Intelligence, not
+// document RAG source families. Never push them onto `sources`.
 
 export interface RagQueryPlanningContext {
  /** Whether the active mode has reference files available to search. */
@@ -45,7 +47,7 @@ export interface RagQueryPlan {
  sources: RagSourceSelection[];
  wasRewritten: boolean;
  reason?: 'referent' | 'conversation_context';
- sourceReason?: 'meeting' | 'personal' | 'mode' | 'follow_up' | 'conversation' | 'default';
+ sourceReason?: 'meeting' | 'personal' | 'mode' | 'knowledge' | 'follow_up' | 'conversation' | 'default';
  /** False when the prompt does not need document/meeting evidence (Change 29). */
  needsDocumentEvidence: boolean;
  retrievalMode: RagRetrievalMode;
@@ -93,6 +95,11 @@ function isModeReferenceQuery(query: string): boolean {
  return /\b(?:annual report|quarterly report|report|reference file|reference files|uploaded document|uploaded file|document|documents|paper|specification|specs|policy|manual|handbook|presentation|slides|dataset|research|whitepaper)\b/i.test(q);
 }
 
+function isKnowledgeQuery(query: string): boolean {
+ const q = clean(query);
+ return /\b(?:knowledge(?:\s+file)?|okf|verified (?:fact|card)s?)\b/i.test(q);
+}
+
 const DOCUMENT_SOURCES = new Set<RagSourceSelection>([
  'mode-reference',
  'personal-files',
@@ -113,7 +120,7 @@ function planRetrievalNeed(
  query: string,
  sources: readonly RagSourceSelection[],
 ): { needsDocumentEvidence: boolean; retrievalMode: RagRetrievalMode; sources: RagSourceSelection[] } {
- if (isMeetingQuery(query) || isPersonalQuery(query) || isModeReferenceQuery(query)) {
+ if (isMeetingQuery(query) || isPersonalQuery(query) || isModeReferenceQuery(query) || isKnowledgeQuery(query)) {
   return { needsDocumentEvidence: true, retrievalMode: 'retrieve', sources: [...sources] };
  }
  if (isGenerativeOrChitchat(query)) {
@@ -133,6 +140,7 @@ function inferPreviousSource(state: ConversationState | null): RagSourceSelectio
  if (!previous) return null;
  if (isMeetingQuery(previous)) return 'meeting';
  if (isPersonalQuery(previous)) return 'personal-files';
+ if (isKnowledgeQuery(previous)) return 'knowledge';
  if (isModeReferenceQuery(previous)) return 'mode-reference';
  return null;
 }
@@ -146,6 +154,7 @@ function selectSources(
  const referential = isReferential(q);
  const meeting = isMeetingQuery(q) || isConversationOnly(q);
  const personal = isPersonalQuery(q);
+ const knowledge = isKnowledgeQuery(q);
  const mode = isModeReferenceQuery(q);
  const previousSource = referential ? inferPreviousSource(state) : null;
 
@@ -169,9 +178,17 @@ function selectSources(
  return { sources, sourceReason: 'personal' };
  }
 
+ // Knowledge/OKF questions stay on the knowledge adapter. Do not bolt knowledge
+ // onto every mode-reference query, and never route profile or long-term memory here.
+ if (knowledge) {
+ sources.push('knowledge');
+ if (referential) sources.push('conversation');
+ return { sources, sourceReason: 'knowledge' };
+ }
+
  // Document/reference questions are routed to the active mode's reference files.
  if (mode) {
- if (context.hasModeReferenceFiles !== false) sources.push('mode-reference', 'knowledge');
+ if (context.hasModeReferenceFiles !== false) sources.push('mode-reference');
  if (referential) sources.push('conversation');
  return { sources, sourceReason: 'mode' };
  }
