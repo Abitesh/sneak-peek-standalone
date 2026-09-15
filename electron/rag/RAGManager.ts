@@ -22,8 +22,9 @@ import { CanonicalRagComparisonService } from './canonical/CanonicalRagCompariso
 import type { RagRetrievalComparisonCandidate, RagRetrievalComparisonSourceType } from './canonical/CanonicalRagComparisonTypes';
 import { ConversationMemoryService } from '../intelligence/ConversationMemoryService';
 import type { RAGConversationTurn } from './RAGRetriever';
+import { toRagEvidenceItems, toRagSearchResponse } from './buildRagEvidencePack';
 import { evaluateRagRelevanceGate } from './RagRelevanceGate';
-import type { EvidenceItem } from '../intelligence/context-os/evidencePack';
+import type { EvidencePack } from '../intelligence/context-os/evidencePack';
 import type { EvidenceScope, SourceType } from '../context-intelligence/contracts/types';
 import type { RetrievalPort } from '../context-intelligence/orchestration/orchestrator';
 import type { LegacyChunk } from '../context-intelligence/retrieval/legacy-adapter';
@@ -218,7 +219,11 @@ function appendRagRetrievalStatus(prompt: string, status: 'ok' | 'no_relevant_ev
 if (status !== 'no_relevant_evidence') return prompt;
 return `${prompt}\n${NO_GROUNDED_EVIDENCE_PROMPT.trim()}`;
 }
-export interface RAGRetrievalResponse extends RagRetrieverResponse<RagSearchResult> {}
+export interface RAGRetrievalResponse extends RagRetrieverResponse<RagSearchResult> {
+  originalQuery?: string;
+  retrievalQuery?: string;
+  pack?: EvidencePack;
+}
 export interface RAGManagerConfig {
 db: Database.Database;
 // dbPath/extPath are unused by VectorStore now (it runs on `db` directly —
@@ -766,38 +771,7 @@ spaceKey?: string | null,
 if (!results.length) return [];
 const admitted = results.filter((result) => admitCanonicalRagHit(result, spaceKey));
 if (!admitted.length) return [];
-const evidenceItems = admitted.map((result, index) => ({
-evidenceId: `rag-manager:${String(result.chunk.id ?? index)}`,
-sourceKind: result.source.sourceType,
-sourceId: result.source.id,
-sourceOwner: 'application',
-authority: 'evidence',
-trustLevel: 'retrieved',
-text: result.chunk.text,
-pointer: {
-chunkId: result.chunk.id,
-fileId: result.source.sourceType === 'personal' ? result.source.id : undefined,
-meetingId: result.source.sourceType === 'meeting' ? result.source.id : undefined,
-page: result.chunk.pageStart,
-},
-documentName: result.source.name,
-pageStart: result.chunk.pageStart ?? undefined,
-pageEnd: result.chunk.pageEnd ?? undefined,
-section: result.chunk.section,
-heading: result.chunk.heading,
-documentId: result.chunk.documentId,
-chunkId: result.chunk.id,
-retrievalScore: result.score,
-rerankScore: result.rerankScore,
-supports: { property: 'unknown' },
-score: {
-lexical: result.lexicalScore,
-vector: result.semanticScore,
-rerank: result.rerankScore,
-final: result.score,
-},
-reasonIncluded: 'retrieval',
-})) as unknown as EvidenceItem[];
+const evidenceItems = toRagEvidenceItems(admitted);
 const ranked = [...admitted].sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0));
 const decision = evaluateRagRelevanceGate({
 items: evidenceItems,
@@ -942,8 +916,8 @@ metadata: {
 // Canonical FTS+vector RRF is CanonicalRagReadService + ragRrfFusion (default off).
 async search(query: string, options: RAGSearchOptions = {}): Promise<RAGRetrievalResponse> {
 const originalQuery = String(query ?? '').trim();
-if (!originalQuery) return { status: 'no_relevant_evidence', results: [], confidence: 0 };
-if (!isRagEnabled()) return { status: 'no_relevant_evidence', results: [], confidence: 0 };
+if (!originalQuery) return toRagSearchResponse({ originalQuery: '', retrievalQuery: '', results: [], status: 'no_relevant_evidence' });
+if (!isRagEnabled()) return toRagSearchResponse({ originalQuery, retrievalQuery: originalQuery, results: [], status: 'no_relevant_evidence' });
 // Change 8: query planning is an explicit retrieval-stage concern. The
 // original user question remains untouched for answer generation; only
 // retrieval receives the rewritten query.
@@ -970,7 +944,12 @@ planningContext,
 // still override. An allowlist must not disable skip.
 const resolution = resolveRagSearchSources(queryPlan, options);
 if (resolution.skip) {
-  return { status: 'no_relevant_evidence', results: [], confidence: 0 };
+  return toRagSearchResponse({
+    originalQuery,
+    retrievalQuery: queryPlan.retrievalQuery,
+    results: [],
+    status: 'no_relevant_evidence',
+  });
 }
 const normalizedQuery = queryPlan.retrievalQuery;
 const selectedSources = resolution.sources;
@@ -1213,13 +1192,19 @@ let spaceKey: string | null = null;
 try { spaceKey = this.embeddingPipeline?.getActiveSpaceKey?.() ?? null; } catch { spaceKey = null; }
 const finalResults = this.gateCanonicalResults(results.slice(0, topK), normalizedQuery, spaceKey);
 if (finalResults.length === 0) {
-return { status: 'no_relevant_evidence', results: [], confidence: 0 };
+return toRagSearchResponse({
+originalQuery,
+retrievalQuery: normalizedQuery,
+results: [],
+status: 'no_relevant_evidence',
+});
 }
-return {
-status: 'ok',
+return toRagSearchResponse({
+originalQuery,
+retrievalQuery: normalizedQuery,
 results: finalResults,
-confidence: Math.max(...finalResults.map(result => Number(result.score) || 0), 0),
-};
+status: 'ok',
+});
 }
 /**
 * Change 33: apply the existing local BGE cross-encoder to the unified

@@ -141,6 +141,10 @@ packId: string;
 version?: number;
 parentPackId?: string;
 turnId: string;
+/** Original user question. The LLM answers this, not the retrieval rewrite. */
+originalQuery?: string;
+/** Retrieval-only rewrite from RagQueryPlanner. */
+retrievalQuery?: string;
 sourceOwner: SourceOwner;
 requestedProperty: RequestedProperty;
 items: EvidenceItem[];

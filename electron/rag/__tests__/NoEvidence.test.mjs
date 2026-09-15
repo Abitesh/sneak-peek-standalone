@@ -55,7 +55,8 @@ test('Change 16: unified manager gates canonical results before returning them',
   assert.match(source, /evaluateRagRelevanceGate\(/);
   assert.match(source, /hasQuestionSpecificRelevance\(/);
   assert.match(source, /const finalResults = this\.gateCanonicalResults\(results\.slice\(0, topK\), normalizedQuery/);
-  assert.match(source, /return \{ status: 'no_relevant_evidence', results: \[\], confidence: 0 \};/);
+  assert.match(source, /toRagSearchResponse\(/);
+  assert.match(source, /status: 'no_relevant_evidence'/);
 });
 
 test('Change 16: no-evidence state reaches the legacy meeting/global prompt path', () => {

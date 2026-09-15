@@ -170,7 +170,25 @@ export interface KnowledgeManagerLike {
 getPackForFile(fileId: string): KnowledgePack | null;
 }
 export interface UnifiedRagSearchLike {
-search(query: string, options?: RAGSearchOptions): Promise<{ status: 'ok' | 'no_relevant_evidence'; results: RagSearchResult[]; confidence: number }>;
+search(query: string, options?: RAGSearchOptions): Promise<{
+  status: 'ok' | 'no_relevant_evidence';
+  results: RagSearchResult[];
+  confidence: number;
+  originalQuery?: string;
+  retrievalQuery?: string;
+  pack?: EvidencePack;
+}>;
+}
+function withSearchQueries(
+  pack: EvidencePack,
+  response: { originalQuery?: string; retrievalQuery?: string } | undefined,
+  question: string,
+): EvidencePack {
+  return {
+    ...pack,
+    originalQuery: response?.originalQuery ?? pack.originalQuery ?? question,
+    retrievalQuery: response?.retrievalQuery ?? pack.retrievalQuery ?? question,
+  };
 }
 export interface EvidenceResolverDeps {
 getModeSnapshot: () => { id: string; templateType: string; customContext: string } | null;
@@ -367,6 +385,7 @@ targetEntities: classification.targetEntities,
 softEntities: classification.softEntities,
 });
 const scoredAcrossFiles: Array<{ card: any; score: number; fileId: string }> = [];
+let ragSearchQueries: { originalQuery?: string; retrievalQuery?: string } | undefined;
 // All card bodies across the active files — used to measure query-term rarity
 // for the salient-distinctive-term gate below. KnowledgeManager remains the
 // source of truth for the persisted pack; retrieval itself belongs to RAGManager.
@@ -386,6 +405,7 @@ candidatePoolSize: Math.min(1000, Math.max(12, files.length * 12)),
 allowRerank: false,
 forceDocumentGrounding: true,
 });
+ragSearchQueries = response;
 for (const result of response.results ?? []) {
 const card = (result.chunk.metadata as any)?.okfCard;
 if (!card) continue;
@@ -540,7 +560,7 @@ conflicts: request.conflicts,
 });
 if (!relevanceDecision.passed) return null;
 const strategy: EvidenceResolutionStrategy = requestedProperty === 'unknown' ? 'okf_exact' : 'okf_property';
-const pack = this.finalizePack(request, items, [], strategy);
+const pack = withSearchQueries(this.finalizePack(request, items, [], strategy), ragSearchQueries, question);
 return {
 pack,
 strategy,
@@ -558,6 +578,7 @@ files: ReferenceFileLike[],
 ): Promise<EvidenceResolutionResult> {
 const { question, turnId, requestedProperty, transcript, followUpReferentHint, relaxed } = request;
 let result: Awaited<ReturnType<HybridRetrieverLike['retrieveHybrid']>>;
+let hybridQueries: { originalQuery?: string; retrievalQuery?: string } | undefined;
 const h4StageTrace = process.env.NATIVELY_E2E === '1'
 && process.env.NATIVELY_H4_STAGE_TRACE === '1';
 const h4StartedAt = Date.now();
@@ -576,6 +597,7 @@ tokenBudget: relaxed ? 5200 : undefined,
 allowRerank: isRagLocalRerankEnabled() && isRagSpeculativeRerankEnabled(),
 forceDocumentGrounding: true,
 });
+hybridQueries = response;
 result = {
 chunks: (response.results ?? []).map((r) => ({
 sourceId: String(r.source.id),
@@ -630,7 +652,7 @@ conflicts: request.conflicts,
 resolverUnavailable: true,
 });
 return {
-pack: this.emptyPack(request, 'insufficient'),
+pack: withSearchQueries(this.emptyPack(request, 'insufficient'), hybridQueries, question),
 strategy: 'insufficient',
 attemptedSources: [],
 retrievedSources: [],
@@ -648,7 +670,7 @@ isSynthesis: classification.isSynthesis,
 conflicts: request.conflicts,
 });
 return {
-pack: this.emptyPack(request, 'insufficient'),
+pack: withSearchQueries(this.emptyPack(request, 'insufficient'), hybridQueries, question),
 strategy: 'insufficient',
 attemptedSources: [],
 retrievedSources: [],
@@ -716,7 +738,7 @@ conflicts: request.conflicts,
 });
 if (!relevanceDecision.passed) {
 return {
-pack: this.emptyPack(request, 'insufficient'),
+pack: withSearchQueries(this.emptyPack(request, 'insufficient'), hybridQueries, question),
 strategy: 'insufficient',
 attemptedSources: [],
 retrievedSources: [],
@@ -726,7 +748,7 @@ confidence: relevanceDecision.confidence,
 }
 const bestScore = relevanceDecision.confidence;
 const strategy: EvidenceResolutionStrategy = result.usedHybrid ? 'hybrid_rag' : 'lexical_fallback';
-const pack = this.finalizePack(request, items, [], strategy);
+const pack = withSearchQueries(this.finalizePack(request, items, [], strategy), hybridQueries, question);
 return {
 pack,
 strategy,
