@@ -71,10 +71,10 @@ test('Change 29 search honors skip unless the caller forces grounding or sources
   const start = src.indexOf('async search(query: string');
   const end = src.indexOf('async retrieve(query: string', start);
   const search = src.slice(start, end);
-  assert.match(search, /queryPlan\.needsDocumentEvidence/);
-  assert.match(search, /forceDocumentGrounding/);
+  assert.match(search, /resolveRagSearchSources\(/);
+  assert.match(search, /resolution\.skip/);
   assert.ok(
-    search.indexOf('queryPlan.needsDocumentEvidence') < search.indexOf('meetingAdapter.retrieve'),
+    search.indexOf('resolution.skip') < search.indexOf('meetingAdapter.retrieve'),
     'skip must happen before source adapters run',
   );
 });

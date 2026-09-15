@@ -15,6 +15,7 @@ import { buildRAGPrompt } from './prompts';
 import type { ProviderDataScopePolicy } from '../llm/ProviderRouter';
 import { applyLocalPrivateRagAnswers, applyLocalPrivateRagScopes, readLocalPrivateRagMode, wantsLocalRetrieval } from './localPrivateRagMode';
 import { dedupeRagSearchResults } from './dedupeRagSearchResults';
+import { resolveRagSearchSources } from './resolveRagSearchSources';
 import { RagQueryPlanner, type RagQueryPlan, type RagQueryPlanningContext, type RagSourceSelection } from './RagQueryPlanner';
 import { CanonicalRagComparisonService } from './canonical/CanonicalRagComparisonService';
 import type { RagRetrievalComparisonCandidate, RagRetrievalComparisonSourceType } from './canonical/CanonicalRagComparisonTypes';
@@ -144,8 +145,10 @@ source?: RagSourceType | 'all';
 sessionId?: string;
 /** Explicit prior turns for retrieval. When omitted, the shared manual memory is used. */
 conversation?: readonly RAGConversationTurn[];
-/** Explicit source-selection override. When omitted, RagQueryPlanner chooses sources. */
+/** Exact source-selection override. When omitted, RagQueryPlanner chooses sources. */
 selectedSources?: readonly RagSourceSelection[];
+/** Authorization cap. Does not replace the planner or disable skip. */
+allowedSources?: readonly RagSourceSelection[];
 meetingId?: string;
 modeId?: string;
 topK?: number;
@@ -244,7 +247,8 @@ scope?: EvidenceScope;
 modeId?: string;
 /** Source typing for mode-attached documents, supplied by the V3 caller. */
 modeSourceTypes?: ReadonlyMap<string, SourceType>;
-selectedSources?: readonly RagSourceSelection[];
+/** Authorization cap forwarded to search(); the planner still chooses among these. */
+allowedSources?: readonly RagSourceSelection[];
 topK?: number;
 candidatePoolSize?: number;
 rerankCandidatePoolSize?: number;
@@ -854,7 +858,7 @@ return createLegacyRetrievalPort({
 registry: { sourceTypes, activeVersions, chunkVersions, sourceScopes },
 retrieve: async (query: string, opts: { topK: number }): Promise<LegacyChunk[]> => {
 const response = await this.search(query, {
-selectedSources: options.selectedSources,
+allowedSources: options.allowedSources,
 modeId: options.modeId,
 meetingId: options.scope?.meetingId,
 sessionId: options.scope?.sessionId,
@@ -949,29 +953,14 @@ originalQuery,
 options.sessionId,
 planningContext,
 );
-// Change 29: skip document retrieval for generative/chitchat prompts unless
-// the caller explicitly selected sources or forced grounding.
-if (
-  !queryPlan.needsDocumentEvidence
-  && !options.forceDocumentGrounding
-  && !options.selectedSources
-  && !options.source
-) {
+// Change 29/31 follow-up: allowlist caps the planner; exact selectedSources
+// still override. An allowlist must not disable skip.
+const resolution = resolveRagSearchSources(queryPlan, options);
+if (resolution.skip) {
   return { status: 'no_relevant_evidence', results: [], confidence: 0 };
 }
 const normalizedQuery = queryPlan.retrievalQuery;
-const legacySourceSelection: RagSourceSelection[] | undefined = options.source
-? options.source === 'meeting'
-? ['meeting']
-: options.source === 'mode'
-? ['mode-reference']
-: options.source === 'personal'
-? ['personal-files']
-: ['meeting', 'mode-reference', 'knowledge', 'personal-files']
-: undefined;
-const selectedSources = Array.isArray(options.selectedSources)
-? [...new Set(options.selectedSources)]
-: (legacySourceSelection ?? queryPlan.sources);
+const selectedSources = resolution.sources;
 const sourceSet = new Set<RagSourceSelection>(selectedSources);
 // Change 31: profile / long-term memory are not document RAG adapters.
 const conversation = sourceSet.has('conversation') && isRagConversationAwareEnabled()
