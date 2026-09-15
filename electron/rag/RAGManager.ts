@@ -16,6 +16,7 @@ import type { ProviderDataScopePolicy } from '../llm/ProviderRouter';
 import { applyLocalPrivateRagAnswers, applyLocalPrivateRagScopes, readLocalPrivateRagMode, wantsLocalRetrieval } from './localPrivateRagMode';
 import { dedupeRagSearchResults } from './dedupeRagSearchResults';
 import { resolveRagSearchSources } from './resolveRagSearchSources';
+import { resolveCanonicalRerankLimits } from './resolveCanonicalRerankLimits';
 import { RagQueryPlanner, type RagQueryPlan, type RagQueryPlanningContext, type RagSourceSelection } from './RagQueryPlanner';
 import { CanonicalRagComparisonService } from './canonical/CanonicalRagComparisonService';
 import type { RagRetrievalComparisonCandidate, RagRetrievalComparisonSourceType } from './canonical/CanonicalRagComparisonTypes';
@@ -975,18 +976,19 @@ const effectiveSourceSet = isRagHybridEnabled()
 : new Set<RagSourceSelection>(
 selectedSources.filter((source) => source !== 'conversation').slice(0, 1),
 );
-const topK = Math.max(1, Math.min(50, options.topK ?? 8));
-const candidatePoolSize = Math.max(topK, Math.min(1000, options.candidatePoolSize ?? 100));
-const rerankCandidatePoolSize = Math.max(
-topK,
-Math.min(candidatePoolSize, Math.min(1000, options.rerankCandidatePoolSize ?? candidatePoolSize)),
-);
+// Change 33: when BGE is active, retrieve 50–100 (default 50, not always 100)
+// and keep top 5–15. Flag-off / allowRerank=false keep the older 1–50 / default-100 cut.
+const rerankActive = options.allowRerank !== false && isRagRerankEnabled();
+const { topK, candidatePoolSize, rerankCandidatePoolSize } = resolveCanonicalRerankLimits({
+topK: options.topK,
+candidatePoolSize: options.candidatePoolSize,
+rerankCandidatePoolSize: options.rerankCandidatePoolSize,
+rerankActive,
+});
 const tokenBudget = Math.max(1, options.tokenBudget ?? 1800);
 const results: RagSearchResult[] = [];
 const canonicalReadEnabled =
-  isIntelligenceFlagEnabled('canonicalRagRead') &&
-  isRagRerankEnabled() &&
-  options.allowRerank !== false;
+  isIntelligenceFlagEnabled('canonicalRagRead') && rerankActive;
 const canonicalRead = canonicalReadEnabled
 ? new CanonicalRagReadService(new CanonicalRagStorage(this.db))
 : null;
@@ -1206,9 +1208,10 @@ confidence: Math.max(...finalResults.map(result => Number(result.score) || 0), 0
 };
 }
 /**
-* Apply the shared local BGE cross-encoder to canonical results that reach
-* the unified manager. Source-specific retrieval remains responsible for
-* candidate generation; this is the common final relevance stage.
+* Change 33: apply the existing local BGE cross-encoder to the unified
+* candidate pool (canonical reads or adapter hits). Source adapters still
+* generate candidates with allowRerank=false; this is the common final
+* relevance stage. Do not invent a second reranker.
 *
 * The existing LocalReranker owns the ONNX worker/lifecycle. We batch at six
 * passages to preserve the native-memory safety already used by ModeHybridRetriever.
