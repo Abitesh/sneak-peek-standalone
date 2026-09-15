@@ -139,3 +139,98 @@ test('TopControlBar is a collapsible, non-blocking overlay (Problem 48)', () => 
   assert.match(topControlBarSource, /const \[collapsed, setCollapsed\] = useState/);
   assert.match(topControlBarSource, /toggleCollapsed/);
 });
+
+function extractBraceBody(source, marker) {
+  const idx = source.indexOf(marker);
+  assert.ok(idx >= 0, `could not locate ${marker}`);
+  let i = idx + marker.length;
+  let depth = 1;
+  const start = i;
+  while (i < source.length && depth > 0) {
+    const ch = source[i];
+    if (ch === '{') depth++;
+    else if (ch === '}') depth--;
+    i++;
+  }
+  assert.equal(depth, 0, `unbalanced braces after ${marker}`);
+  return source.slice(start, i - 1);
+}
+
+const handleStartListeningBody = extractBraceBody(
+  nativelyInterfaceSource,
+  'const handleStartListening = () => {',
+);
+const onSessionResetBody = extractBraceBody(
+  nativelyInterfaceSource,
+  'onSessionReset(() => {',
+);
+
+test('Listen preserves arming across the session-reset Listen itself caused', () => {
+  assert.match(
+    nativelyInterfaceSource,
+    /preserveListenOnResetRef\s*=\s*useRef\(/,
+    'BUG: a one-shot preserveListenOnResetRef must exist so Listen-triggered startMeeting does not disarm the You-channel gate.',
+  );
+  assert.match(
+    handleStartListeningBody,
+    /if\s*\(\s*!active\s*\)\s*\{[\s\S]*preserveListenOnResetRef\.current\s*=\s*true[\s\S]*startMeeting\(/,
+    'BUG: before startMeeting() from Listen, set preserveListenOnResetRef so the coming session-reset does not clear isRecordingRef.',
+  );
+  assert.match(
+    onSessionResetBody,
+    /resetChatState\(\)/,
+    'BUG: onSessionReset must still run resetChatState() (messages + width collapse stay required).',
+  );
+  assert.match(
+    onSessionResetBody,
+    /preserveListenOnResetRef/,
+    'BUG: onSessionReset must consume preserveListenOnResetRef.',
+  );
+  assert.match(
+    onSessionResetBody,
+    /isRecordingRef\.current\s*=\s*false/,
+    'BUG: launcher startMeeting / endMeeting must still clear isRecordingRef when preserve is unset.',
+  );
+  assert.match(
+    onSessionResetBody,
+    /setIsManualRecording\(\s*false\s*\)/,
+    'BUG: launcher startMeeting / endMeeting must still clear isManualRecording when preserve is unset.',
+  );
+  assert.doesNotMatch(
+    onSessionResetBody,
+    /resetChatState\(\);\s*isRecordingRef\.current\s*=\s*false/,
+    'BUG: isRecordingRef must not be cleared unconditionally after resetChatState — Listen-triggered session-reset has to keep the push-to-talk gate armed.',
+  );
+});
+
+test('Listen does not sleep 400ms before ensureListenAudioCapture', () => {
+  assert.doesNotMatch(
+    handleStartListeningBody,
+    /setTimeout\([^,]+,\s*400\s*\)/,
+    'BUG: the 400ms pause cannot wait out 5–7s audio init; ensureListenAudioCapture must await _audioInitPromise instead.',
+  );
+});
+
+test('Listen warns on !status.mic the same way it warns on !status.system', () => {
+  assert.match(
+    handleStartListeningBody,
+    /!status\.mic[\s\S]*?status\.message[\s\S]*?⚠️ \$\{status\.message\}/,
+    'BUG: handleStartListening must surface status.message when mic capture did not start, not only when !status.system.',
+  );
+});
+
+test('Listen disarms when ensureListenAudioCapture returns !ok', () => {
+  assert.match(
+    handleStartListeningBody,
+    /!status\.ok[\s\S]*?isRecordingRef\.current\s*=\s*false[\s\S]*?setIsManualRecording\(\s*false\s*\)[\s\S]*?setAudioSessionState\(\s*['"]idle['"]\s*\)/,
+    'BUG: if ensureListenAudioCapture fails (!status.ok), disarm Listen so the button is clickable again.',
+  );
+});
+
+test('Listen disarms when startMeeting or ensureListenAudioCapture throws', () => {
+  assert.match(
+    handleStartListeningBody,
+    /catch \(err\) \{[\s\S]*?preserveListenOnResetRef\.current\s*=\s*false[\s\S]*?isRecordingRef\.current\s*=\s*false[\s\S]*?setIsManualRecording\(\s*false\s*\)[\s\S]*?setAudioSessionState\(\s*['"]idle['"]\s*\)/,
+    'BUG: if startMeeting throws (e.g. mic-permission-denied), disarm Listen and drop the preserve flag — otherwise the UI stays on Listening with no capture.',
+  );
+});

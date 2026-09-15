@@ -1246,6 +1246,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
   const [conversationContext, setConversationContext] = useState<string>('');
   const [isManualRecording, setIsManualRecording] = useState(false);
   const isRecordingRef = useRef(false); // Ref to track recording state (avoids stale closure)
+  const preserveListenOnResetRef = useRef(false);
   const [manualTranscript, setManualTranscript] = useState('');
   const manualTranscriptRef = useRef<string>('');
   // Listen-scoped interviewer (system audio) buffers — parallel to voiceInput /
@@ -3587,8 +3588,12 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
     const unsubscribe = window.electronAPI.onSessionReset(() => {
       console.log('[NativelyInterface] Resetting session state...');
       resetChatState();
-      isRecordingRef.current = false;
-      setIsManualRecording(false);
+      if (preserveListenOnResetRef.current) {
+        preserveListenOnResetRef.current = false;
+      } else {
+        isRecordingRef.current = false;
+        setIsManualRecording(false);
+      }
       eagerCodeExpansionHoldRef.current = false;
       answerPanelPinnedRef.current = false;
       setAnswerPanelPinned(false);
@@ -6422,17 +6427,15 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
 
         const active = await window.electronAPI.getMeetingActive();
         if (!active) {
+          preserveListenOnResetRef.current = true;
           await window.electronAPI.startMeeting({
             audio: { inputDeviceId, outputDeviceId },
           });
-          // Audio init is async (CoreAudio/SCK can take several seconds). Brief
-          // pause so ensureListenAudioCapture sees the pipeline objects.
-          await new Promise((r) => setTimeout(r, 400));
         }
 
         const status = await window.electronAPI.ensureListenAudioCapture?.();
         if (!status) return;
-        if (!status.system && status.message) {
+        if ((!status.mic || !status.system) && status.message) {
           setMessages((prev) => [
             ...prev,
             {
@@ -6451,8 +6454,17 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
             },
           ]);
         }
+        if (!status.ok) {
+          isRecordingRef.current = false;
+          setIsManualRecording(false);
+          setAudioSessionState('idle');
+        }
       } catch (err) {
         console.error('[NativelyInterface] Failed to ensure Listen audio:', err);
+        preserveListenOnResetRef.current = false;
+        isRecordingRef.current = false;
+        setIsManualRecording(false);
+        setAudioSessionState('idle');
       }
     })();
   };

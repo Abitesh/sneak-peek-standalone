@@ -6056,6 +6056,9 @@ export class AppState {
  }
 
  try {
+ if (this._audioInitPromise) {
+ await this._audioInitPromise;
+ }
  // Ambient AI Chat skips capture at meeting start. Listen is an explicit
  // request for audio — build the pipeline now without flipping the setting.
  if (!this.microphoneCapture || !this.systemAudioCapture || !this.googleSTT || !this.googleSTT_User) {
@@ -6064,14 +6067,17 @@ export class AppState {
  }
  await this.setupSystemAudioPipeline();
  }
- this.startCaptureChannels('ensureListenAudioCapture');
+ const started = this.startCaptureChannels('ensureListenAudioCapture');
+ out.mic = started.mic;
+ out.system = started.system;
+ if (started.mic || started.system) {
+ this._listenAudioActive = true;
+ }
  } catch (err) {
  console.error('[Main] ensureListenAudioCapture failed:', err);
  out.message = (err as Error)?.message || 'Failed to start Listen audio capture.';
  }
 
- out.mic = !!(this.microphoneCapture && this.googleSTT_User);
- out.system = !!(this.systemAudioCapture && this.googleSTT);
  out.ok = out.mic || out.system;
 
  if (process.platform === 'darwin' && out.system) {
@@ -6419,6 +6425,7 @@ export class AppState {
  const channelsStarted = this.startCaptureChannels('startMeeting', false);
  userSttStartedByInit = channelsStarted.mic;
  systemSttStartedByInit = channelsStarted.system;
+ this._listenAudioActive = true;
  } else {
  console.log('[Main] Ambient AI Chat enabled — skipping mic/system audio capture and STT for this session.');
  }
