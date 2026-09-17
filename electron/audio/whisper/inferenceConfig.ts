@@ -140,7 +140,7 @@ export function buildWorkerInitMessage(modelId: string): WorkerInitMessage {
         // resolveNemotronExecutionProviders() for the measurements.
         executionProviders: sessionLayout === 'nemotron-rnnt'
             ? resolveNemotronExecutionProviders(executionProviders)
-            : executionProviders,
+            : dropCoremlForExternalEncoder(executionProviders, useExternalDataFormat),
         dtype,
         expectedBytes,
         useExternalDataFormat,
@@ -176,6 +176,30 @@ export function buildWorkerInitMessage(modelId: string): WorkerInitMessage {
 export function resolveNemotronExecutionProviders(platformProviders: string[]): string[] {
     const cpuOnly = platformProviders.filter(p => p === 'cpu');
     return cpuOnly.length > 0 ? cpuOnly : ['cpu'];
+}
+
+/**
+ * ORT CoreML does not reliably bind sibling `encoder_model.onnx_data` weights.
+ * Distil Large v2/v3 and Whisper Large v3 Turbo ship a ~646KB graph stub plus
+ * the real fp32 encoder in that companion file. `pipeline()` still reports
+ * READY (the stub parses) then inference hangs or returns empty — the
+ * Distil-small.en path keeps working because its encoder weights are inline.
+ *
+ * Only drops `'coreml'`. DirectML/CPU lists are unchanged. Bare
+ * `externalDataFormat: true` (Parakeet, every-file companions) is left on
+ * CoreML — that is a different layout, and it already transcribes.
+ */
+export function dropCoremlForExternalEncoder(
+    platformProviders: string[],
+    useExternalDataFormat: boolean | Record<string, boolean> | undefined,
+): string[] {
+    const encoderIsExternal =
+        !!useExternalDataFormat &&
+        typeof useExternalDataFormat === 'object' &&
+        useExternalDataFormat['encoder_model.onnx'] === true;
+    if (!encoderIsExternal) return platformProviders;
+    const rest = platformProviders.filter((p) => p !== 'coreml');
+    return rest.length > 0 ? rest : ['cpu'];
 }
 
 /**

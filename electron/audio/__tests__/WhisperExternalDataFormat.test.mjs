@@ -53,7 +53,7 @@ const {
   getModelExternalDataFormat,
   isModelCached,
 } = await import(pathToFileURL(modelMgrPath).href);
-const { buildWorkerInitMessage } = await import(pathToFileURL(inferenceCfgPath).href);
+const { buildWorkerInitMessage, dropCoremlForExternalEncoder } = await import(pathToFileURL(inferenceCfgPath).href);
 
 const TURBO = 'onnx-community/whisper-large-v3-turbo-ONNX';
 const MOONSHINE = 'onnx-community/moonshine-tiny-ONNX';
@@ -101,6 +101,58 @@ test('buildWorkerInitMessage leaves the flag undefined for non-split models', ()
   // undefined → worker omits use_external_data_format → transformers behaves
   // exactly as before for self-contained models (moonshine, tiny/base/small).
   assert.equal(buildWorkerInitMessage(MOONSHINE).useExternalDataFormat, undefined);
+});
+
+test('encoder-external Distil large / turbo never request CoreML', () => {
+  // Stub encoder + encoder_model.onnx_data. CoreML binds the stub, reports
+  // READY, then inference hangs/returns empty. Inline-encoder Distil small
+  // keeps the platform list (CoreML on Apple Silicon).
+  for (const id of [DISTIL, TURBO, 'distil-whisper/distil-large-v2']) {
+    const msg = buildWorkerInitMessage(id);
+    assert.equal(
+      msg.executionProviders.includes('coreml'),
+      false,
+      `${id} must not use CoreML (external encoder_model.onnx_data)`,
+    );
+    assert.ok(msg.executionProviders.includes('cpu'), `${id} must keep cpu`);
+  }
+  if (process.platform === 'darwin' && process.arch === 'arm64') {
+    assert.ok(
+      buildWorkerInitMessage('distil-whisper/distil-small.en').executionProviders.includes('coreml'),
+      'inline-encoder Distil small keeps CoreML',
+    );
+  }
+});
+
+test('dropCoremlForExternalEncoder is platform-independent', () => {
+  assert.deepEqual(
+    dropCoremlForExternalEncoder(['coreml', 'cpu'], { 'encoder_model.onnx': true }),
+    ['cpu'],
+  );
+  assert.deepEqual(
+    dropCoremlForExternalEncoder(['coreml', 'cpu'], true),
+    ['coreml', 'cpu'],
+    'Parakeet bare-true must keep CoreML',
+  );
+  assert.deepEqual(
+    dropCoremlForExternalEncoder(['dml', 'cpu'], { 'encoder_model.onnx': true }),
+    ['dml', 'cpu'],
+    'Windows DirectML list is unchanged (no coreml to drop)',
+  );
+  assert.deepEqual(
+    dropCoremlForExternalEncoder(['coreml', 'cpu'], { 'decoder_model_merged.onnx': true }),
+    ['coreml', 'cpu'],
+    'decoder-only split (medium.en) must keep CoreML',
+  );
+  assert.deepEqual(
+    dropCoremlForExternalEncoder(['coreml'], { 'encoder_model.onnx': true }),
+    ['cpu'],
+  );
+  assert.deepEqual(
+    dropCoremlForExternalEncoder(['coreml', 'cpu'], undefined),
+    ['coreml', 'cpu'],
+    'inline-encoder Distil small / Moonshine unchanged',
+  );
 });
 
 test('isModelCached: graph stub WITHOUT encoder_model.onnx_data reports missing (the bug)', () => {

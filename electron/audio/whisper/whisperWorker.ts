@@ -107,15 +107,22 @@ const nemotronSegmentTokens = new Map<string, number[]>();
 // second one reliably takes the fast, no-I/O "reuse shared sessions" path.
 let nemotronInitChain: Promise<void> = Promise.resolve();
 
+// Serializes transformers.js `pipe()` transcribe + setPrompt. The host's
+// streamingTaskInFlight flag only gates streaming ticks — dispatchFinal
+// clears it and posts another transcribe while a pipe() is still running.
+// Overlapping pipe() on one ONNX session hangs Distil-large (and starves
+// Distil-small: dozens of "Sending final" for n=1 completed). Same chain
+// pattern as nemotronInitChain; one pipeline per worker so one chain is
+// enough. # ponytail: global lock, per-session locks if we ever share this
+// worker across two Distil channels the way Nemotron does.
+let whisperPipeChain: Promise<void> = Promise.resolve();
+
 // Tokenized prompt cache — populated by `setPrompt` messages, reused by
 // every subsequent transcribe. Cleared on model swap.
 //
 // The transcribe message handler must remain serial w.r.t. setPrompt so we
-// don't read a half-updated cache; the host-side caller (LocalWhisperSTT)
-// posts setPrompt via the same MessagePort which Node guarantees orders
-// strictly with transcribe messages. As long as no two transcribe messages
-// are in flight concurrently (the streamingTaskInFlight guard ensures this),
-// the cache is consistent.
+// don't read a half-updated cache. whisperPipeChain (not host-side
+// streamingTaskInFlight) is what actually keeps them from overlapping.
 let cachedPromptText = '';
 let cachedPromptIds: number[] | null = null;
 
@@ -399,7 +406,9 @@ parentPort.on('message', async (msg: any) => {
     }
     return;
   } else if (msg.type === 'setPrompt') {
-    await updatePromptCache(msg.prompt);
+    whisperPipeChain = whisperPipeChain.then(() => updatePromptCache(msg.prompt)).catch((chainErr) => {
+      console.error('[WhisperWorker] whisper pipe chain error (should be unreachable):', chainErr);
+    });
   } else if (msg.type === 'setLanguage') {
     // nemotron-rnnt only — silently ignored (no-op) for the transformers.js
     // pipeline() path (and for an unrecognized/absent channelId), same
@@ -487,6 +496,7 @@ parentPort.on('message', async (msg: any) => {
       parentPort!.postMessage({ type: 'error', message: 'Model not loaded' });
       return;
     }
+    whisperPipeChain = whisperPipeChain.then(async () => {
     try {
       let language: string | null = resolveWhisperLanguage(msg.language);
       const streaming: boolean = !!msg.streaming;
@@ -576,5 +586,8 @@ parentPort.on('message', async (msg: any) => {
         message: `Transcription failed: ${e.message}`,
       });
     }
+    }).catch((chainErr) => {
+      console.error('[WhisperWorker] whisper pipe chain error (should be unreachable):', chainErr);
+    });
   }
 });
