@@ -496,7 +496,7 @@ onSessionReset: (callback: () => void) => () => void;
 // Streaming listeners
 streamGeminiChat: (message: string, imagePaths?: string[], context?: string, options?: { skipSystemPrompt?: boolean, ignoreKnowledgeMode?: boolean }) => Promise<void>
 onGeminiStreamToken: (callback: (token: string, meta?: { streamId?: number }) => void) => () => void
-onGeminiStreamDone: (callback: (data?: { finalText?: string; streamId?: number; citationMarkers?: Record<string, { marker: string; evidenceId: string; citationId: string; citation: { citationId: string; documentId: string; documentName: string; chunkId: string; pageStart?: number; pageEnd?: number; section?: string; sourceType: string } }> }) => void) => () => void
+onGeminiStreamDone: (callback: (data?: { finalText?: string; streamId?: number; citationMarkers?: Record<string, { marker: string; evidenceId: string; citationId: string; citation: { citationId: string; documentId: string; documentName: string; chunkId: string; pageStart?: number; pageEnd?: number; section?: string; sourceType: string } }>; text?: string; citations?: Record<string, { marker: string; evidenceId: string; citationId: string; citation: { citationId: string; documentId: string; documentName: string; chunkId: string; pageStart?: number; pageEnd?: number; section?: string; sourceType: string } }>; ragUsed?: boolean; confidence?: number; sources?: string[] }) => void) => () => void
 onGeminiStreamError: (callback: (error: string, meta?: { streamId?: number | null; source?: string }) => void) => () => void;
 // NOTE: onSkillsChanged broadcast subscription was removed. Skills are
 // toggled only via delete; the picker refreshes on Settings unmount, and

@@ -17,6 +17,7 @@ import { BrowserMetadataClassifierService } from './services/browser-context/Bro
 import type { BrowserContextCategory, SafeWebsiteMetadata } from './services/browser-context/types';
 import { SettingsManager } from './services/SettingsManager';
 import { applyLocalPrivateRagAnswers, isLocalPrivateRagMode, parseLocalPrivateRagMode } from './rag/localPrivateRagMode';
+import { toChatAnswerContract, chatAnswerIpcFields } from './rag/chatAnswerContract';
 import { ProviderStatusRegistry } from './services/ProviderStatusRegistry';
 import { SkillsManager } from './services/SkillsManager';
 import { SAFE_DOCUMENT_EXTENSIONS } from './services/SafeDocumentTextExtractor';
@@ -1827,6 +1828,11 @@ finalText,
 streamId: myStreamId,
 incomplete: v3Truncated,
 incompleteReason: v3Truncated ? v3Stream.outcome.reason : undefined,
+...chatAnswerIpcFields(toChatAnswerContract({
+text: finalText,
+citations: isRagCitationsEnabled() ? composed.citationMarkers : undefined,
+ragUsed: composed.evidenceCount > 0,
+})),
 });
 finishDebug(finalText, !v3Truncated, v3Truncated ? 'stream_truncated' : null);
 // ─ ─ Record the turn (V3 previously recorded NOTHING) ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
@@ -5503,7 +5509,12 @@ const citationMarkers = isRagCitationsEnabled() && manualContextOsGeneration?.go
 event.sender.send('gemini-stream-done', {
 ...(finalText ? { finalText } : {}),
 streamId: myStreamId,
-...(citationMarkers && Object.keys(citationMarkers).length > 0 ? { citationMarkers } : {}),
+...chatAnswerIpcFields(toChatAnswerContract({
+text: finalText || fullResponse,
+citations: citationMarkers,
+ragUsed: Boolean(manualContextOsGeneration?.govern && (manualContextOsGeneration.evidencePack?.items?.length ?? 0) > 0),
+confidence: manualContextOsGeneration?.evidencePack?.coverage?.confidence,
+})),
 });
 chatTrace.mark('response_completed', { chars: fullResponse.length, repaired: Boolean(finalText) });
 chatTrace.finish({ chars: fullResponse.length });

@@ -125,6 +125,12 @@ describe('the prompt reflects the decision', () => {
       },
     });
     assert.equal(r.evidenceCount, 1);
+    assert.equal(r.citationMarkers.S1.citation.sourceType, 'REFERENCE_FILE');
+    assert.equal(r.citationMarkers.S1.evidenceId, 'ev-1');
+    assert.ok(!('content' in r.citationMarkers.S1));
+    assert.ok(!('text' in r.citationMarkers.S1.citation));
+    assert.match(r.user, /citation_marker="S1"/);
+    assert.match(r.user, /\[S1\]/);
     assert.match(r.user, /version_id="v2"/);
     assert.match(r.user, /untrusted data/i);
   });

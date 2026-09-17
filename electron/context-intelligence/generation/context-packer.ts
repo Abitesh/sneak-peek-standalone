@@ -62,9 +62,10 @@ function rank(evidence: EvidenceItem[], required: ClaimRequirement[]): EvidenceI
   });
 }
 
-function renderEvidence(e: EvidenceItem): string {
+function renderEvidence(e: EvidenceItem, marker: string): string {
   const attrs = [
     `evidence_id="${esc(e.evidenceId)}"`,
+    `citation_marker="${esc(marker)}"`,
     `source_type="${e.sourceType}"`,
     `source_id="${esc(e.sourceId)}"`,
     `version_id="${esc(e.versionId)}"`,
@@ -114,7 +115,8 @@ export function packContext(
     const key = `${e.sourceId}:${e.content.trim().toLowerCase().replace(/\s+/g, ' ')}`;
     if (seen.has(key)) { dropped.push(e.evidenceId); continue; }
 
-    const rendered = renderEvidence(e);
+    const marker = `S${included.length + 1}`;
+    const rendered = renderEvidence(e, marker);
     const cost = estimateTokens(rendered);
     if (used + cost > budget.evidenceTokens) { dropped.push(e.evidenceId); continue; }
 

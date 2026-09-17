@@ -180,7 +180,7 @@ describe('Defect G contract: mode-identity check precedes the user-visible done 
 
   test('LEGACY block: liveModeIdAtDoneEmit comparison gates the legacy gemini-stream-done emit', () => {
     // The legacy done emit is the only one with the conditional-finalText spread.
-    const legacyDoneIdx = handlerBody.indexOf("send('gemini-stream-done', { ...(finalText ? { finalText } : {}), streamId: myStreamId })");
+    const legacyDoneIdx = handlerBody.search(/send\('gemini-stream-done',\s*\{\s*\.\.\.\(finalText \? \{ finalText \} : \{\}\),\s*streamId: myStreamId/);
     assert.ok(legacyDoneIdx >= 0, 'legacy done emit must exist');
 
     const legacyGuardIdx = handlerBody.indexOf('liveModeIdAtDoneEmit');

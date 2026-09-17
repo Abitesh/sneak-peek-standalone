@@ -25,6 +25,7 @@ isScopeDenied,
 } from '../policies/provider-scope-policy';
 import type { AnswerSurface, EvidenceScope } from '../contracts/types';
 import type { ProviderDataScope } from '../../llm/ProviderRouter';
+import { citationMarkersForEvidenceItems, type RagCitationMarker } from '../../rag/RagCitation';
 export interface BridgeInput {
 surface: AnswerSurface;
 question: string;
@@ -155,6 +156,8 @@ modeId: ModeId;
 * enforced nothing. Pass this straight into streamChat's `extraDataScopes`.
 */
 packedDataScopes: ProviderDataScope[];
+/** Packed-evidence citation identity only — never chunk text. */
+citationMarkers?: Record<string, RagCitationMarker>;
 /** Scopes whose evidence a privacy setting withheld from this turn. Empty on
 * a normal turn. Present so callers can log/surface the withholding. */
 withheldDataScopes: ProviderDataScope[];
@@ -275,9 +278,12 @@ fallbackUsed: result.trace.fallbackUsed,
 // survived BOTH the privacy filter and the packing budget, plus the
 // transcript scope when a conversation summary rides along. This is the
 // truth handed to the transport instead of it guessing from the bytes.
-const includedIds = new Set(composed.packed.includedEvidenceIds);
+const packedEvidence = composed.packed.includedEvidenceIds
+  .map((id) => scopeFilter.evidence.find((item) => item.evidenceId === id))
+  .filter((item): item is (typeof scopeFilter.evidence)[number] => Boolean(item));
+const citationMarkers = citationMarkersForEvidenceItems(packedEvidence);
 const packedDataScopes = new Set<ProviderDataScope>(
-dataScopesForEvidence(scopeFilter.evidence.filter((e) => includedIds.has(e.evidenceId))),
+dataScopesForEvidence(packedEvidence),
 );
 if (convoSummary) packedDataScopes.add('transcript');
 // ── Per-turn source line ────────────────────────────────────────────────
@@ -438,6 +444,7 @@ withheldDataScopes: [...withheldScopes],
 unsupportedInMode: result.decision.retrievalPlan.path !== 'FAST'
 && result.decision.retrievalPlan.shouldRetrieve === false,
 modeId,
+...(Object.keys(citationMarkers).length ? { citationMarkers } : {}),
 ...(debugRequestId ? { debugRequestId } : {}),
 };
 } catch (e) {

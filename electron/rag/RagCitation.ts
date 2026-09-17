@@ -101,3 +101,59 @@ export function citationForEvidenceItem(item: {
     sourceType: item.sourceType || item.sourceKind || 'unknown',
   });
 }
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
+/** Packed-evidence identity only. Never copies chunk/document text. */
+export function citationMarkersForEvidenceItems(
+  items: readonly {
+    evidenceId: string;
+    sourceId: string;
+    citation?: RagCitation;
+    documentId?: string;
+    documentName?: string;
+    documentTitle?: string;
+    chunkId?: string;
+    section?: string;
+    page?: number;
+    pageStart?: number;
+    pageEnd?: number;
+    sourceType?: string;
+    metadata?: Record<string, unknown>;
+  }[],
+): Record<string, RagCitationMarker> {
+  const citationMarkers: Record<string, RagCitationMarker> = {};
+  const seenCitationIds = new Set<string>();
+  for (const item of items) {
+    const metadata = item.metadata ?? {};
+    const citation = citationForEvidenceItem({
+      citation: item.citation,
+      evidenceId: item.evidenceId,
+      sourceId: item.sourceId,
+      documentId: item.documentId || item.sourceId,
+      documentName: item.documentName || item.documentTitle || item.sourceId,
+      chunkId: item.chunkId || item.evidenceId,
+      pageStart: item.pageStart ?? item.page ?? finiteNumber(metadata.pageStart),
+      pageEnd: item.pageEnd ?? finiteNumber(metadata.pageEnd),
+      section: item.section ?? nonEmptyString(metadata.section),
+      sourceType: item.sourceType,
+    });
+    const citationId = citation.citationId.trim();
+    if (!citationId || seenCitationIds.has(citationId)) continue;
+    seenCitationIds.add(citationId);
+    const marker = `S${Object.keys(citationMarkers).length + 1}`;
+    citationMarkers[marker] = {
+      marker,
+      evidenceId: item.evidenceId,
+      citationId,
+      citation,
+    };
+  }
+  return citationMarkers;
+}

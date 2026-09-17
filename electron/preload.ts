@@ -680,7 +680,7 @@ context?: string,
 options?: { skipSystemPrompt?: boolean; ignoreKnowledgeMode?: boolean },
 ) => Promise<void>;
 onGeminiStreamToken: (callback: (token: string, meta?: { streamId?: number }) => void) => () => void;
-onGeminiStreamDone: (callback: (data?: { finalText?: string; streamId?: number; citationMarkers?: Record<string, RagCitationMarker> }) => void) => () => void;
+onGeminiStreamDone: (callback: (data?: { finalText?: string; streamId?: number; citationMarkers?: Record<string, RagCitationMarker>; text?: string; citations?: Record<string, RagCitationMarker>; ragUsed?: boolean; confidence?: number; sources?: string[] }) => void) => () => void;
 onGeminiStreamError: (callback: (error: string, meta?: { streamId?: number | null; source?: string }) => void) => () => void;
 onUndetectableChanged: (callback: (state: boolean) => void) => () => void;
 onSettingsWindowShown: (callback: () => void) => () => void;
@@ -2067,8 +2067,8 @@ return () => {
 ipcRenderer.removeListener('gemini-stream-token', subscription);
 };
 },
-onGeminiStreamDone: (callback: (data?: { finalText?: string; streamId?: number; citationMarkers?: Record<string, RagCitationMarker> }) => void) => {
-const subscription = (_: any, data?: { finalText?: string; streamId?: number; citationMarkers?: Record<string, RagCitationMarker> }) => callback(data);
+onGeminiStreamDone: (callback: (data?: { finalText?: string; streamId?: number; citationMarkers?: Record<string, RagCitationMarker>; text?: string; citations?: Record<string, RagCitationMarker>; ragUsed?: boolean; confidence?: number; sources?: string[] }) => void) => {
+const subscription = (_: any, data?: { finalText?: string; streamId?: number; citationMarkers?: Record<string, RagCitationMarker>; text?: string; citations?: Record<string, RagCitationMarker>; ragUsed?: boolean; confidence?: number; sources?: string[] }) => callback(data);
 ipcRenderer.on('gemini-stream-done', subscription);
 return () => {
 ipcRenderer.removeListener('gemini-stream-done', subscription);
