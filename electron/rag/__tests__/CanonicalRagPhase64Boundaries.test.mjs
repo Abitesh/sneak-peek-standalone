@@ -45,23 +45,32 @@ function seedReadyMeeting(storage, meetingId) {
 }
 
 describe('Change 25 Phase 6.4 canonical shadow boundaries', () => {
-  test('queryMeeting and queryGlobal observe the canonical shadow without replacing legacy results', () => {
+  test('queryMeeting and queryGlobal observe the canonical shadow through search without replacing results', () => {
     const src = source('electron/rag/RAGManager.ts');
 
     const meeting = src.indexOf('async *queryMeeting(');
     const global = src.indexOf('async *queryGlobal(');
+    const search = src.indexOf('async search(query: string');
+    const searchEnd = src.indexOf('async retrieve(query: string');
     assert.ok(meeting >= 0);
     assert.ok(global > meeting);
+    assert.ok(search >= 0);
+    assert.ok(searchEnd > search);
 
     const meetingBlock = src.slice(meeting, global);
     const globalEnd = src.indexOf('async *query(', global);
     const globalBlock = src.slice(global, globalEnd > 0 ? globalEnd : global + 5000);
+    const searchBlock = src.slice(search, searchEnd);
 
-    assert.match(meetingBlock, /this\.retriever\.retrieve\(query, \{ meetingId \}\)/);
-    assert.match(meetingBlock, /observeCanonicalRagShadowIfEnabled/);
+    assert.match(meetingBlock, /this\.search\(/);
+    assert.match(meetingBlock, /forceDocumentGrounding:\s*true/);
+    assert.doesNotMatch(meetingBlock, /this\.retriever\.retrieve\(/);
+    assert.doesNotMatch(meetingBlock, /observeCanonicalRagShadowIfEnabled/);
     assert.doesNotMatch(meetingBlock, /scopeId:\s*meetingId/);
-    assert.match(globalBlock, /this\.retriever\.retrieveGlobal\(query\)/);
-    assert.match(globalBlock, /observeCanonicalRagShadowIfEnabled/);
+    assert.match(globalBlock, /this\.search\(/);
+    assert.doesNotMatch(globalBlock, /this\.retriever\.retrieveGlobal\(/);
+    assert.doesNotMatch(globalBlock, /observeCanonicalRagShadowIfEnabled/);
+    assert.match(searchBlock, /observeCanonicalRagShadowIfEnabled/);
     assert.doesNotMatch(meetingBlock, /canonical.*results.*replace/i);
     assert.doesNotMatch(globalBlock, /canonical.*results.*replace/i);
   });

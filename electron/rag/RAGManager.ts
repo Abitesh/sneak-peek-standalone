@@ -6,7 +6,7 @@ import { DatabaseManager } from '../db/DatabaseManager';
 import * as crypto from 'crypto';
 import { LLMHelper } from '../LLMHelper';
 import { preprocessTranscript, RawSegment } from './TranscriptPreprocessor';
-import { chunkTranscript } from './SemanticChunker';
+import { chunkTranscript, formatChunkForContext } from './SemanticChunker';
 import { VectorStore } from './VectorStore';
 import { EmbeddingPipeline } from './EmbeddingPipeline';
 import { RAGRetriever, hasQuestionSpecificRelevance, type RagRetrievalResponse as RagRetrieverResponse } from './RAGRetriever';
@@ -220,6 +220,33 @@ The retrieval system found no relevant evidence for the user's question in the s
 function appendRagRetrievalStatus(prompt: string, status: 'ok' | 'no_relevant_evidence'): string {
 if (status !== 'no_relevant_evidence') return prompt;
 return `${prompt}\n${NO_GROUNDED_EVIDENCE_PROMPT.trim()}`;
+}
+
+function formatSearchResultsForMeetingPrompt(
+  results: readonly RagSearchResult[],
+  groupByMeeting: boolean,
+): string {
+  if (!results.length) return '';
+  const line = (r: RagSearchResult) => formatChunkForContext({
+    meetingId: String(r.source.id || r.chunk.documentId || ''),
+    chunkIndex: r.chunk.chunkIndex,
+    speaker: r.chunk.speaker || 'Unknown',
+    startMs: Number.isFinite(Number(r.chunk.timestampStart)) ? Number(r.chunk.timestampStart) : 0,
+    endMs: Number.isFinite(Number(r.chunk.timestampEnd)) ? Number(r.chunk.timestampEnd) : 0,
+    text: r.chunk.text,
+    tokenCount: 0,
+  });
+  const byTime = (a: RagSearchResult, b: RagSearchResult) =>
+    Number(a.chunk.timestampStart ?? 0) - Number(b.chunk.timestampStart ?? 0);
+  if (!groupByMeeting) return [...results].sort(byTime).map(line).join('\n\n');
+  const byMeeting = new Map<string, RagSearchResult[]>();
+  for (const r of results) {
+    const id = String(r.source.id || r.chunk.documentId || 'meeting');
+    byMeeting.set(id, [...(byMeeting.get(id) ?? []), r]);
+  }
+  return [...byMeeting.entries()]
+    .map(([id, hits]) => `--- Meeting ${id} ---\n${[...hits].sort(byTime).map(line).join('\n')}`)
+    .join('\n\n');
 }
 export interface RAGRetrievalResponse extends RagRetrieverResponse<RagSearchResult> {
   originalQuery?: string;
@@ -1775,22 +1802,17 @@ abortSignal?: AbortSignal
 if (!this.llmHelper) {
 throw new Error('LLM helper not initialized');
 }
-// Retrieval itself now owns the no-evidence state. We do not convert missing
-// embeddings into a generic wrapper fallback; lexical retrieval may still be
-// useful, and if nothing survives retrieval the result is explicitly empty.
-const context = await this.retriever.retrieve(query, { meetingId });
-void observeCanonicalRagShadowIfEnabled(query, {
-  sourceTypes: ['meeting'],
-  sourceFilters: { sourceIds: [meetingId] },
-  legacyResultCount: context.chunks?.length ?? 0,
+// Change 44: overlay queries use search() so ranking/gate/shadow stay one
+// engine. MeetingRagAdapter still owns RAGRetriever.retrieve.
+const context = await this.search(query, {
+  meetingId,
+  selectedSources: ['meeting'],
+  forceDocumentGrounding: true,
 });
 const promptContext = context.status === 'no_relevant_evidence'
 ? appendRagRetrievalStatus('', context.status)
-: context.formattedContext;
-// Build prompt with intent hint. The explicit status tells the model that no
-// grounded evidence was found and prevents unsupported facts being presented
-// as document-derived.
-const prompt = buildRAGPrompt(query, promptContext, 'meeting', context.intent);
+: formatSearchResultsForMeetingPrompt(context.results, false);
+const prompt = buildRAGPrompt(query, promptContext, 'meeting', this.retriever.detectIntent(query));
 yield* this.streamRagAnswer(prompt, abortSignal);
 }
 /**
@@ -1803,23 +1825,14 @@ abortSignal?: AbortSignal
 if (!this.llmHelper) {
 throw new Error('LLM helper not initialized');
 }
-// Retrieve from all meetings. A miss is now a first-class retrieval state.
-const context = await this.retriever.retrieveGlobal(query);
-void observeCanonicalRagShadowIfEnabled(query, {
-  sourceTypes: ['meeting'],
-  sourceFilters: {
-    sourceIds: [...new Set((context.chunks ?? [])
-      .map((chunk) => String((chunk as unknown as Record<string, unknown>).meetingId ?? ''))
-      .filter(Boolean))],
-  },
-  legacyResultCount: context.chunks?.length ?? 0,
+const context = await this.search(query, {
+  selectedSources: ['meeting'],
+  forceDocumentGrounding: true,
 });
 const promptContext = context.status === 'no_relevant_evidence'
 ? appendRagRetrievalStatus('', context.status)
-: context.formattedContext;
-// Build prompt with intent hint and an explicit no-evidence instruction when
-// retrieval found nothing relevant.
-const prompt = buildRAGPrompt(query, promptContext, 'global', context.intent);
+: formatSearchResultsForMeetingPrompt(context.results, true);
+const prompt = buildRAGPrompt(query, promptContext, 'global', this.retriever.detectIntent(query));
 yield* this.streamRagAnswer(prompt, abortSignal);
 }
 private async *streamRagAnswer(prompt: string, abortSignal?: AbortSignal): AsyncGenerator<string, void, unknown> {
