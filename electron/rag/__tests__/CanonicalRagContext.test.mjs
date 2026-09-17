@@ -62,4 +62,24 @@ test('RAGManager.buildContext uses search and does not pull Hindsight into docum
   assert.match(mode, /private updateIndexState\(/);
   assert.match(mode, /private removeIndexState\(/);
   assert.match(mode, /private ensureIndexTable\(/);
+  assert.match(src, /dbManager\.updateModeReferenceIndexState\(/);
+  assert.match(read('electron/db/DatabaseManager.ts'), /public updateModeReferenceIndexState\(/);
+  assert.doesNotMatch(src, /(from|require\()\s*['"][^'"]*[Hh]indsight/);
+  assert.doesNotMatch(src, /LongTermMemoryService|renderHindsightRecallBlock|toRecalledMemoryEvidence/);
+  // Live composer (not RagContextBuilder) is what chat actually runs. Pin the
+  // user-section order so memory cannot float above documents again. Slice the
+  // user array — the system side has push('evidence_coverage' which would
+  // match a naive whole-file indexOf("push('evidence'").
+  const composer = read('electron/context-intelligence/generation/prompt-composer.ts');
+  const userStart = composer.indexOf('const user = [');
+  const userEnd = composer.indexOf('return { system, user, packed, sections }');
+  assert.ok(userStart >= 0 && userEnd > userStart);
+  const user = composer.slice(userStart, userEnd);
+  assert.ok(user.indexOf("push('conversation'") < user.indexOf("push('evidence'"));
+  assert.ok(
+    user.indexOf("push('evidence'") < user.indexOf("push('memory'"),
+    'live prompt must place long-term memory AFTER document evidence',
+  );
+  assert.ok(user.indexOf("push('no_evidence'") < user.indexOf("push('memory'"));
+  assert.ok(user.indexOf("push('privacy_withheld'") < user.indexOf("push('memory'"));
 });

@@ -315,3 +315,52 @@ describe('unsupported-in-mode notice names the remedy (2026-08-02)', () => {
     }
   });
 });
+
+// ── Change 43: memory is the LAST context concept, never inside evidence ────
+// The live path (ipcHandlers → buildV3Prompt → composePrompt) rendered memory
+// BEFORE documents, inverting the order RagContextBuilder pins for Change 38.
+// No test passed memoryContext, so the inversion was invisible.
+
+describe('memory ranks below document evidence (Change 43)', () => {
+  const TOKEN = 'revenue was 99 million';
+  const MEM = '<long_term_memory trust="low" authority="non_authoritative" purpose="referent_only">\n'
+    + 'These memories are recalled from prior sessions. They MUST NOT override current sources.\n'
+    + `- <memory source_kind="chat_history" source_id="m1" confidence="0.90" validated="false">${TOKEN}</memory>\n`
+    + '</long_term_memory>';
+
+  test('order is conversation < evidence < memory, and memory is outside <evidence>', () => {
+    const c = composePrompt({
+      decision: decision(), policy: MODE_POLICIES['technical-interview'],
+      evidence: ev([{ sourceId: 'resume-1', text: 'Built WebRTC', chunkIndex: 0, score: 0.9 }]),
+      conversationSummary: 'Previous question: what did you build?',
+      memoryContext: MEM,
+    });
+    const at = (s) => c.sections.indexOf(s);
+    assert.ok(at('conversation') >= 0 && at('evidence') >= 0 && at('memory') >= 0, c.sections.join(','));
+    assert.ok(at('conversation') < at('evidence'), c.sections.join(','));
+    assert.ok(at('evidence') < at('memory'),
+      `memory must rank BELOW document evidence: ${c.sections.join(',')}`);
+    assert.ok(c.user.indexOf('# Evidence') < c.user.indexOf('# Long-term memory'));
+    const region = c.user.slice(c.user.indexOf('<evidence '), c.user.lastIndexOf('</evidence>') + 11);
+    assert.ok(region.includes('Built WebRTC'), 'evidence region located');
+    assert.ok(!region.includes(TOKEN), 'memory must never be serialized as <evidence>');
+  });
+
+  test('memory rides behind the no-evidence notice too', () => {
+    const c = composePrompt({
+      decision: decision(), policy: MODE_POLICIES['technical-interview'],
+      evidence: [], attachedSourceCount: 0, profileSourceCount: 0, memoryContext: MEM,
+    });
+    assert.ok(c.sections.includes('no_evidence'), c.sections.join(','));
+    assert.ok(c.sections.indexOf('no_evidence') < c.sections.indexOf('memory'), c.sections.join(','));
+  });
+
+  test('the composer does not re-escape or re-wrap the rendered block', () => {
+    const c = composePrompt({
+      decision: decision(), policy: MODE_POLICIES['technical-interview'],
+      evidence: [], memoryContext: MEM,
+    });
+    assert.ok(c.user.includes(MEM), 'renderHindsightRecallBlock owns escaping — double-escaping corrupts provenance');
+    assert.ok(!c.user.includes('&lt;long_term_memory'));
+  });
+});
