@@ -23,6 +23,7 @@ import type { RagRetrievalComparisonCandidate, RagRetrievalComparisonSourceType 
 import { ConversationMemoryService } from '../intelligence/ConversationMemoryService';
 import type { RAGConversationTurn } from './RAGRetriever';
 import { toRagEvidenceItems, toRagSearchResponse } from './buildRagEvidencePack';
+import { recordRagSearch } from './RagDiagnostics';
 import { buildRagContext } from './RagContextBuilder';
 import { evaluateRagRelevanceGate } from './RagRelevanceGate';
 import type { EvidencePack } from '../intelligence/context-os/evidencePack';
@@ -918,8 +919,26 @@ metadata: {
 // Canonical FTS+vector RRF is CanonicalRagReadService + ragRrfFusion (default off).
 async search(query: string, options: RAGSearchOptions = {}): Promise<RAGRetrievalResponse> {
 const originalQuery = String(query ?? '').trim();
-if (!originalQuery) return toRagSearchResponse({ originalQuery: '', retrievalQuery: '', results: [], status: 'no_relevant_evidence' });
-if (!isRagEnabled()) return toRagSearchResponse({ originalQuery, retrievalQuery: originalQuery, results: [], status: 'no_relevant_evidence' });
+const startedAt = Date.now();
+const finishSearch = (
+  input: Parameters<typeof toRagSearchResponse>[0],
+  extra: { skipped?: boolean; sources?: readonly string[] } = {},
+): RAGRetrievalResponse => {
+  const response = toRagSearchResponse(input);
+  recordRagSearch({
+    originalQuery: response.originalQuery,
+    retrievalQuery: response.retrievalQuery,
+    status: response.status,
+    results: response.results,
+    confidence: response.confidence,
+    elapsedMs: Date.now() - startedAt,
+    sources: extra.sources,
+    skipped: extra.skipped,
+  });
+  return response;
+};
+if (!originalQuery) return finishSearch({ originalQuery: '', retrievalQuery: '', results: [], status: 'no_relevant_evidence' }, { skipped: true });
+if (!isRagEnabled()) return finishSearch({ originalQuery, retrievalQuery: originalQuery, results: [], status: 'no_relevant_evidence' }, { skipped: true });
 // Change 8: query planning is an explicit retrieval-stage concern. The
 // original user question remains untouched for answer generation; only
 // retrieval receives the rewritten query.
@@ -946,12 +965,12 @@ planningContext,
 // still override. An allowlist must not disable skip.
 const resolution = resolveRagSearchSources(queryPlan, options);
 if (resolution.skip) {
-  return toRagSearchResponse({
+  return finishSearch({
     originalQuery,
     retrievalQuery: queryPlan.retrievalQuery,
     results: [],
     status: 'no_relevant_evidence',
-  });
+  }, { skipped: true, sources: resolution.sources });
 }
 const normalizedQuery = queryPlan.retrievalQuery;
 const selectedSources = resolution.sources;
@@ -1194,19 +1213,19 @@ let spaceKey: string | null = null;
 try { spaceKey = this.embeddingPipeline?.getActiveSpaceKey?.() ?? null; } catch { spaceKey = null; }
 const finalResults = this.gateCanonicalResults(results.slice(0, topK), normalizedQuery, spaceKey);
 if (finalResults.length === 0) {
-return toRagSearchResponse({
+return finishSearch({
 originalQuery,
 retrievalQuery: normalizedQuery,
 results: [],
 status: 'no_relevant_evidence',
-});
+}, { sources: selectedSources });
 }
-return toRagSearchResponse({
+return finishSearch({
 originalQuery,
 retrievalQuery: normalizedQuery,
 results: finalResults,
 status: 'ok',
-});
+}, { sources: selectedSources });
 }
 /**
 * Change 33: apply the existing local BGE cross-encoder to the unified
