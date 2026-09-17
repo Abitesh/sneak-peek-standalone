@@ -970,44 +970,44 @@ const CitationBadge = ({
 
 const CitationAwareText = ({ children }: { children?: React.ReactNode }) => {
   const markers = React.useContext(CitationMarkerContext);
-  if (!markers || markers === undefined) {
+  if (!markers || Object.keys(markers).length === 0) {
     return <>{children}</>;
   }
 
-  const value = Array.isArray(children)
-    ? children.map((child) => (typeof child === 'string' ? child : '')).join('')
-    : typeof children === 'string'
-      ? children
-      : '';
-
-  if (!value) return <>{children}</>;
-
-  const markerPattern = /(\[S[A-Za-z0-9_-]+\])/g;
-  const parts = value.split(markerPattern);
-
   return (
     <>
-      {parts.map((part, index) => {
-        const match = part.match(/^\[(S[A-Za-z0-9_-]+)\]$/);
-        if (!match) return <React.Fragment key={index}>{part}</React.Fragment>;
-
-        const record = markers[match[1]];
-        if (!record) {
-          // Never turn an unknown/model-invented marker into a citation UI.
-          return <React.Fragment key={index}>{part}</React.Fragment>;
-        }
-
-        return (
-          <CitationBadge
-            key={`${record.marker}-${record.evidenceId}-${index}`}
-            marker={record.marker}
-            record={record}
-          />
-        );
+      {React.Children.toArray(children).map((child, index) => {
+        if (typeof child !== 'string') return child;
+        const parts = child.split(/(\[S[A-Za-z0-9_-]+\])/g);
+        return parts.map((part, partIndex) => {
+          const match = part.match(/^\[(S[A-Za-z0-9_-]+)\]$/);
+          if (!match) {
+            return <React.Fragment key={`${index}-${partIndex}`}>{part}</React.Fragment>;
+          }
+          const record = markers[match[1]];
+          if (!record) {
+            // Never turn an unknown/model-invented marker into a citation UI.
+            return <React.Fragment key={`${index}-${partIndex}`}>{part}</React.Fragment>;
+          }
+          return (
+            <CitationBadge
+              key={`${record.marker}-${record.evidenceId}-${index}-${partIndex}`}
+              marker={record.marker}
+              record={record}
+            />
+          );
+        });
       })}
     </>
   );
 };
+
+const markdownWithCitations = (Tag: 'p' | 'li', className: string) =>
+  ({ node, children, ...props }: any) => (
+    <Tag className={className} {...props}>
+      <CitationAwareText>{children}</CitationAwareText>
+    </Tag>
+  );
 
 const CitationMarkerProvider = ({
   markers,
@@ -2032,9 +2032,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
     () => ({
       standard: {
         text: CitationAwareText,
-        p: ({ node, ...props }: any) => (
-          <p className="mb-[2.5px] last:mb-0 leading-[1.45] text-[14px] whitespace-pre-wrap" {...props} />
-        ),
+        p: markdownWithCitations('p', 'mb-[2.5px] last:mb-0 leading-[1.45] text-[14px] whitespace-pre-wrap'),
         strong: ({ node, ...props }: any) => (
           <strong className="font-semibold overlay-hotword" {...props} />
         ),
@@ -2047,7 +2045,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
         ol: ({ node, ...props }: any) => (
           <ol className="list-decimal ml-4 mt-[2.5px] mb-[2.5px] space-y-0 leading-[1.45] text-[14px]" {...props} />
         ),
-        li: ({ node, ...props }: any) => <li className="pl-1 mb-[2.5px] last:mb-0 leading-[1.45] text-[14px]" {...props} />,
+        li: markdownWithCitations('li', 'pl-1 mb-[2.5px] last:mb-0 leading-[1.45] text-[14px]'),
         code: ({ node, className, children, ...props }: any) => {
           const match = /language-([\w+#-]+)/.exec(className || '');
           const isBlock = isBlockCode(className, String(children));
@@ -2091,9 +2089,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
       },
       codeText: {
         text: CitationAwareText,
-        p: ({ node, ...props }: any) => (
-          <p className="mb-[2.5px] last:mb-0 leading-[1.45] whitespace-pre-wrap text-[14px]" {...props} />
-        ),
+        p: markdownWithCitations('p', 'mb-[2.5px] last:mb-0 leading-[1.45] whitespace-pre-wrap text-[14px]'),
         strong: ({ node, ...props }: any) => (
           <strong className="font-bold opacity-100 overlay-text-strong" {...props} />
         ),
@@ -2106,7 +2102,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
         ol: ({ node, ...props }: any) => (
           <ol className="list-decimal ml-4 mt-[2.5px] mb-[2.5px] space-y-0 leading-[1.45] text-[14px]" {...props} />
         ),
-        li: ({ node, ...props }: any) => <li className="pl-1 mb-[2.5px] last:mb-0 leading-[1.45] text-[14px]" {...props} />,
+        li: markdownWithCitations('li', 'pl-1 mb-[2.5px] last:mb-0 leading-[1.45] text-[14px]'),
         h1: ({ node, ...props }: any) => (
           <h1 className="text-[15px] font-bold mb-[2.5px] mt-1.5 leading-[1.45] overlay-text-strong uppercase tracking-wide" {...props} />
         ),
@@ -2139,7 +2135,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
       },
       whatToAnswerText: {
         text: CitationAwareText,
-        p: ({ node, ...props }: any) => <p className="mb-[2.5px] last:mb-0 leading-[1.45] text-[14px] whitespace-pre-wrap" {...props} />,
+        p: markdownWithCitations('p', 'mb-[2.5px] last:mb-0 leading-[1.45] text-[14px] whitespace-pre-wrap'),
         strong: ({ node, ...props }: any) => (
           <strong
             className="font-semibold overlay-hotword"
@@ -2158,11 +2154,11 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
         ol: ({ node, ...props }: any) => (
           <ol className="list-decimal ml-4 mt-[2.5px] mb-[2.5px] space-y-0 leading-[1.45] text-[14px]" {...props} />
         ),
-        li: ({ node, ...props }: any) => <li className="pl-1 mb-[2.5px] last:mb-0 leading-[1.45] text-[14px]" {...props} />,
+        li: markdownWithCitations('li', 'pl-1 mb-[2.5px] last:mb-0 leading-[1.45] text-[14px]'),
       },
       recapText: {
         text: CitationAwareText,
-        p: ({ node, ...props }: any) => <p className="mb-[2.5px] last:mb-0 leading-[1.45] text-[14px] whitespace-pre-wrap" {...props} />,
+        p: markdownWithCitations('p', 'mb-[2.5px] last:mb-0 leading-[1.45] text-[14px] whitespace-pre-wrap'),
         strong: ({ node, ...props }: any) => (
           <strong
             className="font-bold opacity-100 overlay-text-strong"
@@ -2170,11 +2166,11 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
           />
         ),
         ul: ({ node, ...props }: any) => <ul className="list-disc ml-4 mt-[2.5px] mb-[2.5px] space-y-0 leading-[1.45] text-[14px]" {...props} />,
-        li: ({ node, ...props }: any) => <li className="pl-1 mb-[2.5px] last:mb-0 leading-[1.45] text-[14px]" {...props} />,
+        li: markdownWithCitations('li', 'pl-1 mb-[2.5px] last:mb-0 leading-[1.45] text-[14px]'),
       },
       followUpQuestionsText: {
         text: CitationAwareText,
-        p: ({ node, ...props }: any) => <p className="mb-[2.5px] last:mb-0 leading-[1.45] text-[14px] whitespace-pre-wrap" {...props} />,
+        p: markdownWithCitations('p', 'mb-[2.5px] last:mb-0 leading-[1.45] text-[14px] whitespace-pre-wrap'),
         strong: ({ node, ...props }: any) => (
           <strong
             className="font-bold opacity-100 overlay-text-strong"
@@ -2183,11 +2179,11 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
         ),
         ul: ({ node, ...props }: any) => <ol className="list-decimal ml-4 mt-[2.5px] mb-[2.5px] space-y-0 leading-[1.45] text-[14px]" {...props} />,
         ol: ({ node, ...props }: any) => <ol className="list-decimal ml-4 mt-[2.5px] mb-[2.5px] space-y-0 leading-[1.45] text-[14px]" {...props} />,
-        li: ({ node, ...props }: any) => <li className="pl-1 mb-[2.5px] last:mb-0 leading-[1.45] text-[14px]" {...props} />,
+        li: markdownWithCitations('li', 'pl-1 mb-[2.5px] last:mb-0 leading-[1.45] text-[14px]'),
       },
       shortenText: {
         text: CitationAwareText,
-        p: ({ node, ...props }: any) => <p className="mb-[2.5px] last:mb-0 leading-[1.45] text-[14px] whitespace-pre-wrap" {...props} />,
+        p: markdownWithCitations('p', 'mb-[2.5px] last:mb-0 leading-[1.45] text-[14px] whitespace-pre-wrap'),
         strong: ({ node, ...props }: any) => (
           <strong
             className="font-semibold overlay-hotword"
@@ -2195,7 +2191,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
           />
         ),
         ul: ({ node, ...props }: any) => <ul className="list-disc ml-4 mt-[2.5px] mb-[2.5px] space-y-0 leading-[1.45] text-[14px]" {...props} />,
-        li: ({ node, ...props }: any) => <li className="pl-1 mb-[2.5px] last:mb-0 leading-[1.45] text-[14px]" {...props} />,
+        li: markdownWithCitations('li', 'pl-1 mb-[2.5px] last:mb-0 leading-[1.45] text-[14px]'),
       },
     }),
     [isLightTheme],
@@ -5953,7 +5949,10 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
         // (in-place, by id) so the user sees the corrected six-section markdown.
         // Absent in the common case, where the streamed tokens already stand.
         const finalText = data?.finalText;
-        const citationMarkers = data?.citationMarkers;
+        const rawCitationMarkers = data?.citationMarkers ?? data?.citations;
+        const citationMarkers = rawCitationMarkers && Object.keys(rawCitationMarkers).length > 0
+          ? rawCitationMarkers
+          : undefined;
         // Capture pending text/id BEFORE any clearing. The capture happens
         // synchronously here, but a late-arriving token between this line and
         // the eventual React flush could otherwise clobber streamingTextRef —
