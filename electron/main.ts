@@ -2385,6 +2385,23 @@ export class AppState {
  return this.isMeetingActive;
  }
 
+ /**
+ * Drop both STT instances so the next setupSystemAudioPipeline recreate
+ * gate (`if (!this.googleSTT)`) builds providers against current settings.
+ * LocalWhisperSTT bakes modelId in the constructor; reusing the object after
+ * a Distil/Parakeet switch leaves write() pointed at a dead or wrong worker.
+ */
+ public invalidateSttInstances(): void {
+ if (this.googleSTT) {
+ try { this.googleSTT.stop(); this.googleSTT.removeAllListeners(); } catch (e) { console.warn('[Main] invalidateSttInstances: googleSTT teardown threw:', e); }
+ this.googleSTT = null;
+ }
+ if (this.googleSTT_User) {
+ try { this.googleSTT_User.stop(); this.googleSTT_User.removeAllListeners(); } catch (e) { console.warn('[Main] invalidateSttInstances: googleSTT_User teardown threw:', e); }
+ this.googleSTT_User = null;
+ }
+ }
+
  public isQuitting(): boolean {
  return this._isQuitting;
  }
@@ -5089,40 +5106,36 @@ export class AppState {
  private async _doReconfigureSttProvider(): Promise<void> {
  console.log('[Main] Reconfiguring STT Provider...');
 
- // RC-01 fix: pause audio captures FIRST so their EventEmitter queues drain
- // before we null-out the STT instances. Without this, buffered 'data' events
- // still in-flight call this.googleSTT?.write() while googleSTT is already null.
+ // Settings Audio-tab meters can hold WASAPI exclusive / the CoreAudio
+ // input device. Drop them before we destroy+recreate meeting captures.
+ this.stopAudioTest();
+
+ // F-104: destroy+recreate, NOT stop()+start() on the same wrappers.
+ // SystemAudioCapture.stop() defers native teardown via setImmediate so a
+ // following start() races the still-Some Rust capture_thread ("Capture
+ // already running"). Null fields first so watcher/recovery ticks observe
+ // teardown, then await destroy() so HAL/WASAPI handles are released
+ // before setupSystemAudioPipeline constructs fresh wrappers.
  if (this.isMeetingActive) {
- // Wait for native teardown before restarting below. This keeps the lazy
- // mic start from constructing a new cpal stream while the previous
- // CoreAudio tap / mic handle is still releasing on setImmediate.
- await Promise.all([
- Promise.resolve(this.systemAudioCapture?.stop()).catch((e) => {
- console.warn('[Main] Reconfigure STT: system capture stop threw:', e);
- }),
- (async () => {
- // This path immediately restarts the same wrapper below. Disable the
- // asynchronous pre-warm so stop() cannot race a freshly-started instance
- // by constructing an extra cpal stream in its post-teardown .then().
+ (this.systemAudioCapture as any)?.__disarmStuckWatchdog?.();
+ (this.microphoneCapture as any)?.__disarmStuckWatchdog?.();
  this.microphoneCapture?.disablePreWarm();
- await this.microphoneCapture?.stop();
- })().catch((e) => {
- console.warn('[Main] Reconfigure STT: mic capture stop threw:', e);
+ const dyingSystemAudioCapture = this.systemAudioCapture;
+ const dyingMicrophoneCapture = this.microphoneCapture;
+ this.systemAudioCapture = null;
+ this.microphoneCapture = null;
+ await Promise.all([
+ Promise.resolve(dyingSystemAudioCapture?.destroy()).catch((e) => {
+ console.warn('[Main] Reconfigure STT: system capture destroy threw:', e);
+ }),
+ Promise.resolve(dyingMicrophoneCapture?.destroy()).catch((e) => {
+ console.warn('[Main] Reconfigure STT: mic capture destroy threw:', e);
  }),
  ]);
  }
 
  // Now safe to destroy STT instances — no more audio events incoming
- if (this.googleSTT) {
- this.googleSTT.stop();
- this.googleSTT.removeAllListeners();
- this.googleSTT = null;
- }
- if (this.googleSTT_User) {
- this.googleSTT_User.stop();
- this.googleSTT_User.removeAllListeners();
- this.googleSTT_User = null;
- }
+ this.invalidateSttInstances();
 
  // Only reinitialize the pipeline when a meeting is already active.
  // Outside a meeting, defer pipeline creation to startMeeting() so we never
@@ -6056,6 +6069,7 @@ export class AppState {
  }
 
  try {
+ this.stopAudioTest();
  if (this._audioInitPromise) {
  await this._audioInitPromise;
  }
@@ -6178,6 +6192,7 @@ export class AppState {
 
  private async startMeetingTransition(metadata?: any): Promise<void> {
  console.log('[Main] Starting Meeting...', metadata);
+ this.stopAudioTest();
  this._listenAudioActive = false;
  this.simpleAutoAnswer.onMeetingStart();
 

@@ -119,9 +119,42 @@ test('setupMicRecoveryHandler restarts microphone before resuming system audio',
 
 test('_doReconfigureSttProvider disables mic pre-warm immediately before stopping mic', () => {
   const body = scrubNonCode(extractMethodBody('_doReconfigureSttProvider'));
-  const pattern = /this\.microphoneCapture\?\.disablePreWarm\(\);\s*await\s+this\.microphoneCapture\?\.stop\(\);/;
+  const pattern = /this\.microphoneCapture\?\.disablePreWarm\(\);/;
   assert.ok(
     pattern.test(body),
-    '_doReconfigureSttProvider must call microphoneCapture.disablePreWarm() immediately before awaiting microphoneCapture.stop().',
+    '_doReconfigureSttProvider must call microphoneCapture.disablePreWarm() before tearing down the mic wrapper.',
+  );
+});
+
+test('_doReconfigureSttProvider awaits destroy() on both mic and system captures, not only stop()', () => {
+  const body = scrubNonCode(extractMethodBody('_doReconfigureSttProvider'));
+  // F-104 snapshot-then-destroy: null the fields, then await destroy() on the
+  // dying wrappers so watcher/recovery ticks do not see a half-dead instance.
+  assert.match(
+    body,
+    /dyingMicrophoneCapture\?\.destroy\(\)/,
+    '_doReconfigureSttProvider must await microphoneCapture.destroy() (F-104: stop()+start() on the same wrapper races deferred native teardown).',
+  );
+  assert.match(
+    body,
+    /dyingSystemAudioCapture\?\.destroy\(\)/,
+    '_doReconfigureSttProvider must await systemAudioCapture.destroy() — system stop()+start() is the F-104 "Capture already running" path.',
+  );
+  assert.match(
+    body,
+    /await\s+Promise\.all\s*\(/,
+    '_doReconfigureSttProvider must await both capture destroy() promises (not fire-and-forget stop()).',
+  );
+  // Same-wrapper restart is the documented-unsafe pattern. Fresh wrappers
+  // come from setupSystemAudioPipeline after destroy+null.
+  assert.doesNotMatch(
+    body,
+    /this\.microphoneCapture\?\.stop\(\)[\s\S]{0,400}this\.microphoneCapture\?\.start\(\)/,
+    '_doReconfigureSttProvider must not stop()+start() the same microphoneCapture wrapper.',
+  );
+  assert.doesNotMatch(
+    body,
+    /this\.systemAudioCapture\?\.stop\(\)[\s\S]{0,400}this\.systemAudioCapture\?\.start\(\)/,
+    '_doReconfigureSttProvider must not stop()+start() the same systemAudioCapture wrapper.',
   );
 });

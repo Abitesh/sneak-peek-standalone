@@ -147,6 +147,40 @@ test('local-whisper-set-channel-config validates non-empty mic/system ids', () =
   );
 });
 
+test('local-whisper-set-model reconfigures or invalidates STT when a meeting is active', () => {
+  const body = stripCommentsAndStrings(findSafeHandleBody(readSrc('electron/ipcHandlers.ts'), 'local-whisper-set-model'));
+  const invalidates =
+    body.includes('invalidateStt') ||
+    body.includes('googleSTT') ||
+    body.includes('reconfigureSttProvider');
+  assert.ok(
+    invalidates,
+    'local-whisper-set-model must call reconfigureSttProvider or an STT invalidate helper after a successful write — otherwise the next Listen reuses a LocalWhisperSTT baked to the old modelId',
+  );
+  assert.ok(
+    body.includes('getIsMeetingActive') && body.includes('reconfigureSttProvider'),
+    'local-whisper-set-model must await reconfigureSttProvider when a meeting is active (channel-config already does; set-model must too)',
+  );
+});
+
+test('local-whisper-set-channel-config invalidates STT even when meeting-active reconfigure is gated', () => {
+  const body = stripCommentsAndStrings(findSafeHandleBody(readSrc('electron/ipcHandlers.ts'), 'local-whisper-set-channel-config'));
+  // Strip the meeting-active reconfigure so this assertion cannot pass solely
+  // on `if (getIsMeetingActive()) await reconfigureSttProvider()`. Idle model
+  // switches must still drop baked-in LocalWhisperSTT instances.
+  const ungated = body.replace(
+    /if\s*\(\s*appState\.getIsMeetingActive\(\s*\)\s*\)\s*await\s+appState\.reconfigureSttProvider\(\s*\)\s*;?/g,
+    '',
+  );
+  const invalidatesIdle =
+    ungated.includes('invalidateStt') ||
+    ungated.includes('googleSTT');
+  assert.ok(
+    invalidatesIdle,
+    'local-whisper-set-channel-config must invalidate STT instances even when the meeting is idle — gating only on getIsMeetingActive() leaves a stale Parakeet worker for the next Listen',
+  );
+});
+
 test('renderer LocalWhisperModelPanel surfaces the recovery notice', () => {
   const src = readSrc('src/components/LocalWhisperModelPanel.tsx');
   assert.ok(

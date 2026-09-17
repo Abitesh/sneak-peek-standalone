@@ -8739,6 +8739,8 @@ if (!SettingsManager.getInstance().set('localWhisperModel', modelId)) {
 // never received, which silently reverted on the next launch.
 return { success: false, error: 'settings_store_degraded' };
 }
+if (appState.getIsMeetingActive()) await appState.reconfigureSttProvider();
+else appState.invalidateSttInstances();
 return { success: true };
 } catch (e: any) {
 return { success: false, error: e.message };
@@ -8816,6 +8818,7 @@ if (!sm.set('localWhisperModelSystem', cfg.systemModelId)) {
 return { success: false, error: 'settings_store_degraded' };
 }
 if (appState.getIsMeetingActive()) await appState.reconfigureSttProvider();
+else appState.invalidateSttInstances();
 return { success: true };
 } catch (e: any) {
 return { success: false, error: e.message };
