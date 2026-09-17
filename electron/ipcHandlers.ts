@@ -1113,7 +1113,7 @@ personalFiles: personalFiles.length,
 profileSources: 0,
 });
 }
-// Change 17: normal/manual chat has ONE document-retrieval entry point.
+// Change 17/40: normal/manual chat has ONE document-retrieval entry point.
 // RAGManager owns candidate generation, source-family selection, hybrid fusion,
 // common reranking and the canonical relevance gate. Context Intelligence still
 // owns authorization and claim-level filtering through the RetrievalPort returned

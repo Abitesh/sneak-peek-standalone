@@ -6625,7 +6625,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
         setAudioSessionState('processing');
 
         try {
-          // Change 17: normal/manual chat has ONE retrieval transport. Meeting
+          // Change 17/40: normal/manual chat has ONE retrieval transport. Meeting
           // evidence is selected inside gemini-chat-stream -> Context Intelligence
           // -> RAGManager; do not preflight the separate rag:query-live IPC path.
 
@@ -6799,7 +6799,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
     pinAnswerPanel();
 
     try {
-      // Change 17: normal/manual chat has ONE retrieval transport. Meeting
+      // Change 17/40: normal/manual chat has ONE retrieval transport. Meeting
       // evidence is selected inside gemini-chat-stream -> Context Intelligence
       // -> RAGManager; do not preflight the separate rag:query-live IPC path.
 
