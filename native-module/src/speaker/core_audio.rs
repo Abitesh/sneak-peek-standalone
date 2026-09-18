@@ -17,7 +17,6 @@ fn strip_audio_suffix(s: &str) -> &str {
 struct Ctx {
     format: arc::R<av::AudioFormat>,
     producer: HeapProd<f32>,
-    channels: u32,
     current_sample_rate: Arc<AtomicU32>,
     callback_invocations: Arc<AtomicU64>,
     callback_samples_pushed: Arc<AtomicU64>,
@@ -150,7 +149,6 @@ impl SpeakerInput {
         let mut ctx = Box::new(Ctx {
             format,
             producer,
-            channels,
             current_sample_rate: current_sample_rate.clone(),
             callback_invocations: callback_invocations.clone(),
             callback_samples_pushed: callback_samples_pushed.clone(),

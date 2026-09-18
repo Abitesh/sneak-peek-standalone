@@ -287,7 +287,7 @@ impl SilenceSuppressor {
             let edge = if self.was_speaking { SpeechEdge::None } else { SpeechEdge::Started };
             self.was_speaking = true;
             let action = FrameAction::Send(frame.to_vec());
-            self.maybe_log_summary(now, &action, rms, "send");
+            self.maybe_log_summary(now, rms, "send");
             return (action, edge);
         }
 
@@ -309,7 +309,7 @@ impl SilenceSuppressor {
                     self.state = SuppressionState::Hangover;
                     self.frames_sent += 1;
                     let action = FrameAction::Send(frame.to_vec());
-                    self.maybe_log_summary(now, &action, rms, "hangover");
+                    self.maybe_log_summary(now, rms, "hangover");
                     return (action, SpeechEdge::None);
                 }
             }
@@ -331,12 +331,12 @@ impl SilenceSuppressor {
             self.last_keepalive_time = now;
             self.frames_sent += 1;
             let action = FrameAction::SendSilence;
-            self.maybe_log_summary(now, &action, rms, "keepalive");
+            self.maybe_log_summary(now, rms, "keepalive");
             (action, edge)
         } else {
             self.frames_suppressed += 1;
             let action = FrameAction::Suppress;
-            self.maybe_log_summary(now, &action, rms, "suppress");
+            self.maybe_log_summary(now, rms, "suppress");
             (action, edge)
         }
     }
@@ -391,18 +391,12 @@ impl SilenceSuppressor {
         (self.frames_sent, self.frames_suppressed)
     }
 
-    fn maybe_log_summary(&mut self, now: Instant, action: &FrameAction, rms: f32, action_label: &str) {
+    fn maybe_log_summary(&mut self, now: Instant, rms: f32, action_label: &str) {
         let summary_due = self.frames_processed % 128 == 0
             || now.duration_since(self.last_summary_at) >= Duration::from_secs(3);
         if !summary_due {
             return;
         }
-
-        let action_name = match action {
-            FrameAction::Send(_) => "send",
-            FrameAction::SendSilence => "keepalive",
-            FrameAction::Suppress => "suppress",
-        };
 
         let state_label = match self.state {
             SuppressionState::Active => "active",
@@ -419,7 +413,7 @@ impl SilenceSuppressor {
             rms,
             self.adaptive_threshold,
             state_label,
-            action_name,
+            action_label,
             self.config.use_vad,
         );
         self.last_summary_at = now;
