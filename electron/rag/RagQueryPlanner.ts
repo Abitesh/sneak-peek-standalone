@@ -206,6 +206,20 @@ function selectSources(
  return { sources, sourceReason: 'conversation' };
  }
 
+ // A generic technical question can still be a curated-corpus candidate. The
+ // caller supplies actual corpus availability, so this does not turn ordinary
+ // RAG planning into a blind fan-out across empty stores. The relevance gate
+ // decides whether the selected corpus contains useful evidence.
+ const curatedSources: RagSourceSelection[] = [];
+ if (context.hasPersonalFiles === true) curatedSources.push('personal-files');
+ if (context.hasModeReferenceFiles === true) curatedSources.push('mode-reference');
+ if (curatedSources.length) {
+ return {
+ sources: curatedSources,
+ sourceReason: context.hasPersonalFiles === true ? 'personal' : 'mode',
+ };
+ }
+
  // No reliable source signal: stay conservative rather than fan out across
 // every document family. The caller can still explicitly request sources via
 // RAGSearchOptions.selectedSources, and strong source signals are handled above.

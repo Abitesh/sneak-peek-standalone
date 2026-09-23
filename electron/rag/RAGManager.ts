@@ -972,9 +972,14 @@ if (!isRagEnabled()) return finishSearch({ originalQuery, retrievalQuery: origin
 // Change 10: the same planner now chooses the source families to consult.
 const { modesManager, personalKnowledge } = this.getSourceManagers();
 const activeModeInfo = modesManager?.getActiveModeInfo?.() ?? null;
+const activeModeId = options.modeId ?? activeModeInfo?.id;
+const modeReferenceFiles = activeModeId && modesManager
+? (modesManager.getReferenceFiles(activeModeId) ?? [])
+: [];
+const personalFiles = personalKnowledge?.listFiles?.() ?? [];
 const planningContext: RagQueryPlanningContext = {
-hasModeReferenceFiles: Boolean(modesManager && (options.modeId || activeModeInfo?.id)),
-hasPersonalFiles: Boolean(personalKnowledge),
+hasModeReferenceFiles: modeReferenceFiles.length > 0,
+hasPersonalFiles: personalFiles.length > 0,
 // Meeting retrieval can search globally when no meetingId is supplied, so
 // keep the meeting source available to the planner. The final query's
 // intent still decides whether it is actually selected.

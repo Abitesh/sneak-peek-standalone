@@ -1088,6 +1088,15 @@ export function classifyTurn(input: ClassificationInput): Classification {
   const q = norm(input.resolvedQuestion);
   const { types, claims, clauses } = detectTypes(q, input);
 
+  // A general-knowledge claim normally stays on the fast path. When the turn
+  // actually has curated documents, however, the document corpus is a valid
+  // candidate even though no private claim type owns GENERAL_TECHNICAL. The
+  // relevance gate remains responsible for deciding whether those documents
+  // actually contain useful evidence; this only prevents the fast path from
+  // skipping an available curated corpus entirely.
+  const onlyGeneralClaims = claims.length > 0
+    && claims.every((c) => (CLAIM_AUTHORITY[c]?.authoritative ?? []).length === 0);
+
   // Required sources = union of what the detected claims need, INTERSECTED with
   // what the mode authorizes. A mode never has sources forced into it.
   //
@@ -1105,6 +1114,12 @@ export function classifyTurn(input: ClassificationInput): Classification {
     if (allowedSrcs.length) for (const s of allowedSrcs) wanted.add(s);
     else for (const s of srcs) unreachable.add(s);
   }
+  if (input.hasAttachedDocuments === true
+      && onlyGeneralClaims
+      && input.policy.allowedSourceTypes.includes('REFERENCE_FILE')) {
+    wanted.add('REFERENCE_FILE');
+  }
+
   const requiredSourceTypes = [...wanted];
   // What the question needed but the mode refuses to authorize. Kept separate so
   // "no source required" and "source required but forbidden here" cannot be
@@ -1129,8 +1144,6 @@ export function classifyTurn(input: ClassificationInput): Classification {
   // Name-shaped signals (capitalised tokens, p99-style identifiers) always
   // block the fast path, exactly as before.
   const digitsOnlyEntity = specificEntity && !hasCapsOrIdentifierEntity(input.resolvedQuestion);
-  const onlyGeneralClaims = claims.length > 0
-    && claims.every((c) => (CLAIM_AUTHORITY[c]?.authoritative ?? []).length === 0);
   const entityBlocksFastPath = specificEntity && !(digitsOnlyEntity && onlyGeneralClaims);
 
   const isPurelyGeneral =
@@ -1177,7 +1190,9 @@ export function classifyTurn(input: ClassificationInput): Classification {
     reason = followUp ? 'follow-up may reference grounded content by pronoun' : 'ambiguous question — retrieve conservatively';
   } else {
     path = 'GROUNDED'; shouldRetrieve = true;
-    reason = `requires ${requiredSourceTypes.join(',') || 'authorized sources'}`;
+    reason = input.hasAttachedDocuments === true && onlyGeneralClaims
+      ? 'general-knowledge question has curated documents available; retrieve as a candidate and let relevance gating decide'
+      : `requires ${requiredSourceTypes.join(',') || 'authorized sources'}`;
   }
 
   if (!input.policy.retrievalPolicy.enabled) {
