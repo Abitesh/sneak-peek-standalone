@@ -9,7 +9,7 @@
 // model IS bundled (the shipping case), this proves the dtype/local_files_only
 // load path and the logits→ranking contract end-to-end.
 
-import { test, describe } from 'node:test';
+import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -30,9 +30,17 @@ async function loadReranker() {
 }
 
 describe('LocalReranker — real bundled model', () => {
+  let rerankerForTest = null;
+
+  after(() => {
+    rerankerForTest?.__resetForTests();
+    rerankerForTest = null;
+  });
+
   test('ranks a relevant passage above an irrelevant one', { skip: !MODEL_PRESENT ? 'reranker model not downloaded' : false }, async () => {
     const { getLocalReranker } = await loadReranker();
     const reranker = getLocalReranker();
+    rerankerForTest = reranker;
 
     const available = await reranker.isAvailable();
     assert.equal(available, true, 'bundled reranker should load');
@@ -53,6 +61,7 @@ describe('LocalReranker — real bundled model', () => {
   test('empty inputs return null (no throw)', async () => {
     const { getLocalReranker } = await loadReranker();
     const reranker = getLocalReranker();
+    rerankerForTest = reranker;
     assert.equal(await reranker.rerank('', ['x']), null);
     assert.equal(await reranker.rerank('q', []), null);
   });

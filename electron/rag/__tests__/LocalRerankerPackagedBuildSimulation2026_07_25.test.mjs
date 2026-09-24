@@ -114,10 +114,12 @@ describe('LocalReranker.isCached() resolves true against a SIMULATED packaged-bu
     const origResourcesPath = process.resourcesPath;
     Object.defineProperty(process, 'resourcesPath', { value: simulatedResourcesPath, configurable: true });
 
+    let reranker = null;
+
     try {
       const rerankerPath = path.resolve(repoRoot, 'dist-electron/electron/rag/LocalReranker.js');
       const { getLocalReranker } = await import(`${pathToFileURL(rerankerPath).href}?t=${Date.now()}`);
-      const reranker = getLocalReranker();
+      reranker = getLocalReranker();
 
       const cached = await reranker.isCached();
       assert.equal(cached, true, 'isCached() must resolve true against the simulated packaged resourcesPath layout — this is the direct regression check for the audit\'s "unbundled in packaged production" finding');
@@ -132,6 +134,7 @@ describe('LocalReranker.isCached() resolves true against a SIMULATED packaged-bu
       assert.ok(Array.isArray(results) && results.length === 2, 'rerank() must actually run end-to-end against the packaged-layout model, not no-op');
       assert.equal(results[0].index, 1, 'the relevant passage must rank first — proves real inference, not a stub');
     } finally {
+      reranker?.__resetForTests();
       Module._load = origLoad;
       Object.defineProperty(process, 'resourcesPath', { value: origResourcesPath, configurable: true });
       fs.rmSync(simulatedResourcesPath, { recursive: true, force: true });
