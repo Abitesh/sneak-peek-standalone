@@ -949,9 +949,9 @@ metadata: {
 });
 }
 // Change 28: search() is the universal retrieval engine.
-// Query → RagQueryPlanner (prep + sources) → per-source adapters /
-// CanonicalRagReadService (vector + FTS) → dedupeRagSearchResults →
-// shared BGE rerank → relevance gate → RagSearchResult[].
+// Query →RagQueryPlanner (prep + sources) \u8594  per-source adapters /
+// CanonicalRagReadService (vector + FTS) →dedupeRagSearchResults \u8594
+// shared BGE rerank →relevance gate \u8594  RagSearchResult[].
 // Adapters stay specialized. Cross-source fusion is concat + union-by-chunk-id.
 // Canonical FTS+vector RRF is CanonicalRagReadService + ragRrfFusion (default off).
 async search(query: string, options: RAGSearchOptions = {}): Promise<RAGRetrievalResponse> {
@@ -1521,13 +1521,24 @@ return this.queryPlanner.plan(String(query ?? '').trim(), sessionId, context);
  * Memory is not loaded here — Hindsight is not document RAG.
  */
 async buildContext(query: string, options: RAGSearchOptions = {}): Promise<RAGRetrievalResponse> {
-  const response = await this.search(query, options);
-  if (!response.pack) return response;
+  return this.search(query, options);
+}
+/**
+ * Render a prompt explicitly from an already-completed RAG retrieval response.
+ *
+ * This is a compatibility boundary for callers that still need the legacy
+ * prompt representation. It never performs retrieval, so the architecture
+ * remains one retrieval -> multiple representations.
+ */
+buildPromptFromRagResponse(
+  response: RAGRetrievalResponse,
+  options: Pick<RAGSearchOptions, 'sessionId' | 'conversation'> = {},
+): string | undefined {
+  if (!response.pack) return undefined;
   const conversation = isRagConversationAwareEnabled()
     ? this.getConversationForRetrieval(options.sessionId, options.conversation)
     : undefined;
-  const { prompt } = buildRagContext({ pack: response.pack, conversation });
-  return { ...response, prompt };
+  return buildRagContext({ pack: response.pack, conversation }).prompt;
 }
 /**
 * Alias for callers that use retrieval terminology. Kept intentionally thin so
@@ -1857,7 +1868,7 @@ throw new Error('LLM helper not initialized');
 }
 // Change 27: retrieval stays MiniLM-local in private modes; answers go through
 // the selected provider. streamChatWithOutcome honors isLocalOnlyMode (full-local
-// → Ollama/local) and the user's cloud default (local-retrieval hybrid).
+// →Ollama/local) and the user's cloud default (local-retrieval hybrid).
 const { stream, outcome } = this.llmHelper.streamChatWithOutcome(
 prompt,
 undefined,
@@ -1909,7 +1920,7 @@ await this.embeddingPipeline.processQueue();
 isMeetingProcessed(meetingId: string): boolean {
 return this.vectorStore.hasEmbeddings(meetingId);
 }
-//  JIT RAG: Live Meeting Indexing 
+//  JIT RAG: Live Meeting Indexing
 /**
 * Start JIT indexing for a live meeting.
 * Call when a meeting session begins.
