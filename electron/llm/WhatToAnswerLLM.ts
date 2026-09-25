@@ -9,6 +9,7 @@ import { IntentResult } from "./IntentClassifier";
 import { ScreenContext } from "../services/screen/ScreenContextService";
 import { PromptAssembler, escapeUserContent, INJECTION_REDACTION_MESSAGE, TRUNCATION_SUFFIX } from "../services/context/PromptAssembler";
 import { isIntelligenceFlagEnabled } from "../intelligence/intelligenceFlags";
+import { renderManualContext, type ManualRenderContext } from "../rag/ManualRenderContext";
 import { fuseContext, toPromptContextContract } from "../intelligence/ContextFusionEngine";
 import { assemblePromptV2 } from "../intelligence/PromptAssemblerV2";
 import { beginTrace, commitTrace } from "../intelligence/IntelligenceTrace";
@@ -107,6 +108,7 @@ type RAGManagerLike = {
         status?: string;
         prompt?: string;
         pack?: { items?: readonly unknown[] };
+        manualContext?: ManualRenderContext;
     }>;
 };
 
@@ -599,13 +601,16 @@ The user triggered this action with a coding problem on screen and NO new questi
                                             followUpReferentHint: retrievalOptions?.followUpReferentHint,
                                         }),
                                         forceDocumentGrounding ? HYBRID_RETRIEVAL_BUDGET_DOC_GROUNDED_MS : HYBRID_RETRIEVAL_BUDGET_MS,
-                                        { status: 'no_relevant_evidence', prompt: '', pack: { items: [] } },
+                                        { status: 'no_relevant_evidence', prompt: '', pack: { items: [] }, manualContext: { items: [] } },
                                     );
                                     if (timedOut) {
                                         console.warn(`[WhatToAnswerLLM] universal Mode RAG exceeded ${forceDocumentGrounding ? HYBRID_RETRIEVAL_BUDGET_DOC_GROUNDED_MS : HYBRID_RETRIEVAL_BUDGET_MS}ms — using legacy compatibility fallback`);
-                                    } else if (ragResponse?.status === 'ok' && ragResponse.pack?.items?.length && ragResponse.prompt) {
-                                        modeContextBlock = ragResponse.prompt;
-                                        universalModeRetrieved = true;
+                                    } else if (ragResponse?.status === 'ok' && ragResponse.manualContext?.items?.length) {
+                                        // Change 47Q: consume the exact final universal result set through
+                                        // the renderer-facing contract. No second retrieval and no legacy
+                                        // formatter call are involved on a successful universal result.
+                                        modeContextBlock = renderManualContext(ragResponse.manualContext);
+                                        universalModeRetrieved = Boolean(modeContextBlock);
                                     }
                                 } catch (universalErr: any) {
                                     console.warn('[WhatToAnswerLLM] universal Mode RAG failed — using legacy compatibility fallback:', universalErr?.message ?? universalErr);

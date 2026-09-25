@@ -26,6 +26,7 @@ import type { AnswerType } from '../llm/AnswerPlanner';
 import { toRagEvidenceItems, toRagSearchResponse } from './buildRagEvidencePack';
 import { recordRagSearch } from './RagDiagnostics';
 import { buildRagContext } from './RagContextBuilder';
+import { toManualRenderContext, type ManualRenderContext } from './ManualRenderContext';
 import { evaluateRagRelevanceGate } from './RagRelevanceGate';
 import type { EvidencePack } from '../intelligence/context-os/evidencePack';
 import type { EvidenceScope, SourceType } from '../context-intelligence/contracts/types';
@@ -260,6 +261,8 @@ export interface RAGRetrievalResponse extends RagRetrieverResponse<RagSearchResu
   retrievalQuery?: string;
   pack?: EvidencePack;
   prompt?: string;
+  /** Change 47Q: selected universal results for manual prompt rendering. */
+  manualContext?: ManualRenderContext;
 }
 export interface RAGManagerConfig {
 db: Database.Database;
@@ -958,10 +961,11 @@ const finishSearch = (
   input: Parameters<typeof toRagSearchResponse>[0],
   extra: { skipped?: boolean; sources?: readonly string[] } = {},
 ): RAGRetrievalResponse => {
-  const response = toRagSearchResponse(input);
+  const response: RAGRetrievalResponse = toRagSearchResponse(input);
+  response.manualContext = toManualRenderContext(response.results);
   recordRagSearch({
-    originalQuery: response.originalQuery,
-    retrievalQuery: response.retrievalQuery,
+    originalQuery: response.originalQuery ?? originalQuery,
+    retrievalQuery: response.retrievalQuery ?? originalQuery,
     status: response.status,
     results: response.results,
     confidence: response.confidence,
