@@ -260,7 +260,6 @@ export interface RAGRetrievalResponse extends RagRetrieverResponse<RagSearchResu
   originalQuery?: string;
   retrievalQuery?: string;
   pack?: EvidencePack;
-  prompt?: string;
   /** Change 47Q: selected universal results for manual prompt rendering. */
   manualContext?: ManualRenderContext;
 }

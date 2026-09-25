@@ -52,6 +52,14 @@ test('document evidence stays ahead of memory; memory cannot become <evidence>',
 
 test('RAGManager.buildContext uses search and does not pull Hindsight into document RAG', () => {
   const src = read('electron/rag/RAGManager.ts');
+  const wta = read('electron/llm/WhatToAnswerLLM.ts');
+
+  assert.doesNotMatch(src, /prompt\?:\s*string/);
+  assert.doesNotMatch(wta, /prompt\?:\s*string/);
+  assert.doesNotMatch(
+    wta,
+    /status:\s*'no_relevant_evidence'[\s\S]{0,140}prompt:\s*''/,
+  );
 
   // buildContext must contain retrieval only. Stop exactly at the compatibility
   // prompt helper so its legitimate buildRagContext() call is not included.

@@ -106,7 +106,6 @@ type RAGManagerLike = {
     }>;
     buildContext: (query: string, options?: Record<string, unknown>) => Promise<{
         status?: string;
-        prompt?: string;
         pack?: { items?: readonly unknown[] };
         manualContext?: ManualRenderContext;
     }>;
@@ -601,7 +600,7 @@ The user triggered this action with a coding problem on screen and NO new questi
                                             followUpReferentHint: retrievalOptions?.followUpReferentHint,
                                         }),
                                         forceDocumentGrounding ? HYBRID_RETRIEVAL_BUDGET_DOC_GROUNDED_MS : HYBRID_RETRIEVAL_BUDGET_MS,
-                                        { status: 'no_relevant_evidence', prompt: '', pack: { items: [] }, manualContext: { items: [] } },
+                                        { status: 'no_relevant_evidence', pack: { items: [] }, manualContext: { items: [] } },
                                     );
                                     if (timedOut) {
                                         console.warn(`[WhatToAnswerLLM] universal Mode RAG exceeded ${forceDocumentGrounding ? HYBRID_RETRIEVAL_BUDGET_DOC_GROUNDED_MS : HYBRID_RETRIEVAL_BUDGET_MS}ms — using legacy compatibility fallback`);
