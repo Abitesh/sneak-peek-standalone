@@ -63,6 +63,11 @@ export class IntelligenceManager extends EventEmitter {
         this.engine.setRagRetrieverProvider(provider);
     }
 
+    /** Give WTA lazy access to the full unified RAGManager without changing the existing retriever provider. */
+    setRagManagerProvider(provider: (() => unknown) | null): void {
+        this.engine.setRagManagerProvider(provider);
+    }
+
     /**
      * Forward all events from IntelligenceEngine through this facade
      * so existing listeners on IntelligenceManager continue to work.

@@ -2575,6 +2575,9 @@ export class AppState {
  this.intelligenceManager?.setRagRetrieverProvider?.(
  () => this.ragManager?.getRetriever() ?? null,
  );
+ this.intelligenceManager?.setRagManagerProvider?.(
+ () => this.ragManager ?? null,
+ );
  } catch (e) { console.warn('[AppState] V3 meeting retriever wiring skipped:', e); }
 
  console.log('[AppState] RAGManager initialized');

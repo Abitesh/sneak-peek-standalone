@@ -93,6 +93,15 @@ type ModesManagerType = {
     };
 };
 
+/** Minimal RAGManager surface injected by IntelligenceManager. */
+type RAGManagerLike = {
+    buildContext: (query: string, options?: Record<string, unknown>) => Promise<{
+        status?: string;
+        prompt?: string;
+        pack?: { items?: readonly unknown[] };
+    }>;
+};
+
 // SCREEN VISION (rewritten 2026-08-18 after a live repro).
 //
 // The previous text ended the coding clause with "give a concise SPOKEN answer
@@ -134,10 +143,16 @@ export const SCREEN_DOM_INSTRUCTION = SCREEN_DIRECT_VISION_INSTRUCTION
 export class WhatToAnswerLLM {
     private llmHelper: LLMHelper;
     private modesManager?: ReturnType<ModesManagerType['getInstance']>;
+    private ragManagerProvider?: () => RAGManagerLike | null;
 
     constructor(llmHelper: LLMHelper, modesManager?: ReturnType<ModesManagerType['getInstance']>) {
         this.llmHelper = llmHelper;
         this.modesManager = modesManager;
+    }
+
+    /** Injected once the application RAG stack is initialized. */
+    setRagManagerProvider(provider: (() => RAGManagerLike | null) | null): void {
+        this.ragManagerProvider = provider ?? undefined;
     }
 
     private getModesManager(): ReturnType<ModesManagerType['getInstance']> {
@@ -546,36 +561,63 @@ The user triggered this action with a coding problem on screen and NO new questi
                             if (timedOut) {
                                 console.warn(`[WhatToAnswerLLM] prefetched mode retrieval exceeded ${HYBRID_RETRIEVAL_BUDGET_MS}ms — using lexical fallback`);
                             }
-                        } else if (typeof modesManager.buildRetrievedActiveModeContextBlockHybrid === 'function') {
-                            // Cap the hybrid (embedding) retrieval so a cold/slow
-                            // embedder can't stall first-token for up to 30s. On
-                            // timeout we fall through to the synchronous lexical
-                            // retriever below, which needs no embedding round-trip.
-                            // pinnedModeId (#6): retrieve from the SAME mode the
-                            // answer was planned from, not a mid-request switch.
-                            // Phase 3: allowRerank on the live inline path only when
-                            // ragSpeculativeRerank is on — prewarmed + inside this same
-                            // budget race, so an overrun just falls through to lexical.
-                            let allowRerank = false;
-                            try {
-                                // eslint-disable-next-line @typescript-eslint/no-var-requires
-                                const { isRagSpeculativeRerankEnabled } = require('../intelligence/intelligenceFlags');
-                                allowRerank = isRagSpeculativeRerankEnabled();
-                            } catch { /* flag module unavailable → no rerank */ }
-                            // Pass undefined tokenBudget when doc-grounded so the
-                            // retriever auto-upgrades to DOC_GROUNDED_TOKEN_BUDGET
-                            // (3600). Explicit 1800 would bypass the != null guard.
+                        } else {
+                            // Change 47F: universal RAG is primary; legacy Mode retrieval
+                            // remains only as a compatibility fallback.
                             const retrievalQuery = retrievalQueryDecision.query;
-                            const { value, timedOut } = await raceWithBudget(
-                                modesManager.buildRetrievedActiveModeContextBlockHybrid(
-                                    retrievalQuery, cleanedTranscript, forceDocumentGrounding ? undefined : 1800, answerPlan?.answerType, true, requestSnapshot?.modeUniqueId, allowRerank, retrievalOptions,
-                                ),
-                                forceDocumentGrounding ? HYBRID_RETRIEVAL_BUDGET_DOC_GROUNDED_MS : HYBRID_RETRIEVAL_BUDGET_MS,
-                                '',
-                            );
-                            modeContextBlock = value;
-                            if (timedOut) {
-                                console.warn(`[WhatToAnswerLLM] hybrid retrieval exceeded ${HYBRID_RETRIEVAL_BUDGET_MS}ms — using lexical fallback`);
+                            let universalModeRetrieved = false;
+                            const ragManager = this.ragManagerProvider?.();
+                            if (ragManager) {
+                                try {
+                                    let allowRerank = false;
+                                    try {
+                                        const { isRagSpeculativeRerankEnabled } = require('../intelligence/intelligenceFlags');
+                                        allowRerank = isRagSpeculativeRerankEnabled();
+                                    } catch { /* flag unavailable → no rerank */ }
+                                    const { value: ragResponse, timedOut } = await raceWithBudget(
+                                        ragManager.buildContext(retrievalQuery, {
+                                            selectedSources: ['mode-reference'],
+                                            allowedSources: ['mode-reference'],
+                                            modeId: requestSnapshot?.modeUniqueId,
+                                            topK: forceDocumentGrounding ? 12 : 20,
+                                            candidatePoolSize: forceDocumentGrounding ? 48 : 50,
+                                            tokenBudget: forceDocumentGrounding ? 3600 : 1800,
+                                            allowRerank,
+                                            forceDocumentGrounding,
+                                            answerType: answerPlan?.answerType,
+                                            excludeCustomContext: true,
+                                            followUpReferentHint: retrievalOptions?.followUpReferentHint,
+                                        }),
+                                        forceDocumentGrounding ? HYBRID_RETRIEVAL_BUDGET_DOC_GROUNDED_MS : HYBRID_RETRIEVAL_BUDGET_MS,
+                                        { status: 'no_relevant_evidence', prompt: '', pack: { items: [] } },
+                                    );
+                                    if (timedOut) {
+                                        console.warn(`[WhatToAnswerLLM] universal Mode RAG exceeded ${forceDocumentGrounding ? HYBRID_RETRIEVAL_BUDGET_DOC_GROUNDED_MS : HYBRID_RETRIEVAL_BUDGET_MS}ms — using legacy compatibility fallback`);
+                                    } else if (ragResponse?.status === 'ok' && ragResponse.pack?.items?.length && ragResponse.prompt) {
+                                        modeContextBlock = ragResponse.prompt;
+                                        universalModeRetrieved = true;
+                                    }
+                                } catch (universalErr: any) {
+                                    console.warn('[WhatToAnswerLLM] universal Mode RAG failed — using legacy compatibility fallback:', universalErr?.message ?? universalErr);
+                                }
+                            }
+                            if (!universalModeRetrieved && typeof modesManager.buildRetrievedActiveModeContextBlockHybrid === 'function') {
+                                let allowRerank = false;
+                                try {
+                                    const { isRagSpeculativeRerankEnabled } = require('../intelligence/intelligenceFlags');
+                                    allowRerank = isRagSpeculativeRerankEnabled();
+                                } catch { /* flag unavailable → no rerank */ }
+                                const { value, timedOut } = await raceWithBudget(
+                                    modesManager.buildRetrievedActiveModeContextBlockHybrid(
+                                        retrievalQuery, cleanedTranscript, forceDocumentGrounding ? undefined : 1800, answerPlan?.answerType, true, requestSnapshot?.modeUniqueId, allowRerank, retrievalOptions,
+                                    ),
+                                    forceDocumentGrounding ? HYBRID_RETRIEVAL_BUDGET_DOC_GROUNDED_MS : HYBRID_RETRIEVAL_BUDGET_MS,
+                                    '',
+                                );
+                                modeContextBlock = value;
+                                if (timedOut) {
+                                    console.warn(`[WhatToAnswerLLM] legacy Mode retrieval fallback exceeded ${forceDocumentGrounding ? HYBRID_RETRIEVAL_BUDGET_DOC_GROUNDED_MS : HYBRID_RETRIEVAL_BUDGET_MS}ms`);
+                                }
                             }
                         }
                         if (!modeContextBlock) {

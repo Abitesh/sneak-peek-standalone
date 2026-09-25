@@ -229,6 +229,7 @@ export class IntelligenceEngine extends EventEmitter {
      * RAG import — it only calls what it is handed.
      */
     private ragRetrieverProvider: (() => unknown) | null = null;
+    private ragManagerProvider: (() => unknown) | null = null;
 
     private lastTranscriptTime: number = 0;
     private lastTriggerTime: number = 0;
@@ -534,6 +535,7 @@ export class IntelligenceEngine extends EventEmitter {
         this.recapLLM = new RecapLLM(this.llmHelper);
         this.followUpQuestionsLLM = new FollowUpQuestionsLLM(this.llmHelper);
         this.whatToAnswerLLM = new WhatToAnswerLLM(this.llmHelper);
+        this.whatToAnswerLLM.setRagManagerProvider?.(this.ragManagerProvider as (() => any) | null);
         this.codeHintLLM = new CodeHintLLM(this.llmHelper);
         this.brainstormLLM = new BrainstormLLM(this.llmHelper);
 
@@ -5212,6 +5214,12 @@ export class IntelligenceEngine extends EventEmitter {
     /** Injected by IntelligenceManager once the RAG stack is up. */
     setRagRetrieverProvider(provider: (() => unknown) | null): void {
         this.ragRetrieverProvider = provider;
+    }
+
+    /** Injected by IntelligenceManager once the unified RAG stack is initialized. */
+    setRagManagerProvider(provider: (() => unknown) | null): void {
+        this.ragManagerProvider = provider;
+        this.whatToAnswerLLM?.setRagManagerProvider?.(provider as (() => any) | null);
     }
 
     // ── CONTEXT INTELLIGENCE V3 — shared adoption plumbing (Phase 6) ─────────
