@@ -15,12 +15,22 @@ interface ModesManagerLike {
       tokenBudget?: number;
       allowRerank?: boolean;
       forceDocumentGrounding?: boolean;
+      answerType?: import('../../llm/AnswerPlanner').AnswerType;
+      excludeCustomContext?: boolean;
+      followUpReferentHint?: string;
       canonicalShadowAlreadyHandled?: boolean;
     },
   ): Promise<any>;
 }
 
-/** Thin adapter around ModesManager's existing ModeHybridRetriever-backed path. */
+/**
+ * Thin adapter around ModesManager's existing ModeHybridRetriever-backed path.
+ *
+ * Change 47C:
+ * The universal RAG request now carries the existing Mode retrieval semantics
+ * into the existing RetrieveOptions boundary. Mode-specific retrieval remains
+ * owned by ModeContextRetriever/ModeHybridRetriever.
+ */
 export class ModeRagAdapter implements RagSourceAdapter {
   async retrieve(context: RagSourceAdapterContext): Promise<RagSearchResult[]> {
     const modesManager = this.getModesManager();
@@ -39,10 +49,25 @@ export class ModeRagAdapter implements RagSourceAdapter {
       query,
       topK: candidatePoolSize,
       tokenBudget,
+
+      // Keep Mode-local reranker behavior unchanged. Universal Change 33
+      // reranking remains the downstream RAGManager responsibility.
       allowRerank: false,
+
+      ...(options.answerType !== undefined
+        ? { answerType: options.answerType }
+        : {}),
+      ...(options.excludeCustomContext !== undefined
+        ? { excludeCustomContext: options.excludeCustomContext }
+        : {}),
+      ...(options.followUpReferentHint !== undefined
+        ? { followUpReferentHint: options.followUpReferentHint }
+        : {}),
       ...(options.forceDocumentGrounding !== undefined
         ? { forceDocumentGrounding: options.forceDocumentGrounding }
         : {}),
+
+      // The unified boundary has already handled canonical shadow observation.
       canonicalShadowAlreadyHandled: true,
     });
 

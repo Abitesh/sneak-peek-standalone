@@ -22,6 +22,7 @@ import { CanonicalRagComparisonService } from './canonical/CanonicalRagCompariso
 import type { RagRetrievalComparisonCandidate, RagRetrievalComparisonSourceType } from './canonical/CanonicalRagComparisonTypes';
 import { ConversationMemoryService } from '../intelligence/ConversationMemoryService';
 import type { RAGConversationTurn } from './RAGRetriever';
+import type { AnswerType } from '../llm/AnswerPlanner';
 import { toRagEvidenceItems, toRagSearchResponse } from './buildRagEvidencePack';
 import { recordRagSearch } from './RagDiagnostics';
 import { buildRagContext } from './RagContextBuilder';
@@ -164,6 +165,12 @@ rerankCandidatePoolSize?: number;
 tokenBudget?: number;
 allowRerank?: boolean;
 forceDocumentGrounding?: boolean;
+/** Existing Mode answer classification forwarded through ModeRagAdapter. */
+answerType?: AnswerType;
+/** Existing Mode custom-context suppression forwarded through ModeRagAdapter. */
+excludeCustomContext?: boolean;
+/** Existing Mode follow-up referent hint forwarded through ModeRagAdapter. */
+followUpReferentHint?: string;
 }
 /**
 * A bare `for await` over an LLM stream blocks forever if the provider hangs
