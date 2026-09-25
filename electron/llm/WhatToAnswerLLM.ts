@@ -95,6 +95,14 @@ type ModesManagerType = {
 
 /** Minimal RAGManager surface injected by IntelligenceManager. */
 type RAGManagerLike = {
+    search: (query: string, options?: Record<string, unknown>) => Promise<{
+        status: 'ok' | 'no_relevant_evidence';
+        results: any[];
+        confidence: number;
+        originalQuery?: string;
+        retrievalQuery?: string;
+        pack?: import('../intelligence/context-os').EvidencePack;
+    }>;
     buildContext: (query: string, options?: Record<string, unknown>) => Promise<{
         status?: string;
         prompt?: string;
@@ -517,10 +525,12 @@ The user triggered this action with a coding problem on screen and NO new questi
                             const { classifyQuestion } = require('../services/knowledge/QuestionClassifier');
                             const { queryOkfCards } = require('../services/knowledge/OkfRetriever');
                             const { KnowledgeManager } = require('../services/knowledge/KnowledgeManager');
+                            const ragManager = this.ragManagerProvider?.();
                             const resolver = new EvidenceResolver({
                                 getModeSnapshot: () => activeMode,
                                 getReferenceFiles: (modeId: string) => modesManager.getReferenceFiles!(modeId),
                                 hybridRetriever: { retrieveHybrid: (mode: any, files: any, options: any) => modesManager.retrieveHybridRaw!(mode, files, options) },
+                                unifiedRag: ragManager ?? undefined,
                                 knowledgeManager: { getPackForFile: (fileId: string) => KnowledgeManager.getInstance().getPackForFile(fileId) },
                                 classifyQuestion,
                                 queryOkfCards,
