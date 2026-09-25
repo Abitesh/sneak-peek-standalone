@@ -3494,6 +3494,8 @@ question: message,
 sourceContract: _tc,
 activeMode: { modeId: activeModeRow.id, modeUniqueId: activeModeRow.id },
 requestedProperty: _tc.requestedProperty,
+answerType: answerPlan.answerType,
+excludeCustomContext: true,
 transcript: context,
 });
 return resolution.pack;

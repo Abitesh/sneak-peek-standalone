@@ -2716,6 +2716,8 @@ export class IntelligenceEngine extends EventEmitter {
                                 activeMode: { modeId: snapshotMode.id, modeUniqueId: snapshotMode.id },
                                 requestedProperty: wtaTurnContract!.requestedProperty,
                                 transcript: preparedTranscript,
+                                answerType: answerPlan.answerType,
+                                excludeCustomContext: true,
                             })).pack;
                         }
                         : undefined;

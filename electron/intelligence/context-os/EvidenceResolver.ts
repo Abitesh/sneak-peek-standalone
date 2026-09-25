@@ -51,6 +51,7 @@ import type { EvidenceItem, EvidencePack, RejectedEvidenceItem } from './evidenc
 import { textCanProveProperty } from './requestedProperty';
 import { buildStableRagCitation } from '../../rag/RagCitation';
 import type { RAGSearchOptions, RagSearchResult } from '../../rag/RAGManager';
+import type { AnswerType } from '../../llm/AnswerPlanner';
 import { evaluateRagRelevanceGate } from '../../rag/RagRelevanceGate';
 // Type-only (erased at runtime). The DI ports below described a structural
 // SUBSET of the pack, but what actually flows through them at runtime is a
@@ -109,6 +110,10 @@ activeMode: EvidenceResolverModeSnapshot;
 requestedProperty: RequestedProperty;
 /** Rolling transcript snapshot, when the contract permits transcript as a peer source. */
 transcript?: string;
+/** Answer-planning contract used by Mode retrieval to scope custom context. */
+answerType?: AnswerType;
+/** When true, customContext is already pinned elsewhere and must not be retrieved again. */
+excludeCustomContext?: boolean;
 /** Round-7 Failure-2 parity: prior assistant answer text, used ONLY to expand
 * the retrieval query for anaphoric follow-ups — never shown to the model. */
 followUpReferentHint?: string;
@@ -140,6 +145,8 @@ tokenBudget?: number;
 topK?: number;
 allowRerank?: boolean;
 forceDocumentGrounding?: boolean;
+answerType?: AnswerType;
+excludeCustomContext?: boolean;
 followUpReferentHint?: string;
 },
 ): Promise<{
@@ -575,7 +582,7 @@ request: EvidenceResolutionRequest,
 mode: { id: string; templateType: string; customContext: string },
 files: ReferenceFileLike[],
 ): Promise<EvidenceResolutionResult> {
-const { question, turnId, requestedProperty, transcript, followUpReferentHint, relaxed } = request;
+const { question, turnId, requestedProperty, transcript, answerType, excludeCustomContext, followUpReferentHint, relaxed } = request;
 let result: Awaited<ReturnType<HybridRetrieverLike['retrieveHybrid']>>;
 let hybridQueries: { originalQuery?: string; retrievalQuery?: string } | undefined;
 const h4StageTrace = process.env.NATIVELY_E2E === '1'
@@ -595,6 +602,9 @@ candidatePoolSize: relaxed ? 48 : 24,
 tokenBudget: relaxed ? 5200 : undefined,
 allowRerank: isRagLocalRerankEnabled() && isRagSpeculativeRerankEnabled(),
 forceDocumentGrounding: true,
+answerType,
+excludeCustomContext,
+followUpReferentHint,
 });
 hybridQueries = response;
 result = {
@@ -628,6 +638,8 @@ tokenBudget: relaxed ? 5200 : undefined,
 topK: relaxed ? 24 : undefined,
 allowRerank: isRagLocalRerankEnabled() && isRagSpeculativeRerankEnabled(),
 forceDocumentGrounding: true,
+answerType,
+excludeCustomContext,
 followUpReferentHint,
 });
 }

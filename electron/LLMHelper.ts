@@ -6285,6 +6285,8 @@ let isMultimodal = !!(imagePaths?.length);
                 activeMode: { modeId: activeModeRow.id, modeUniqueId: activeModeRow.id },
                 requestedProperty: _cogEarly.contract.requestedProperty,
                 transcript: context,
+                answerType: modeAnswerType(routeOptions),
+                excludeCustomContext: true,
                 followUpReferentHint: routeOptions?.followUpReferentHint,
               });
               (_cogEarly as any).evidencePack = resolution.pack;

@@ -520,6 +520,8 @@ The user triggered this action with a coding problem on screen and NO new questi
                                 activeMode: { modeId: activeMode.id, modeUniqueId: activeMode.id },
                                 requestedProperty: _cog!.contract.requestedProperty,
                                 transcript: transcriptIsEvidence ? cleanedTranscript : undefined,
+                                answerType: answerPlan?.answerType,
+                                excludeCustomContext: true,
                                 followUpReferentHint: transcriptIsReferentOnly
                                     ? temporalContext?.previousResponses?.slice(-1)?.[0]
                                     : undefined,
