@@ -23,13 +23,16 @@
 //      evidencePack is the SAME OBJECT (identity, not deep-equal) the
 //      resolver returned — nothing downstream silently reconstructs a second,
 //      divergent pack for the same turn.
-//   4. When Context-OS does NOT govern the turn (flag off), the legacy
-//      retrieval path DOES run and EvidenceResolver.resolve() is never
-//      called — proving the un-governed case is unaffected.
+//   4. When Context-OS does NOT govern the turn, EvidenceResolver.resolve()
+//      is never called and the old application-level mode-injection retrieval
+//      seam is never called — proving retrieval ownership stays outside this
+//      resolver-specific path after Universal RAG convergence.
 //
 // Any regression that deletes the wiring (like a524329 did) makes assertions
-// 1-3 fail immediately: the resolver spy count drops to 0, the legacy-path
-// spy fires instead, and evidencePack stays the pre-seeded `null`.
+// 1-3 fail immediately: the resolver spy count drops to 0, the governed
+// retrieval path can fall back incorrectly, and evidencePack stays the
+// pre-seeded `null`. Universal RAG ownership is guarded separately by the
+// Change-50/50B retrieval-boundary tests.
 //
 // Requires: npm run build:electron (uses an ISOLATED per-file tsc tree, same
 // pattern as electron/services/__tests__/LLMHelperNegotiationCoachingGate.test.mjs,
@@ -417,7 +420,7 @@ describe('evidence-execution-repair: EvidenceResolver wiring identity (a524329 r
     assert.equal(resolveArgsSeen.question, 'What compute controller does the system use?');
   });
 
-  test('un-governed turn (no contextOsGeneration): legacy retrieval DOES run, EvidenceResolver is NEVER called', async () => {
+  test('un-governed turn (no contextOsGeneration): EvidenceResolver is NEVER called and legacy mode-injection retrieval is not called', async () => {
     resolveCalls = 0;
     resolveArgsSeen = null;
     throwOnResolve = false;
@@ -441,14 +444,14 @@ describe('evidence-execution-repair: EvidenceResolver wiring identity (a524329 r
     ));
 
     assert.equal(resolveCalls, 0, 'EvidenceResolver must NOT be called when the turn is not Context-OS-governed');
-    assert.ok(hybridLegacyCalls + lexicalLegacyCalls > 0, 'legacy retrieval (hybrid or lexical) must run for an un-governed doc-grounded turn');
+    assert.equal(hybridLegacyCalls + lexicalLegacyCalls, 0, 'legacy mode-injection retrieval must not run for an un-governed turn; Universal RAG owns application retrieval');
 
     const dispatched = calls.find(c => c.via === 'executeCustomProvider');
     assert.ok(dispatched, 'executeCustomProvider must be reached');
     assert.doesNotMatch(dispatched.userContent, /<evidence_pack/, 'the typed evidence pack must NOT govern an un-governed turn');
   });
 
-  test('un-governed turn (govern: false): legacy retrieval DOES run, EvidenceResolver is NEVER called', async () => {
+  test('un-governed turn (govern: false): EvidenceResolver is NEVER called and legacy mode-injection retrieval is not called', async () => {
     resolveCalls = 0;
     resolveArgsSeen = null;
     throwOnResolve = false;
@@ -481,7 +484,7 @@ describe('evidence-execution-repair: EvidenceResolver wiring identity (a524329 r
     ));
 
     assert.equal(resolveCalls, 0, 'EvidenceResolver must NOT be called when govern is false');
-    assert.ok(hybridLegacyCalls + lexicalLegacyCalls > 0, 'legacy retrieval must run when govern is false');
+    assert.equal(hybridLegacyCalls + lexicalLegacyCalls, 0, 'legacy mode-injection retrieval must not run when govern is false; Universal RAG owns application retrieval');
     assert.equal(cogCtx.evidencePack, null, 'evidencePack must remain untouched (null) when govern is false');
   });
 

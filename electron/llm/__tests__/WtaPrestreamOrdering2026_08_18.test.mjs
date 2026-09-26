@@ -21,8 +21,8 @@
 // unchanged and still enforced there.
 //
 // Source-level pins (same convention as WtaParallelPrestream.test.mjs):
-// these fail if the kicks are moved back above extraction or the query
-// reverts to the transcript blob.
+// these fail if the kicks are moved back above extraction, the query reverts
+// to the transcript blob, or the prefetch bypasses the Universal RAG boundary.
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
@@ -67,14 +67,22 @@ describe('F5/F6/F7: pre-stream kicks run on the RESOLVED question, after extract
     const q = engineSrc.indexOf('const wtaPrefetchQuery =');
     assert.ok(q > resolutionDone && q < kickMode, 'query is derived after resolution, before the kick');
     assert.match(engineSrc,
-      /buildRetrievedActiveModeContextBlockHybrid\(\s*wtaPrefetchQuery,\s*preparedTranscript,/,
-      'query slot = resolved question; transcript slot = prepared window');
+      /this\.retrieveUniversalModeContext\(\s*wtaPrefetchQuery,\s*snapshotModeInfo\?\.id,\s*\{/,
+      'prefetch must enter the Universal RAG boundary with the resolved question and pinned mode');
+    const modeKickBlock = engineSrc.slice(kickMode, kickMode + 1200);
+    assert.doesNotMatch(modeKickBlock, /buildRetrievedActiveModeContextBlock(?:Hybrid)?\(/,
+      'prefetch must not call the legacy application-level mode retrieval API');
   });
 
   test('F5: the prefetch passes a provisional answerType instead of undefined', () => {
     assert.match(engineSrc, /const wtaPrefetchAnswerType/);
-    assert.match(engineSrc,
-      /buildRetrievedActiveModeContextBlockHybrid\(\s*wtaPrefetchQuery,\s*preparedTranscript,\s*1800,\s*wtaPrefetchAnswerType,/);
+    const modeKickBlock = engineSrc.slice(kickMode, kickMode + 1200);
+    assert.match(modeKickBlock,
+      /answerType:\s*wtaPrefetchAnswerType,/,
+      'the Universal RAG prefetch must receive the provisional answerType');
+    assert.match(modeKickBlock,
+      /tokenBudget:\s*1800,/,
+      'the Universal RAG prefetch must preserve the 1800-token retrieval budget');
   });
 
   test('F7: the kicks sit AFTER the long-range recall prepend, so retrieval sees recalled context', () => {

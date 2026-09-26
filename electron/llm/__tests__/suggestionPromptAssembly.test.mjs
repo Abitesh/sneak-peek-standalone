@@ -24,16 +24,14 @@ test('generateSuggestion loads active mode prompt suffix and retrieved active mo
   assert.ok(generateSuggestionStart >= 0, 'generateSuggestion should exist');
   assert.match(generateSuggestionSource, /require\('\.\/services\/ModesManager'\)/);
   assert.match(generateSuggestionSource, /getActiveModeSystemPromptSuffix\(\)/);
-  // Retrieved mode context is scoped by answer type. Since the 2026-06-27
-  // document-grounded fix, generateSuggestion picks the answer type
-  // conditionally ('document_grounded_suggestion' when the active mode is
-  // document-grounded, else 'general_meeting_answer') and threads
-  // forceDocumentGrounding through the retrievalOptions position. Assert the
-  // call uses lastQuestion + the conditional retrieveAnswerType, not the old
-  // hardcoded 'general_meeting_answer' literal.
-  assert.match(generateSuggestionSource, /buildRetrievedActiveModeContextBlock\(\s*lastQuestion,/);
-  assert.match(generateSuggestionSource, /retrieveAnswerType/);
-  assert.match(generateSuggestionSource, /documentGroundedCustomModeActive/);
+  // Universal RAG owns document/source admission now. generateSuggestion
+  // supplies the resolved lastQuestion plus the active mode id to the single
+  // application-owned retrieval boundary; it must not call the legacy
+  // ModesManager retrieval block directly.
+  assert.match(generateSuggestionSource,
+    /retrieveUniversalModeContext\(\s*lastQuestion,\s*groundingInfo\?\.modeId,\s*false,/);
+  assert.doesNotMatch(generateSuggestionSource, /buildRetrievedActiveModeContextBlock(?:Hybrid)?\(/);
+  assert.match(generateSuggestionSource, /getActiveModeDocumentGroundingInfo/);
   assert.doesNotMatch(generateSuggestionSource, /\|\| modesMgr\.buildActiveModeContextBlock\(\)/);
 });
 
