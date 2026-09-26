@@ -2558,6 +2558,12 @@ export class AppState {
  providerDataScopes
  });
  this.ragManager.setLLMHelper(this.processingHelper.getLLMHelper());
+ // Manual document-grounded chat uses the same application-owned RAGManager.
+ // Keep the provider lazy so LLMHelper never constructs a second instance and
+ // later RAGManager re-initialization is picked up automatically.
+ this.processingHelper.getLLMHelper().setRagManagerProvider(
+   () => this.ragManager ?? null,
+ );
 
  // Modes reference files must use the same initialized EmbeddingPipeline as
  // the main RAG stack. A private, never-initialized pipeline marks every

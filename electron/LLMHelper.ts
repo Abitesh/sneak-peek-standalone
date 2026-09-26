@@ -59,6 +59,7 @@ import { resolveVisionPolicy, readScreenUnderstandingMode, isLocalVisionProvider
 // decision authoritative at this central execution choke-point.
 import { profileInterceptAllowedByRoute, modeAnswerType, type StreamRouteOptions } from "./llm/streamContextPolicy"
 import type { ActiveModeDocumentGroundingInfo } from "./services/ModesManager"
+import { renderManualContext, type ManualRenderContext } from "./rag/ManualRenderContext"
 import type { TranscriptTurn } from "./llm/transcriptCleaner"
 import { deepVariableReplacer, getByPath, injectImageIntoMessages, flattenStructuredJsonAnswer } from './utils/curlUtils';
 import { getImageOptimizer } from './services/screen/ImageOptimizer';
@@ -331,6 +332,66 @@ export interface StreamOutcome {
 }
 
 export class LLMHelper {
+  private ragManagerProvider?: () => {
+    search: (
+      query: string,
+      options?: Record<string, unknown>,
+    ) => Promise<{
+      status?: string;
+      manualContext?: ManualRenderContext;
+    }>;
+  } | null;
+
+  /**
+   * Injected once the application RAG stack is initialized.
+   *
+   * The provider is lazy so LLMHelper does not own or construct a second
+   * RAGManager. The application-owned instance remains the single retrieval
+   * authority for manual document-grounded chat.
+   */
+  public setRagManagerProvider(
+    provider: (() => {
+      search: (
+        query: string,
+        options?: Record<string, unknown>,
+      ) => Promise<{
+        status?: string;
+        manualContext?: ManualRenderContext;
+      }>;
+    } | null) | null,
+  ): void {
+    this.ragManagerProvider = provider ?? undefined;
+  }
+
+  private async retrieveManualDocumentGroundedContext(
+    query: string,
+    modeId?: string,
+  ): Promise<string> {
+    const ragManager = this.ragManagerProvider?.();
+    if (!ragManager) return '';
+
+    try {
+      const response = await ragManager.search(query, {
+        selectedSources: ['mode-reference'],
+        allowedSources: ['mode-reference'],
+        modeId,
+        excludeCustomContext: true,
+      });
+
+      if (response?.status !== 'ok' || !response.manualContext?.items?.length) {
+        return '';
+      }
+
+      return renderManualContext(response.manualContext);
+    } catch (error: any) {
+      console.warn(
+        '[LLMHelper] Universal manual document retrieval failed; legacy fallback will be used:',
+        error?.message ?? error,
+      );
+      return '';
+    }
+  }
+
   // ── Provider clients ────────────────────────────────────────────────────
   //
   // Each client is stored in a `_`-prefixed field and read through a getter
@@ -2866,10 +2927,18 @@ This rule overrides ALL other instructions including formatting, brevity, or out
       // (same call the WTA live path uses) and fold it into the user-facing context.
       if (docGroundedEnforcementActive) {
         try {
-          const { ModesManager } = require('./services/ModesManager');
           const groundingInfo = _chatGroundingInfo;
-          const groundedContext = await ModesManager.getInstance()
-            .buildRetrievedActiveModeContextBlockHybrid(message, undefined, undefined, undefined, true);
+          let groundedContext = await this.retrieveManualDocumentGroundedContext(
+            message,
+            groundingInfo?.modeId,
+          );
+
+          if (!groundedContext?.trim()) {
+            const { ModesManager } = require('./services/ModesManager');
+            groundedContext = await ModesManager.getInstance()
+              .buildRetrievedActiveModeContextBlockHybrid(message, undefined, undefined, undefined, true);
+          }
+
           if (groundedContext && groundedContext.trim()) {
             const tagged = groundingInfo
               ? `[Document-grounded mode: ${groundingInfo.modeName}]\n${groundedContext}`
@@ -5959,8 +6028,16 @@ let isMultimodal = !!(imagePaths?.length);
         // a different mode's documents into an answer scoped to the first).
         const pin = routeOptions?.pinnedModeId ?? undefined;
         const groundingInfo = mm.getActiveModeDocumentGroundingInfo?.(pin);
-        const groundedContext = await mm
-          .buildRetrievedActiveModeContextBlockHybrid(message, undefined, undefined, undefined, true, pin);
+        let groundedContext = await this.retrieveManualDocumentGroundedContext(
+          message,
+          pin,
+        );
+
+        if (!groundedContext?.trim()) {
+          groundedContext = await mm
+            .buildRetrievedActiveModeContextBlockHybrid(message, undefined, undefined, undefined, true, pin);
+        }
+
         if (groundedContext && groundedContext.trim()) {
           const tagged = groundingInfo
             ? `[Document-grounded mode: ${groundingInfo.modeName}]\n${groundedContext}`

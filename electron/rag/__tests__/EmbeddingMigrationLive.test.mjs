@@ -27,6 +27,8 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { load as loadSqliteVec } from 'sqlite-vec';
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dmPath = path.resolve(__dirname, '../../../dist-electron/electron/db/DatabaseManager.js');
 const { DatabaseManager } = await import(pathToFileURL(dmPath).href);
@@ -50,6 +52,7 @@ describe('REAL v0→v16 migration on a persisted file DB (mandate #2)', () => {
   beforeEach(() => {
     file = path.join(os.tmpdir(), `miglive_${process.pid}_${Date.now()}_${Math.random().toString(36).slice(2)}.db`);
     db = new Database(file);
+    loadSqliteVec(db);
     db.pragma('journal_mode = WAL');
     // Stand the DB up at exactly user_version 15 with the v15 schema shape the real
     // migration expects (meetings has embedding_provider/embedding_dimensions but NOT
