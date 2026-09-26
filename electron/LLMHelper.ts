@@ -363,9 +363,10 @@ export class LLMHelper {
     this.ragManagerProvider = provider ?? undefined;
   }
 
-  private async retrieveManualDocumentGroundedContext(
+  private async retrieveUniversalModeContext(
     query: string,
     modeId?: string,
+    excludeCustomContext = true,
   ): Promise<string> {
     const ragManager = this.ragManagerProvider?.();
     if (!ragManager) return '';
@@ -375,7 +376,7 @@ export class LLMHelper {
         selectedSources: ['mode-reference'],
         allowedSources: ['mode-reference'],
         modeId,
-        excludeCustomContext: true,
+        excludeCustomContext,
       });
 
       if (response?.status !== 'ok' || !response.manualContext?.items?.length) {
@@ -385,11 +386,18 @@ export class LLMHelper {
       return renderManualContext(response.manualContext);
     } catch (error: any) {
       console.warn(
-        '[LLMHelper] Universal manual document retrieval failed; legacy fallback will be used:',
+        '[LLMHelper] Universal Mode RAG retrieval failed; proceeding without mode evidence:',
         error?.message ?? error,
       );
       return '';
     }
+  }
+
+  private async retrieveManualDocumentGroundedContext(
+    query: string,
+    modeId?: string,
+  ): Promise<string> {
+    return this.retrieveUniversalModeContext(query, modeId, true);
   }
 
   // ── Provider clients ────────────────────────────────────────────────────
@@ -2491,42 +2499,24 @@ ${IMAGE_TRUST_TRAILER}`;
     // Load active mode system prompt and context block (reference files + custom context)
     let activeModePrompt = '';
     let modeContextBlock = '';
-    let documentGroundedCustomModeActive = false;
     try {
       const { ModesManager } = require('./services/ModesManager');
       const modesMgr = ModesManager.getInstance();
       activeModePrompt = modesMgr.getActiveModeSystemPromptSuffix() ?? '';
-      // Read the active-mode grounding flag and thread `forceDocumentGrounding`
-      // into the retrieval call so the suggestion channel cannot silently
-      // bypass the document-grounded custom-mode guard. Without this gate
-      // (audit 2026-06-27) a document-grounded session's in-meeting
-      // suggestion panel could emit general-knowledge answers over the
-      // uploaded material.
+      // Read the active-mode scope from the same mode snapshot used by the
+      // suggestion surface. Universal RAG owns document/source admission now;
+      // LLMHelper only passes the mode scope into that canonical boundary.
       const groundingInfo = modesMgr.getActiveModeDocumentGroundingInfo?.();
-      documentGroundedCustomModeActive = groundingInfo?.documentGroundedCustomModeActive === true;
-      // R6 (2026-08-12, review finding): the broad flag alone forced
-      // doc-grounded suggestion retrieval over an EMPTY corpus for every
-      // template-seeded fileless mode — the same class the 2026-08-11 WTA
-      // fixes closed. Enforcement = explicit strict contract, or a doc mode
-      // with at least one real file.
-      const docGroundedEnforcementActive = groundingInfo?.strictDocumentGroundedActive === true
-        || (documentGroundedCustomModeActive && groundingInfo?.hasReferenceFiles === true);
-      const retrieveAnswerType = docGroundedEnforcementActive
-        ? 'document_grounded_suggestion'
-        : 'general_meeting_answer';
-      // buildRetrievedActiveModeContextBlock signature:
-      //   (query, transcript?, tokenBudget?, answerType?, excludeCustomContext?, pinnedModeId?, retrievalOptions?)
-      // Pass forceDocumentGrounding via the retrievalOptions position so the
-      // suggestion channel respects the document-grounded custom-mode gate.
-      modeContextBlock = modesMgr.buildRetrievedActiveModeContextBlock(
+      // Change 50B: suggestion retrieval now uses the application-owned
+      // Universal RAG boundary. Keep custom mode context eligible here because
+      // generateSuggestion historically surfaced both reference material and
+      // user-authored mode context; the RAG source policy still owns the final
+      // admission and rendering.
+      modeContextBlock = await this.retrieveUniversalModeContext(
         lastQuestion,
-        context,
-        1800,
-        retrieveAnswerType,
-        false, // excludeCustomContext: false — let the manager handle scoping per answer type
-        undefined, // pinnedModeId
-        { forceDocumentGrounding: docGroundedEnforcementActive },
-      ) || '';
+        groundingInfo?.modeId,
+        false,
+      );
     } catch (_modeErr: any) {
       console.warn('[LLMHelper] ModesManager load failed in generateSuggestion (non-fatal):', _modeErr?.message);
     }
@@ -2920,24 +2910,18 @@ This rule overrides ALL other instructions including formatting, brevity, or out
         });
       }
       // DOCUMENT-GROUNDED custom-mode manual chat: the generic knowledge intercept
-      // is gated off for these modes, but the manual path still NEEDS the uploaded
-      // reference files surfaced into the prompt — otherwise the model answers
-      // "please upload your document" because it literally has no context. Pull the
-      // grounded context block directly from the ModesManager's hybrid retriever
-      // (same call the WTA live path uses) and fold it into the user-facing context.
+      // is gated off for these modes, so the manual path surfaces uploaded reference
+      // files through the application-owned Universal RAG boundary. Do not fall back
+      // to ModesManager's legacy hybrid retrieval here: that would create a second
+      // application-level retrieval path and let the manual chat silently diverge
+      // from the canonical RAG contract.
       if (docGroundedEnforcementActive) {
         try {
           const groundingInfo = _chatGroundingInfo;
-          let groundedContext = await this.retrieveManualDocumentGroundedContext(
+          const groundedContext = await this.retrieveManualDocumentGroundedContext(
             message,
             groundingInfo?.modeId,
           );
-
-          if (!groundedContext?.trim()) {
-            const { ModesManager } = require('./services/ModesManager');
-            groundedContext = await ModesManager.getInstance()
-              .buildRetrievedActiveModeContextBlockHybrid(message, undefined, undefined, undefined, true);
-          }
 
           if (groundedContext && groundedContext.trim()) {
             const tagged = groundingInfo
@@ -2946,7 +2930,7 @@ This rule overrides ALL other instructions including formatting, brevity, or out
             context = context ? `${tagged}\n\n${context}` : tagged;
           }
         } catch (groundedErr: any) {
-          console.warn('[LLMHelper] Document-grounded manual retrieval failed, proceeding without:', groundedErr.message);
+          console.warn('[LLMHelper] Universal RAG document retrieval failed, proceeding without:', groundedErr.message);
         }
       }
       // R6: knowledge suppression reads the STRICT flag (Defect C doctrine —
@@ -3116,70 +3100,17 @@ const shouldSkipModeInjection = skipModeInjection === true || (
 if (!shouldSkipModeInjection) {
   try {
     const modesMgr = modesMgrForInjection || require('./services/ModesManager').ModesManager.getInstance();
-    let modeContextBlock = '';
-    let usedRerankPath = false;
-    // Doc-grounded modes: use the hybrid retriever (the same call wired into
-    // the manual-streaming fix) so the uploaded reference files actually
-    // reach the model. Other modes fall back to the existing sync lexical
-    // retriever for byte-for-byte legacy behavior.
-    // SOURCE-AWARE RETRIEVAL HINTS (2026-07-06): for a doc-grounded turn,
-    // expand the query with GENERIC concept synonyms ("phases"→objectives/
-    // milestones/stages, "system"→architecture/pipeline) so the lexical/hybrid
-    // retriever matches sections that use different words than the question.
-    // This only broadens recall WITHIN the uploaded reference files — it never
-    // injects answer text and carries no document-specific terms. Non-doc modes
-    // pass the raw query byte-for-byte (legacy behavior preserved).
-    let docRetrievalQuery = message;
-    if (forceDocumentGrounding) {
-      try {
-        const { expandQueryWithHints } = require('./llm/documentGroundedPrompt');
-        docRetrievalQuery = expandQueryWithHints(message);
-      } catch { docRetrievalQuery = message; }
-    }
-    // Phase 2 (semantic-retrieval repair, 2026-08-13): eligibility + argument
-    // mapping unified with streamChat via modeHybridEligibility. Two fixes over
-    // the previous inline call: (1) eligibility now includes the ragLocalRerank
-    // rollout flag (prod behavior unchanged — the flag defaults OFF there);
-    // (2) retrievalOptions.forceDocumentGrounding is finally threaded, so the
-    // wrapper's doc-grounded hybrid branch (fine chunking + identity-block
-    // merge) actually fires here — the old 5-arg call left retrievalOptions
-    // undefined and silently ran the generic path.
-    //
-    // BUDGET: doc-grounded keeps budgetMs: null — this site is not on the
-    // streaming deadline and the answer depends on the documents the user
-    // uploaded. The RERANK-ONLY path, newly reachable here since eligibility
-    // widened to include the ragLocalRerank flag, is an optional quality boost
-    // and must not be able to block a manual answer on a cold embedder +
-    // cross-encoder load, so it gets a generous ceiling instead of no race at
-    // all. See the module doc for the race-budget asymmetry with streamChat.
-    {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { shouldUseHybridRetrieval, runHybridModeRetrieval, MANUAL_HYBRID_RERANK_BUDGET_MS } = require('./llm/modeHybridEligibility');
-      if (shouldUseHybridRetrieval({ forceDocumentGrounding })) {
-        try {
-          const { block } = await runHybridModeRetrieval(modesMgr, {
-            query: docRetrievalQuery,
-            context,
-            answerType: modeAnswerType(routeOptions),
-            forceDocumentGrounding,
-            pinnedModeId: routeOptions?.pinnedModeId ?? undefined,
-            followUpReferentHint: routeOptions?.followUpReferentHint,
-            budgetMs: forceDocumentGrounding ? null : MANUAL_HYBRID_RERANK_BUDGET_MS,
-          });
-          if (block && block.trim()) {
-            modeContextBlock = block;
-            usedRerankPath = true;
-          }
-        } catch (groundedErr: any) {
-          console.warn('[LLMHelper.chatWithGemini] Doc-grounded hybrid retrieval failed, using sync lexical:', groundedErr?.message);
-        }
-      }
-    }
-    if (!usedRerankPath) {
-      modeContextBlock = modesMgr.buildRetrievedActiveModeContextBlock(
-        docRetrievalQuery, context, forceDocumentGrounding ? undefined : 1800, modeAnswerType(routeOptions), true, undefined, { forceDocumentGrounding },
-      );
-    }
+    // Change 50B: application-level mode-reference retrieval is now owned by
+    // Universal RAG. Do not run ModesManager's hybrid or lexical retrieval here.
+    // Universal RAG owns planning, source policy, retrieval, reranking, gating,
+    // and the renderer-facing evidence shape; LLMHelper only consumes the final
+    // rendered context. Custom context remains excluded on this manual answer
+    // path, matching the old call's `excludeCustomContext: true` contract.
+    const modeContextBlock = await this.retrieveUniversalModeContext(
+      message,
+      routeOptions?.pinnedModeId ?? undefined,
+      true,
+    );
     const modePromptSuffix = modesMgr.getActiveModeSystemPromptSuffix();
     const pinnedInstructions: string = modesMgr.getActiveModePinnedInstructions?.(modeAnswerType(routeOptions)) || '';
 
@@ -6004,9 +5935,10 @@ let isMultimodal = !!(imagePaths?.length);
     // DOCUMENT-GROUNDED custom-mode manual chat (streaming path): same fix as the
     // non-streaming path above — the generic knowledge intercept is gated off for
     // document-grounded modes, so the manual stream must surface the uploaded
-    // reference files directly. Otherwise the model says "please upload your
-    // document" even though the files are indexed and the user just typed into
-    // the regular chat expecting grounded answers.
+    // reference files through the application-owned Universal RAG boundary.
+    // Otherwise the model says "please upload your document" even though the
+    // files are indexed and the user just typed into the regular chat expecting
+    // grounded answers.
     const contextOsGovernedDocumentTurn = Boolean(
       (routeOptions?.contextOsGeneration as import('./intelligence/context-os').ContextOsGenerationContext | undefined)?.govern,
     );
@@ -6028,15 +5960,10 @@ let isMultimodal = !!(imagePaths?.length);
         // a different mode's documents into an answer scoped to the first).
         const pin = routeOptions?.pinnedModeId ?? undefined;
         const groundingInfo = mm.getActiveModeDocumentGroundingInfo?.(pin);
-        let groundedContext = await this.retrieveManualDocumentGroundedContext(
+        const groundedContext = await this.retrieveManualDocumentGroundedContext(
           message,
           pin,
         );
-
-        if (!groundedContext?.trim()) {
-          groundedContext = await mm
-            .buildRetrievedActiveModeContextBlockHybrid(message, undefined, undefined, undefined, true, pin);
-        }
 
         if (groundedContext && groundedContext.trim()) {
           const tagged = groundingInfo
@@ -6411,55 +6338,19 @@ let isMultimodal = !!(imagePaths?.length);
           console.warn('[LLMHelper] EvidenceResolver governed retrieval failed; governed turn will not use legacy retrieval:', _evidenceResolverErr?.message);
         }
         try {
-          // Evidence-execution-repair: when EvidenceResolver already resolved
-          // this turn's evidence above, skip the entire legacy hybrid/lexical
-          // retrieval block — modeContextBlock + usedRerankPath are already set.
-          if (resolvedViaEvidenceResolver) { /* no-op: fall through to pinned instructions below */ } else {
-          // Document-grounded custom mode (audit 2026-06-27, real-path fix):
-          // previously the `!forceDocumentGrounding` term SKIPPED the hybrid
-          // (semantic + cross-encoder) retriever for document-grounded modes,
-          // forcing the sync lexical path. Now document-grounded modes ALSO
-          // use the hybrid path. To avoid a cold/slow embedder stalling the
-          // hot path past the first-useful deadline (which would abort to the
-          // canned fallback), the hybrid call is raced against a budget; on
-          // timeout we fall through to the sync lexical retriever — same
-          // fallback the manual flow always had.
-          //
-          // Phase 2 (semantic-retrieval repair, 2026-08-13): eligibility,
-          // argument mapping, and the race live in modeHybridEligibility —
-          // SHARED with chatWithGemini so the two entry points can no longer
-          // drift (this site's semantics were adopted as canonical). This is
-          // the streaming site, so it passes the race budget; see the module
-          // doc for the documented budget asymmetry.
-          // eslint-disable-next-line @typescript-eslint/no-var-requires
-          const { shouldUseHybridRetrieval, runHybridModeRetrieval, hybridRetrievalBudgetMs } = require('./llm/modeHybridEligibility');
-          if (shouldUseHybridRetrieval({ forceDocumentGrounding })) {
-            const budgetMs = hybridRetrievalBudgetMs(forceDocumentGrounding);
-            const { block, timedOut } = await runHybridModeRetrieval(modesMgr, {
-              query: message,
-              context,
-              answerType: modeAnswerType(routeOptions),
-              forceDocumentGrounding,
-              pinnedModeId: routeOptions?.pinnedModeId ?? undefined,
-              followUpReferentHint: routeOptions?.followUpReferentHint,
-              budgetMs,
-            });
-            if (!timedOut && block != null) {
-              modeContextBlock = block;
-              usedRerankPath = true;
-            } else if (timedOut) {
-              console.warn(`[LLMHelper] manual hybrid retrieval exceeded ${budgetMs}ms — using sync lexical fallback`, { forceDocumentGrounding });
-              telemetryService.track({ name: 'doc_grounded_hybrid_timeout', properties: { budgetMs, forceDocumentGrounding } });
-            }
+          // Change 50B: all non-governed application-level mode-reference
+          // retrieval now goes through the application-owned Universal RAG
+          // manager. The governed EvidenceResolver path above remains the
+          // canonical Context OS execution path and is deliberately untouched.
+          if (!resolvedViaEvidenceResolver && !governedEvidenceResolutionStarted) {
+            modeContextBlock = await this.retrieveUniversalModeContext(
+              message,
+              routeOptions?.pinnedModeId ?? undefined,
+              true,
+            );
           }
-          }
-        } catch (_rerankErr: any) {
-          console.warn('[LLMHelper] manual hybrid+rerank path failed, using sync lexical:', _rerankErr?.message);
-        }
-        if (!usedRerankPath && !governedEvidenceResolutionStarted) {
-          // Pass undefined for tokenBudget when doc-grounded — the retriever
-          // auto-upgrades to DOC_GROUNDED_TOKEN_BUDGET (3600) internally.
-          modeContextBlock = modesMgr.buildRetrievedActiveModeContextBlock(message, context, forceDocumentGrounding ? undefined : 1800, modeAnswerType(routeOptions), true, routeOptions?.pinnedModeId ?? undefined, { forceDocumentGrounding, followUpReferentHint: routeOptions?.followUpReferentHint });
+        } catch (_ragErr: any) {
+          console.warn('[LLMHelper] Universal Mode RAG retrieval failed; proceeding without mode evidence:', _ragErr?.message);
         }
         // Root-cause fix (2026-07-23): surface the block this generation call
         // actually used back to the caller, regardless of governance state
