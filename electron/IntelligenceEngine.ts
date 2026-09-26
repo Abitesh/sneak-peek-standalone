@@ -1816,36 +1816,22 @@ export class IntelligenceEngine extends EventEmitter {
                 } catch { return undefined; }
             })();
             // Governed document turns resolve through EvidenceResolver inside
-            // WhatToAnswerLLM. Do not start the legacy prefetch in parallel: even
-            // an ignored retrieval is an unauthorized competing evidence path.
+            // WhatToAnswerLLM. Do not start a competing legacy retrieval path.
+            // Normal application retrieval, when allowed, goes through the same
+            // application-owned universal RAGManager used by WTA/manual chat.
             const modeContextPromise: Promise<string> = options?.activeSkill || docGroundedEnforcementActive || !wtaPrefetchDecision.allowed
-                ? Promise.resolve('') // skill/governed-document mode skips legacy retrieval; blind turn (no user-originated query) skips it too
-                : (async () => {
-                    try {
-                        const { ModesManager } = require('./services/ModesManager') as typeof import('./services/ModesManager');
-                        const mm = ModesManager.getInstance();
-                        if (typeof mm.buildRetrievedActiveModeContextBlockHybrid === 'function') {
-                            // pinnedModeId (#6): parallel-prefetch reads the SAME mode captured
-                            // at t0, so a mid-request mode switch can't mismatch retrieval.
-                            // Phase 3: allowRerank on the LIVE prefetch path only when
-                            // ragSpeculativeRerank is on. The reranker is prewarmed at
-                            // mode activation and this prefetch is consumed under the
-                            // caller's raceWithBudget — so a (warm) rerank costs ~tens of
-                            // ms and an overrun falls through to the non-reranked block.
-                            let allowRerank = false;
-                            try {
-                                // eslint-disable-next-line @typescript-eslint/no-var-requires
-                                const { isRagSpeculativeRerankEnabled } = require('./intelligence/intelligenceFlags');
-                                allowRerank = isRagSpeculativeRerankEnabled();
-                            } catch { /* flag module unavailable → no rerank */ }
-                            return await mm.buildRetrievedActiveModeContextBlockHybrid(
-                                wtaPrefetchQuery, preparedTranscript, 1800, wtaPrefetchAnswerType, true, snapshotModeInfo?.id, allowRerank,
-                                docGroundedEnforcementActive ? { forceDocumentGrounding: true } : undefined,
-                            );
-                        }
-                        return '';
-                    } catch { return ''; }
-                })();
+                ? Promise.resolve('')
+                : this.retrieveUniversalModeContext(wtaPrefetchQuery, snapshotModeInfo?.id, {
+                    tokenBudget: 1800,
+                    allowRerank: (() => {
+                        try {
+                            const { isRagSpeculativeRerankEnabled } = require('./intelligence/intelligenceFlags');
+                            return isRagSpeculativeRerankEnabled();
+                        } catch { return false; }
+                    })(),
+                    answerType: wtaPrefetchAnswerType,
+                    forceDocumentGrounding: docGroundedEnforcementActive,
+                });
 
             // ── Candidate-profile grounding for interviewer questions ─────────
             // The "What to answer?" path streams with ignoreKnowledgeMode=true, so
@@ -3914,36 +3900,16 @@ export class IntelligenceEngine extends EventEmitter {
                     && this.currentGenerationId === generationId) {
                     const docQuestion = (answerPlan.question || question || extractedQuestion.latestQuestion || lastInterviewerTurn || '').trim();
                     if (docQuestion) {
-                        const { ModesManager } = require('./services/ModesManager') as typeof import('./services/ModesManager');
-                        const mm = ModesManager.getInstance();
-                        const buildDocContext = async (relaxed: boolean): Promise<string> => {
-                            const opts = {
+                        const buildDocContext = async (relaxed: boolean): Promise<string> => (
+                            this.retrieveUniversalModeContext(docQuestion, requestSnapshot.modeUniqueId, {
                                 forceDocumentGrounding: true,
                                 followUpReferentHint: temporalContext?.previousResponses?.slice(-1)?.[0],
-                                ...(relaxed ? { relaxed: true, topK: 24 } : {}),
-                            };
-                            if (typeof mm.buildRetrievedActiveModeContextBlockHybrid === 'function') {
-                                return await mm.buildRetrievedActiveModeContextBlockHybrid(
-                                    docQuestion,
-                                    preparedTranscript,
-                                    relaxed ? 5200 : undefined,
-                                    answerPlan.answerType,
-                                    true,
-                                    requestSnapshot.modeUniqueId,
-                                    true,
-                                    opts,
-                                );
-                            }
-                            return mm.buildRetrievedActiveModeContextBlock(
-                                docQuestion,
-                                preparedTranscript,
-                                relaxed ? 5200 : undefined,
-                                answerPlan.answerType,
-                                true,
-                                requestSnapshot.modeUniqueId,
-                                opts,
-                            );
-                        };
+                                tokenBudget: relaxed ? 5200 : 1800,
+                                topK: relaxed ? 24 : undefined,
+                                allowRerank: true,
+                                answerType: answerPlan.answerType,
+                            })
+                        );
 
                         // Evidence-execution-repair (2026-07-11): when this turn was
                         // governed by EvidenceResolver/typed-pack generation inside
@@ -4016,7 +3982,8 @@ export class IntelligenceEngine extends EventEmitter {
                                 let wtaRepairSystemPrompt: string | undefined;
                                 try {
                                     const { appendCustomModeSystemPromptLayer } = require('./llm/documentGroundedPrompt');
-                                    const { isCustomMode } = require('./services/ModesManager');
+                                    const { ModesManager, isCustomMode } = require('./services/ModesManager');
+                                    const mm = ModesManager.getInstance();
                                     const _activeModeRow = mm.getActiveMode?.();
                                     wtaRepairSystemPrompt = appendCustomModeSystemPromptLayer({
                                         baseSystemPrompt: HARD_SYSTEM_PROMPT,
@@ -5220,6 +5187,57 @@ export class IntelligenceEngine extends EventEmitter {
     setRagManagerProvider(provider: (() => unknown) | null): void {
         this.ragManagerProvider = provider;
         this.whatToAnswerLLM?.setRagManagerProvider?.(provider as (() => any) | null);
+    }
+
+    /**
+     * Application-level mode retrieval boundary. Normal IntelligenceEngine
+     * retrieval must use the application-owned universal RAGManager; the
+     * governed EvidenceResolver seam remains the only intentional raw hybrid
+     * dependency.
+     */
+    private async retrieveUniversalModeContext(
+        query: string,
+        modeId?: string | null,
+        options: {
+            tokenBudget?: number;
+            topK?: number;
+            allowRerank?: boolean;
+            forceDocumentGrounding?: boolean;
+            answerType?: string;
+            followUpReferentHint?: string;
+        } = {},
+    ): Promise<string> {
+        const ragManager = this.ragManagerProvider?.() as any;
+        if (!ragManager || typeof ragManager.search !== 'function') return '';
+
+        try {
+            const response = await ragManager.search(query, {
+                selectedSources: ['mode-reference'],
+                allowedSources: ['mode-reference'],
+                modeId: modeId ?? undefined,
+                tokenBudget: options.tokenBudget ?? 1800,
+                ...(options.topK !== undefined ? { topK: options.topK } : {}),
+                ...(options.allowRerank !== undefined ? { allowRerank: options.allowRerank } : {}),
+                ...(options.forceDocumentGrounding !== undefined
+                    ? { forceDocumentGrounding: options.forceDocumentGrounding }
+                    : {}),
+                ...(options.answerType ? { answerType: options.answerType } : {}),
+                excludeCustomContext: true,
+                ...(options.followUpReferentHint
+                    ? { followUpReferentHint: options.followUpReferentHint }
+                    : {}),
+            });
+
+            if (response?.status !== 'ok' || !response.manualContext?.items?.length) return '';
+            const { renderManualContext } = require('./rag/ManualRenderContext') as typeof import('./rag/ManualRenderContext');
+            return renderManualContext(response.manualContext);
+        } catch (error: any) {
+            console.warn(
+                '[IntelligenceEngine] Universal Mode RAG retrieval failed; proceeding without mode evidence:',
+                error?.message ?? error,
+            );
+            return '';
+        }
     }
 
     // ── CONTEXT INTELLIGENCE V3 — shared adoption plumbing (Phase 6) ─────────
