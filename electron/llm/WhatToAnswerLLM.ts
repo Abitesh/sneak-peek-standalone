@@ -22,7 +22,6 @@ import { isLayerAllowed } from "./contextRoute";
 import { deriveRetrievalQuery } from "./retrievalQueryPolicy";
 import { DOCUMENT_GROUNDING_SCOPE_DENIED_MESSAGE, type ProviderDataScope } from "./ProviderRouter";
 import type { ActiveModeDocumentGroundingInfo } from "../services/ModesManager";
-import type { ModeRetrievalOptions } from "../services/ModeContextRetriever";
 import { isCodeVerificationEnabled } from "./codeVerification/verificationEnabled";
 import type { WhatToAnswerRequestSnapshot } from "./whatToAnswerRequestSnapshot";
 import { getPerson1FileContext, getPerson1FileContextAsync } from '../personalKnowledge/person1PromptContext';
@@ -78,12 +77,6 @@ type ModesManagerType = {
         getReferenceFiles?: (modeId: string) => Array<{ id: string; fileName: string; content: string }>;
         retrieveHybridRaw?: (mode: any, files: any, options: any) => Promise<any>;
         buildActiveModeContextBlock: () => string;
-        buildRetrievedActiveModeContextBlock: (query: string, transcript?: string, tokenBudget?: number, answerType?: AnswerType, excludeCustomContext?: boolean, pinnedModeId?: string, retrievalOptions?: ModeRetrievalOptions) => string;
-        // Phase 4: optional async hybrid retrieval (FTS + vector). Backwards
-        // compatible — older builds without this method still work via the
-        // sync lexical fallback. `answerType` (Phase 3) scopes the mode's
-        // customContext so sensitive chunks can't leak into the wrong answer.
-        buildRetrievedActiveModeContextBlockHybrid?: (query: string, transcript?: string, tokenBudget?: number, answerType?: AnswerType, excludeCustomContext?: boolean, pinnedModeId?: string, allowRerank?: boolean, retrievalOptions?: ModeRetrievalOptions) => Promise<string>;
         // PI v3 (W2): the always-pinned "Real-time prompt". Optional for older
         // module shapes (tests/stubs) — absence simply skips pinning.
         getActiveModePinnedInstructions?: (answerType?: AnswerType, pinnedModeId?: string) => string;
@@ -615,31 +608,15 @@ The user triggered this action with a coding problem on screen and NO new questi
                                     console.warn('[WhatToAnswerLLM] universal Mode RAG failed — using legacy compatibility fallback:', universalErr?.message ?? universalErr);
                                 }
                             }
-                            if (!universalModeRetrieved && typeof modesManager.buildRetrievedActiveModeContextBlockHybrid === 'function') {
-                                let allowRerank = false;
-                                try {
-                                    const { isRagSpeculativeRerankEnabled } = require('../intelligence/intelligenceFlags');
-                                    allowRerank = isRagSpeculativeRerankEnabled();
-                                } catch { /* flag unavailable → no rerank */ }
-                                const { value, timedOut } = await raceWithBudget(
-                                    modesManager.buildRetrievedActiveModeContextBlockHybrid(
-                                        retrievalQuery, cleanedTranscript, forceDocumentGrounding ? undefined : 1800, answerPlan?.answerType, true, requestSnapshot?.modeUniqueId, allowRerank, retrievalOptions,
-                                    ),
-                                    forceDocumentGrounding ? HYBRID_RETRIEVAL_BUDGET_DOC_GROUNDED_MS : HYBRID_RETRIEVAL_BUDGET_MS,
-                                    '',
-                                );
-                                modeContextBlock = value;
-                                if (timedOut) {
-                                    console.warn(`[WhatToAnswerLLM] legacy Mode retrieval fallback exceeded ${forceDocumentGrounding ? HYBRID_RETRIEVAL_BUDGET_DOC_GROUNDED_MS : HYBRID_RETRIEVAL_BUDGET_MS}ms`);
-                                }
+                            // Change 48: WTA no longer bypasses the universal RAG boundary
+                            // when Mode retrieval is empty, times out, or fails. ModeRagAdapter
+                            // owns the legacy ModeContextRetriever/ModeHybridRetriever mechanics
+                            // behind RAGManager, so a second retrieval path here would duplicate
+                            // policy, ranking, and evidence handling.
+                            if (!universalModeRetrieved) {
+                                console.warn('[WhatToAnswerLLM] universal Mode RAG produced no usable evidence; no direct Mode retrieval fallback will run');
                             }
-                        }
-                        if (!modeContextBlock) {
-                            // excludeCustomContext (PI v3 W2): the mode's
-                            // customContext is PINNED below — keep retrieval to
-                            // reference files only so the text never ships twice.
-                            const retrievalQuery = retrievalQueryDecision.query;
-                            modeContextBlock = modesManager.buildRetrievedActiveModeContextBlock(retrievalQuery, cleanedTranscript, forceDocumentGrounding ? undefined : 1800, answerPlan?.answerType, true, requestSnapshot?.modeUniqueId, retrievalOptions);
+
                         }
 
                         // Fix 1b (2026-07-06): augment the retrieved chunk block
@@ -655,9 +632,7 @@ The user triggered this action with a coding problem on screen and NO new questi
                         }
                         }
                     } else if (await this.llmHelper.canUseLocalFallback(false)) {
-                        console.warn('[ScopeFallback] reference_files denied; local fallback available, routing via streamChat');
-                        const retrievalQuery = retrievalQueryDecision.query;
-                        modeContextBlock = modesManager.buildRetrievedActiveModeContextBlock(retrievalQuery, cleanedTranscript, forceDocumentGrounding ? undefined : 1800, answerPlan?.answerType, true, requestSnapshot?.modeUniqueId, retrievalOptions);
+                        console.warn('[ScopeFallback] reference_files denied; reference context omitted at the source boundary');
                     } else {
                         console.warn('[ScopeFallback] reference_files denied; Ollama unavailable, omitting from context');
                         if (forceDocumentGrounding) {
