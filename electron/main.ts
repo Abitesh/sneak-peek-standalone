@@ -2562,6 +2562,12 @@ export class AppState {
  providerDataScopes
  });
  this.ragManager.setLLMHelper(this.processingHelper.getLLMHelper());
+ // Manual document-grounded chat (47ZF) uses the same application-owned RAGManager.
+ // Keep the provider lazy so LLMHelper never constructs a second instance and
+ // later RAGManager re-initialization is picked up automatically.
+ this.processingHelper.getLLMHelper().setRagManagerProvider(
+   () => this.ragManager ?? null,
+ );
 
  // Modes reference files must use the same initialized EmbeddingPipeline as
  // the main RAG stack. A private, never-initialized pipeline marks every
@@ -2578,6 +2584,9 @@ export class AppState {
  try {
  this.intelligenceManager?.setRagRetrieverProvider?.(
  () => this.ragManager?.getRetriever() ?? null,
+ );
+ this.intelligenceManager?.setRagManagerProvider?.(
+ () => this.ragManager ?? null,
  );
  } catch (e) { console.warn('[AppState] V3 meeting retriever wiring skipped:', e); }
 

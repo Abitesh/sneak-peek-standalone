@@ -435,6 +435,32 @@ export class LLMHelper {
     return this.retrieveUniversalModeContext(query, modeId, true);
   }
 
+  /**
+   * 47ZF manual document-grounded retrieval: universal search → manualContext
+   * → renderManualContext first. On empty/throw-as-empty, legacy hybrid once.
+   * Success short-circuits so buildRetrievedActiveModeContextBlockHybrid is
+   * not called afterward. LLMHelper never constructs a second RAGManager —
+   * it only uses the injected application-owned provider.
+   */
+  private async resolveManualDocumentGroundedContextWithLegacyFallback(
+    query: string,
+    modeId: string | undefined,
+    legacyHybrid: () => Promise<string>,
+  ): Promise<string> {
+    const grounded = await this.retrieveManualDocumentGroundedContext(query, modeId);
+    if (grounded?.trim()) return grounded;
+    try {
+      const legacy = await legacyHybrid();
+      return legacy?.trim() ? legacy : '';
+    } catch (error: any) {
+      console.warn(
+        '[LLMHelper] Legacy document-grounded hybrid fallback failed:',
+        error?.message ?? error,
+      );
+      return '';
+    }
+  }
+
   // ── Provider clients ────────────────────────────────────────────────────
   //
   // Each client is stored in a `_`-prefixed field and read through a getter
@@ -2942,18 +2968,19 @@ This rule overrides ALL other instructions including formatting, brevity, or out
           retrievalRequired: true,
         });
       }
-      // DOCUMENT-GROUNDED custom-mode manual chat: the generic knowledge intercept
-      // is gated off for these modes, so the manual path surfaces uploaded reference
-      // files through the application-owned Universal RAG boundary. Do not fall back
-      // to ModesManager's legacy hybrid retrieval here: that would create a second
-      // application-level retrieval path and let the manual chat silently diverge
-      // from the canonical RAG contract.
+      // DOCUMENT-GROUNDED custom-mode manual chat (47ZF): universal RAG first;
+      // legacy hybrid once only when universal returns empty / throw-as-empty.
       if (docGroundedEnforcementActive) {
         try {
           const groundingInfo = _chatGroundingInfo;
-          const groundedContext = await this.retrieveManualDocumentGroundedContext(
+          const groundedContext = await this.resolveManualDocumentGroundedContextWithLegacyFallback(
             message,
             groundingInfo?.modeId,
+            async () => {
+              const { ModesManager } = require('./services/ModesManager') as typeof import('./services/ModesManager');
+              return ModesManager.getInstance()
+                .buildRetrievedActiveModeContextBlockHybrid(message, undefined, undefined, undefined, true);
+            },
           );
 
           if (groundedContext && groundedContext.trim()) {
@@ -5964,13 +5991,8 @@ let isMultimodal = !!(imagePaths?.length);
     // applyFullProfileGrounding gate; absent route options → allowed (legacy).
     const profileInjectionAllowed = profileInterceptAllowedByRoute(routeOptions);
 
-    // DOCUMENT-GROUNDED custom-mode manual chat (streaming path): same fix as the
-    // non-streaming path above — the generic knowledge intercept is gated off for
-    // document-grounded modes, so the manual stream must surface the uploaded
-    // reference files through the application-owned Universal RAG boundary.
-    // Otherwise the model says "please upload your document" even though the
-    // files are indexed and the user just typed into the regular chat expecting
-    // grounded answers.
+    // DOCUMENT-GROUNDED custom-mode manual chat (streaming / 47ZF): same as the
+    // non-streaming path — universal RAG first, legacy hybrid once on empty.
     const contextOsGovernedDocumentTurn = Boolean(
       (routeOptions?.contextOsGeneration as import('./intelligence/context-os').ContextOsGenerationContext | undefined)?.govern,
     );
@@ -5992,9 +6014,12 @@ let isMultimodal = !!(imagePaths?.length);
         // a different mode's documents into an answer scoped to the first).
         const pin = routeOptions?.pinnedModeId ?? undefined;
         const groundingInfo = mm.getActiveModeDocumentGroundingInfo?.(pin);
-        const groundedContext = await this.retrieveManualDocumentGroundedContext(
+        const groundedContext = await this.resolveManualDocumentGroundedContextWithLegacyFallback(
           message,
           pin,
+          async () => mm.buildRetrievedActiveModeContextBlockHybrid(
+            message, undefined, undefined, undefined, true, pin,
+          ),
         );
 
         if (groundedContext && groundedContext.trim()) {
