@@ -199,38 +199,34 @@ test('ipcHandlers: false-refusal detector catches "could not find" refusal phras
 });
 
 // ---------------------------------------------------------------------------
-// 4. LLMHelper — hybrid timeout and budget changes
+// 4. LLMHelper — Stage 10 / Change 50B: no dead hybrid-eligibility orchestrator
 // ---------------------------------------------------------------------------
-test('LLMHelper: HYBRID_BUDGET_MS raised to 2000 for doc-grounded paths', () => {
-  // Phase 2 (2026-08-13): the budget conditional moved from an inline
-  // HYBRID_BUDGET_MS in LLMHelper into the SHARED eligibility module so the
-  // two entry points cannot drift. The invariant this test protects is
-  // unchanged — doc-grounded gets 2000ms, everything else 1000ms — it just
-  // lives in modeHybridEligibility now, and LLMHelper must consume it from
-  // there (behavioral pin: ModeHybridEligibility2026_08_13.test.mjs).
-  const eligibilitySrc = read('electron/llm/modeHybridEligibility.ts');
+// modeHybridEligibility.ts was DEAD after the universal RAG boundary (Change
+// 50B / Stage 6 47ZF). Doc-grounded manual chat is universal-first with a
+// single legacy hybrid FALLBACK — not a raced eligibility helper.
+test('LLMHelper: must not call deleted modeHybridEligibility orchestrator', () => {
   assert.ok(
-    eligibilitySrc.includes('forceDocumentGrounding ? 2000 : 1000'),
-    'the shared eligibility module must use the 2000ms doc-grounded hybrid budget (was 1000ms for all paths)',
+    !llmHelperSrc.includes('runHybridModeRetrieval'),
+    'LLMHelper must not orchestrate legacy hybrid via runHybridModeRetrieval',
   );
   assert.ok(
-    llmHelperSrc.includes('hybridRetrievalBudgetMs(forceDocumentGrounding)'),
-    'LLMHelper must take the budget from the shared module, not re-declare it inline',
+    !llmHelperSrc.includes('shouldUseHybridRetrieval'),
+    'LLMHelper must not own legacy hybrid eligibility',
   );
-});
-
-test('LLMHelper: passes undefined tokenBudget for doc-grounded (lets retriever auto-upgrade)', () => {
-  // Both the hybrid and sync fallback calls must pass undefined when forceDocumentGrounding
   assert.ok(
-    llmHelperSrc.includes('forceDocumentGrounding ? undefined : 1800'),
-    'LLMHelper must pass undefined (not 1800) for tokenBudget when forceDocumentGrounding=true, so the retriever auto-upgrades to DOC_GROUNDED_TOKEN_BUDGET',
+    !llmHelperSrc.includes('hybridRetrievalBudgetMs'),
+    'LLMHelper must not import deleted hybridRetrievalBudgetMs',
   );
 });
 
-test('LLMHelper: emits telemetry on hybrid timeout with forceDocumentGrounding context', () => {
+test('LLMHelper: 47ZF uses universal-first with one legacy hybrid FALLBACK', () => {
   assert.ok(
-    llmHelperSrc.includes('doc_grounded_hybrid_timeout'),
-    'LLMHelper must emit telemetry event on hybrid timeout so we can monitor cold-embedder fallback rate',
+    llmHelperSrc.includes('resolveManualDocumentGroundedContextWithLegacyFallback'),
+    'manual document-grounded path must go through universal-first helper',
+  );
+  assert.ok(
+    llmHelperSrc.includes('buildRetrievedActiveModeContextBlockHybrid'),
+    'legacy hybrid must remain available as the Stage-6 once-fallback',
   );
 });
 
@@ -679,13 +675,20 @@ test('round2: ModeHybridRetriever uses 12 for DOC_GROUNDED_TOP_K_LOCAL', () => {
   );
 });
 
-// --- HIGH: WhatToAnswerLLM.ts passes undefined when doc-grounded ---
+// --- HIGH: WhatToAnswerLLM retired direct Mode hybrid (Change 48 / Stage 10) ---
 
-test('round2: WhatToAnswerLLM passes undefined tokenBudget when forceDocumentGrounding (hybrid path)', () => {
-  // All three call sites must use forceDocumentGrounding ? undefined : 1800
-  const count = (wtaSrc.match(/forceDocumentGrounding \? undefined : 1800/g) || []).length;
-  assert.ok(count >= 2,
-    `WhatToAnswerLLM must have ≥2 call sites using "forceDocumentGrounding ? undefined : 1800" (found ${count})`);
+test('round2: WhatToAnswerLLM does not call legacy Mode hybrid string retrieval', () => {
+  // Change 48 / Stage 10: normal WTA Mode hybrid is retired. Governed turns use
+  // EvidenceResolver→retrieveHybridRaw; non-governed use universal RAG.
+  assert.doesNotMatch(
+    wtaSrc,
+    /buildRetrievedActiveModeContextBlockHybrid\s*\(/,
+    'WhatToAnswerLLM must not call buildRetrievedActiveModeContextBlockHybrid',
+  );
+  assert.ok(
+    wtaSrc.includes('retrieveHybridRaw'),
+    'governed EvidenceResolver path must still wire retrieveHybridRaw',
+  );
 });
 
 test('round2: WhatToAnswerLLM does not pass hardcoded 1800 to any retrieval call unconditionally', () => {
