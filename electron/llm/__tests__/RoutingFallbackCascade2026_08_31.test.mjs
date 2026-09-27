@@ -76,17 +76,19 @@ function verifiedHealth(family, modelId) {
  * its name and returns immediately, so an accidental extra dispatch is always
  * visible in `captured` instead of silently succeeding.
  */
-function runInner(message, { model = 'gpt-4o', useOllama = false, ollamaModel, clients = {}, streamers = {} } = {}) {
+function runInner(message, { model = 'gpt-4o', useOllama = false, ollamaModel, clients = {}, streamers = {}, ollamaReachable = true, isLocalOnlyMode = false } = {}) {
   const captured = [];
   const h = Object.create(LLMHelper.prototype);
   h.useOllama = useOllama;
   h.ollamaModel = ollamaModel;
   h.checkOllamaAvailable = async () => false;
   h.ensureOllamaModelSelected = async () => false;
+  // Stage 1: selected-Ollama path probes reachability before dispatch.
+  h.isOllamaReachable = async () => ollamaReachable;
   h.currentModelId = model;
   h.pickConfiguredCustomProviderForFallback = () => null;
   h.getActiveModeGroundingInfo = () => null;
-  h.isLocalOnlyMode = false;
+  h.isLocalOnlyMode = isLocalOnlyMode;
   for (const [field, value] of Object.entries(clients)) h[field] = value;
   const wrap = (k, override) => async function* (...args) {
     captured.push(k);
@@ -130,6 +132,29 @@ describe('ollama-* selection: single dispatch, no cloud cascade', () => {
     assert.equal(routing.requestedProvider, 'ollama');
     assert.equal(routing.actualProvider, 'ollama');
     assert.equal(routing.fallbackOccurred, false);
+  });
+
+  // Stage 1 pin: unreachable Ollama must not hang or trap on a yielded error —
+  // fall through to a verified cloud provider within a short deadline.
+  test('Ollama unreachable → verified fallback within deadline', async () => {
+    setCredentials({ health: { claude: verifiedHealth('claude', 'claude-3-5-sonnet-20241022') } });
+    const t0 = Date.now();
+    const { captured, text, error, routing } = await runInner('hello', {
+      useOllama: true,
+      ollamaModel: 'llama3.2',
+      ollamaReachable: false,
+      clients: { _claudeClient: {} },
+      streamers: { streamWithClaude: 'cloud fallback answer' },
+    });
+    const elapsedMs = Date.now() - t0;
+    assert.equal(error, null, `must not error, got: ${error?.message}`);
+    assert.ok(!captured.includes('streamWithOllama'), 'unreachable Ollama must never be dispatched');
+    assert.deepEqual(captured, ['streamWithClaude']);
+    assert.equal(text, 'cloud fallback answer');
+    assert.equal(routing.requestedProvider, 'ollama');
+    assert.equal(routing.actualProvider, 'claude');
+    assert.equal(routing.fallbackOccurred, true);
+    assert.ok(elapsedMs < 2000, `fallback must complete within 2s, took ${elapsedMs}ms`);
   });
 });
 

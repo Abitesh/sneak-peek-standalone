@@ -6997,11 +6997,25 @@ let isMultimodal = !!(imagePaths?.length);
     // mode ran first and could hijack a local-only Ollama selection into a
     // CLOUD Codex/Groq call whenever Codex happened to be signed in — exactly
     // the kind of silent cloud fallback local-only users must never get.
+    //
+    // Unreachable daemon (Stage 1): probe BEFORE streamWithOllama. That helper
+    // yields an error string on ECONNREFUSED instead of throwing, which would
+    // trap the turn with no cloud fallback. When local-only is off, fall
+    // through to the verified cascade within the normal connect deadline.
     if (this.useOllama) {
-      const ollamaSystemPrompt = this.resolveLocalSystemPrompt(finalSystemPrompt);
-      this.recordActualStream('ollama', `ollama-${this.ollamaModel}`);
-      yield* this.streamWithOllama(contextOsGoverningBlock ? userContent : message, contextOsGoverningBlock ? undefined : combinedContext || undefined, ollamaSystemPrompt, imagePaths, abortSignal);
-      return;
+      const ollamaReachable = await this.isOllamaReachable();
+      if (!ollamaReachable) {
+        if (this.isLocalOnlyMode) {
+          yield 'Error: Failed to stream from Ollama (unreachable).';
+          return;
+        }
+        console.warn('[LLMHelper] Ollama selected but unreachable; falling through to verified providers');
+      } else {
+        const ollamaSystemPrompt = this.resolveLocalSystemPrompt(finalSystemPrompt);
+        this.recordActualStream('ollama', `ollama-${this.ollamaModel}`);
+        yield* this.streamWithOllama(contextOsGoverningBlock ? userContent : message, contextOsGoverningBlock ? undefined : combinedContext || undefined, ollamaSystemPrompt, imagePaths, abortSignal);
+        return;
+      }
     }
 
     // GROQ FAST TEXT OVERRIDE (Text-Only)
