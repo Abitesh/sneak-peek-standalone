@@ -30,6 +30,10 @@ export interface RagQueryPlanningContext {
  hasModeReferenceFiles?: boolean;
  /** Whether Personal Files are available to search. */
  hasPersonalFiles?: boolean;
+    /** Project-tagged My Files available for project-specific questions. */
+    hasProjectFiles?: boolean;
+    /** Project file names are routing metadata only; document contents stay in retrieval. */
+    projectFileNames?: readonly string[];
  /** Whether a meeting scope is active/available for transcript retrieval. */
  hasMeeting?: boolean;
  /**
@@ -51,6 +55,8 @@ export interface RagQueryPlan {
  /** False when the prompt does not need document/meeting evidence (Change 29). */
  needsDocumentEvidence: boolean;
  retrievalMode: RagRetrievalMode;
+    /** Restrict personal retrieval to files tagged as projects. */
+    projectFilesOnly?: boolean;
 }
 
 function clean(text: string): string {
@@ -91,6 +97,24 @@ function isPersonalQuery(query: string): boolean {
  // them through the existing My Files path instead of relying on generic
  // technical retrieval, which can otherwise prioritize résumé material.
  return /\b(?:my|mine|personal|notes?|notebook|saved|resume|cv|curriculum vitae|my files?|personal files?|project notes?|projects?|find my)\b/i.test(q);
+}
+
+function projectNameMatches(query: string, fileNames: readonly string[] = []): boolean {
+ const queryTokens = new Set(clean(query).toLowerCase().replace(/[_-]+/g, ' ').split(/[^a-z0-9]+/).filter(Boolean));
+ return fileNames.some((fileName) => {
+    const baseName = String(fileName ?? '').split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '') ?? '';
+    const tokens = baseName.toLowerCase().replace(/[_-]+/g, ' ').split(/[^a-z0-9]+/)
+     .filter((token) => token.length >= 3 && !/^(?:project|file|document|notes?|pdf|architecture|summary)$/.test(token));
+    return tokens.some((token) => queryTokens.has(token));
+ });
+}
+
+function isProjectIntent(query: string): boolean {
+ const q = clean(query);
+ return /\b(?:my|your|our|the candidate'?s?)\s+(?:[\w-]+\s+)?projects?\b/i.test(q)
+    || /\b(?:what did you|what have you)\s+(?:personally\s+)?(?:build|implement|create|design|develop)\b/i.test(q)
+    || /\bwhat challenges? did you face\b/i.test(q)
+    || /\bwhy did (?:you|we) (?:choose|use|select|pick|go with)\b/i.test(q);
 }
 
 function isModeReferenceQuery(query: string): boolean {
@@ -137,12 +161,12 @@ function planRetrievalNeed(
  };
 }
 
-function inferPreviousSource(state: ConversationState | null): RagSourceSelection | null {
+function inferPreviousSource(state: ConversationState | null, context: RagQueryPlanningContext): RagSourceSelection | null {
  if (!state) return null;
  const previous = clean(state.previousQuestion ?? '');
  if (!previous) return null;
  if (isMeetingQuery(previous)) return 'meeting';
- if (isPersonalQuery(previous)) return 'personal-files';
+ if (isPersonalQuery(previous) || projectNameMatches(previous, context.projectFileNames)) return 'personal-files';
  if (isKnowledgeQuery(previous)) return 'knowledge';
  if (isModeReferenceQuery(previous)) return 'mode-reference';
  return null;
@@ -159,7 +183,7 @@ function selectSources(
  const personal = isPersonalQuery(q);
  const knowledge = isKnowledgeQuery(q);
  const mode = isModeReferenceQuery(q);
- const previousSource = referential ? inferPreviousSource(state) : null;
+ const previousSource = referential ? inferPreviousSource(state, context) : null;
 
  const sources: RagSourceSelection[] = [];
 
@@ -209,24 +233,9 @@ function selectSources(
  return { sources, sourceReason: 'conversation' };
  }
 
- // A generic technical question can still be a curated-corpus candidate. The
- // caller supplies actual corpus availability, so this does not turn ordinary
- // RAG planning into a blind fan-out across empty stores. The relevance gate
- // decides whether the selected corpus contains useful evidence.
- const curatedSources: RagSourceSelection[] = [];
- if (context.hasPersonalFiles === true) curatedSources.push('personal-files');
- if (context.hasModeReferenceFiles === true) curatedSources.push('mode-reference');
- if (curatedSources.length) {
- return {
- sources: curatedSources,
- sourceReason: context.hasPersonalFiles === true ? 'personal' : 'mode',
- };
- }
-
- // No reliable source signal: stay conservative rather than fan out across
-// every document family. The caller can still explicitly request sources via
-// RAGSearchOptions.selectedSources, and strong source signals are handled above.
-return { sources: [], sourceReason: 'default' };
+ // No reliable source signal: general technical questions stay on the fast
+ // knowledge path. Governed document turns can still request retrieval explicitly.
+ return { sources: [], sourceReason: 'default' };
 }
 
 function extractTopic(previousQuestion: string, referent?: string): string {
@@ -323,7 +332,16 @@ export class RagQueryPlanner {
  }
  }
 
- const selection = selectSources(original, state, context);
+ const hasProjectFiles = context.hasProjectFiles === true || (context.projectFileNames?.length ?? 0) > 0;
+ const projectSpecific = hasProjectFiles
+  && !isMeetingQuery(original)
+  && (projectNameMatches(original, context.projectFileNames) || isProjectIntent(original));
+ const selection = projectSpecific
+  ? {
+   sources: context.hasPersonalFiles === false ? [] : ['personal-files' as const],
+   sourceReason: 'personal' as const,
+  }
+  : selectSources(original, state, context);
  const retrieval = planRetrievalNeed(original, selection.sources);
  return {
  originalQuery: original,
@@ -334,6 +352,7 @@ export class RagQueryPlanner {
  sourceReason: selection.sourceReason,
  needsDocumentEvidence: retrieval.needsDocumentEvidence,
  retrievalMode: retrieval.retrievalMode,
+    ...(projectSpecific ? { projectFilesOnly: true } : {}),
  };
  }
 }

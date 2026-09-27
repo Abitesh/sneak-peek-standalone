@@ -5,8 +5,8 @@ import type { EmbeddingPipeline } from '../EmbeddingPipeline';
 import type { VectorStore } from '../VectorStore';
 
 interface PersonalKnowledgeLike {
-  searchRelevantAsync?(query: string, limit?: number): Promise<any[]>;
-  searchRelevant?(query: string, limit?: number): any[];
+  searchRelevantAsync?(query: string, limit?: number, fileType?: string): Promise<any[]>;
+  searchRelevant?(query: string, limit?: number, fileType?: string): any[];
   search?(query: string, limit?: number): any[];
   listFiles?(): any[];
   setEmbeddingServices?(embeddingPipeline: EmbeddingPipeline, vectorStore: VectorStore): void;
@@ -21,10 +21,16 @@ export class PersonalRagAdapter implements RagSourceAdapter {
     if (!personalKnowledge) return [];
 
     const { query, candidatePoolSize } = context;
+    const projectFilesOnly = context.options.projectFilesOnly === true;
+    const projectFileIds = projectFilesOnly
+      ? new Set((personalKnowledge.listFiles?.() ?? [])
+        .filter((file: any) => String(file?.fileType ?? '') === 'project')
+        .map((file: any) => String(file?.id ?? '')))
+      : undefined;
     let items: any[] = [];
     try {
       items = await (
-        personalKnowledge.searchRelevantAsync?.(query, candidatePoolSize)
+        personalKnowledge.searchRelevantAsync?.(query, candidatePoolSize, projectFilesOnly ? 'project' : undefined)
         ?? Promise.resolve(
           personalKnowledge.searchRelevant?.(query, candidatePoolSize)
           ?? personalKnowledge.search?.(query, candidatePoolSize)
@@ -34,7 +40,7 @@ export class PersonalRagAdapter implements RagSourceAdapter {
     } catch (error) {
       console.warn('[PersonalRagAdapter] semantic personal search failed; using lexical fallback:', error instanceof Error ? error.message : String(error));
       try {
-        items = personalKnowledge.searchRelevant?.(query, candidatePoolSize)
+        items = personalKnowledge.searchRelevant?.(query, candidatePoolSize, projectFilesOnly ? 'project' : undefined)
           ?? personalKnowledge.search?.(query, candidatePoolSize)
           ?? [];
       } catch (fallbackError) {
@@ -42,6 +48,7 @@ export class PersonalRagAdapter implements RagSourceAdapter {
         items = [];
       }
     }
+    if (projectFileIds) items = items.filter((item) => projectFileIds.has(String(item.fileId ?? '')));
 
     const documentCache = new Map<string, RagDocument>();
     const results: RagSearchResult[] = [];

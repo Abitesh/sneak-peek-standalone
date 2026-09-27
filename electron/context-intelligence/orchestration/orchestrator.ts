@@ -20,7 +20,7 @@ import type {
 import { freezeTurnDecision } from '../contracts/types';
 import { resolveModePolicy, generalKnowledgeAllowed, type ModePolicy } from '../policies/mode-policy-registry';
 import { resolveAnswerPolicy, type AnswerPolicy } from '../policies/answer-policy';
-import { CLAIM_AUTHORITY } from '../policies/source-authority-policy';
+import { CLAIM_AUTHORITY, authoritativeSourcesForTurn } from '../policies/source-authority-policy';
 import { classifyTurn, isBareFollowUp } from '../question/turn-classifier';
 import type { AnswerTrace, RetrievalAttemptTrace } from '../observability/answer-trace';
 
@@ -105,14 +105,20 @@ function buildClaimRequirements(
   policy: ModePolicy,
   claimTypes: string[],
   clauses: Partial<Record<string, string>> = {},
+  question = '',
 ): ClaimRequirement[] {
   return claimTypes.map((ct) => {
     const authority = CLAIM_AUTHORITY[ct as keyof typeof CLAIM_AUTHORITY];
-    const isPrivate = authority.authoritative.length > 0;
+    const authoritativeSources = authoritativeSourcesForTurn(
+      ct as ClaimRequirement['claimType'],
+      policy.id,
+      ct === 'USER_MOTIVATION' ? question : clauses[ct] ?? '',
+    );
+    const isPrivate = authoritativeSources.length > 0;
     return {
       claimType: ct as ClaimRequirement['claimType'],
       authority: isPrivate ? 'PRIVATE_SOURCE_REQUIRED' : 'GENERAL_KNOWLEDGE_ALLOWED',
-      authoritativeSources: authority.authoritative,
+      authoritativeSources,
       prohibitedSources: authority.prohibited,
       // An unsupported personal claim is DISCLOSED, not silently omitted and not
       // fabricated. Over-refusal is explicitly forbidden (§27.2).
@@ -205,7 +211,7 @@ export function decide(req: AnswerRequest): Readonly<TurnDecision> {
     isFollowUp: Boolean(req.isFollowUp) || cls.questionTypes.includes('FOLLOW_UP'),
 
     questionTypes: cls.questionTypes,
-    claimRequirements: buildClaimRequirements(policy, cls.claimTypes, cls.claimClauses),
+    claimRequirements: buildClaimRequirements(policy, cls.claimTypes, cls.claimClauses, q.resolved),
 
     scope: req.scope,
     authorizedSources: [],            // populated by source authorization at retrieval time

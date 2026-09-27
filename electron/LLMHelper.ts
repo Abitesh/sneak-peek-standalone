@@ -106,19 +106,6 @@ function formatFetchError(err: any): string {
     .join(' ');
 }
 
-const GROQ_INTERACTIVE_INPUT_TOKENS = 5000;
-const GROQ_INTERACTIVE_OUTPUT_TOKENS = 1536;
-const GROQ_INTERACTIVE_SYSTEM_TOKENS = 900;
-
-function keepGroqHeadAndTail(text: string, maxTokens: number): string {
-  if (!text || maxTokens <= 0) return '';
-  const maxChars = Math.max(1, Math.floor(maxTokens * 3.2));
-  if (text.length <= maxChars) return text;
-  const headChars = Math.floor(maxChars * 0.42);
-  const tailChars = Math.max(1, maxChars - headChars);
-  return `${text.slice(0, headChars).trimEnd()}\n...[context compacted for fast Groq turn]...\n${text.slice(-tailChars).trimStart()}`;
-}
-
 interface OllamaResponse {
   response: string
   done: boolean
@@ -280,9 +267,36 @@ const MINIMAL_THINKING_MODELS = new Set<string>([
   'gemini-3.6-flash',
 ]);
 
-export function buildThinkingConfig(model: string | undefined, budget: number): { thinkingLevel: ThinkingLevel } | { thinkingBudget: number } {
+export function resolveInteractiveThinkingLevel(message: string): ThinkingLevel {
+  const prompt = String(message ?? '');
+  const questionBlock = prompt.match(/(?:^|\n)# Question\s*\n([\s\S]*?)(?=\n# [A-Z][^\n]*|$)/i)?.[1];
+  const question = String(questionBlock ?? prompt.split(/\r?\n/).find((line) => line.trim()) ?? '')
+    .replace(/^#\s*Question\s*/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const detailed = /\b(?:\d\s*(?:-|to)\s*\d?\s*minutes?|in detail|complete architecture|full architecture|full workflow|walk me through|challenges?|personally implement|why did (?:you|we) choose)\b/i.test(question);
+  const hasProjectEvidence = /source_type=["']PROJECT_FILE["']/i.test(prompt);
+  const simpleDefinition = /^(?:what is|what are|define)\b[^?]{1,100}\??$/i.test(question)
+    && !/\b(?:access|refresh|versus|vs\.?|compare|difference|project|architecture|implementation)\b/i.test(question)
+    && !hasProjectEvidence;
+  return simpleDefinition && !detailed ? ThinkingLevel.MINIMAL : ThinkingLevel.LOW;
+}
+
+export function resolveInteractiveGroqOutputLimit(modelId: string): number {
+  return Math.min(
+    resolveMaxOutputTokens({ id: modelId, provider: 'groq' }) ?? 4096,
+    4096,
+  );
+}
+
+export function buildThinkingConfig(
+  model: string | undefined,
+  budget: number,
+  interactiveLevel?: ThinkingLevel,
+): { thinkingLevel: ThinkingLevel } | { thinkingBudget: number } {
   if (typeof model === 'string' && PRO_MODEL_RE.test(model)) return { thinkingLevel: ThinkingLevel.LOW };
   if (budget <= 0) {
+    if (interactiveLevel === ThinkingLevel.LOW) return { thinkingLevel: ThinkingLevel.LOW };
     // Unknown/unlisted model → LOW, the universally accepted floor. Falling
     // through to MINIMAL here is what 400s gemini-3.7-flash.
     if (typeof model === 'string' && !MINIMAL_THINKING_MODELS.has(model)) {
@@ -291,6 +305,96 @@ export function buildThinkingConfig(model: string | undefined, budget: number): 
     return { thinkingLevel: ThinkingLevel.MINIMAL };
   }
   return { thinkingBudget: budget };
+}
+
+const LANGUAGE_MARKER_OPENERS = ['[language override', '[language instruction'];
+const LANGUAGE_MARKER_CLOSERS = ['[end language override]', '[end language instruction]'];
+
+function partialMarkerSuffixLength(text: string, markers: readonly string[]): number {
+  const lower = text.toLowerCase();
+  let longest = 0;
+  for (const marker of markers) {
+    const max = Math.min(lower.length, marker.length - 1);
+    for (let length = max; length > longest; length--) {
+      if (lower.endsWith(marker.slice(0, length))) longest = length;
+    }
+  }
+  return longest;
+}
+
+/** Suppress echoed language-control blocks without buffering ordinary stream text. */
+export class LanguageMarkerStreamFilter {
+  private pending = '';
+  private insideLanguageBlock = false;
+
+  push(chunk: string): string {
+    let input = this.pending + String(chunk ?? '');
+    this.pending = '';
+    let output = '';
+
+    while (input.length > 0) {
+      const lower = input.toLowerCase();
+      if (this.insideLanguageBlock) {
+        let endIndex = -1;
+        let endMarker = '';
+        for (const marker of LANGUAGE_MARKER_CLOSERS) {
+          const index = lower.indexOf(marker);
+          if (index >= 0 && (endIndex < 0 || index < endIndex)) {
+            endIndex = index;
+            endMarker = marker;
+          }
+        }
+        if (endIndex < 0) {
+          const held = partialMarkerSuffixLength(input, LANGUAGE_MARKER_CLOSERS);
+          this.pending = held ? input.slice(-held) : '';
+          break;
+        }
+        input = input.slice(endIndex + endMarker.length);
+        this.insideLanguageBlock = false;
+        continue;
+      }
+
+      let markerIndex = -1;
+      let opener = '';
+      for (const marker of LANGUAGE_MARKER_OPENERS) {
+        const index = lower.indexOf(marker);
+        if (index >= 0 && (markerIndex < 0 || index < markerIndex)) {
+          markerIndex = index;
+          opener = marker;
+        }
+      }
+      if (markerIndex < 0) {
+        const held = partialMarkerSuffixLength(input, LANGUAGE_MARKER_OPENERS);
+        const emitLength = input.length - held;
+        output += input.slice(0, emitLength);
+        this.pending = held ? input.slice(emitLength) : '';
+        break;
+      }
+
+      output += input.slice(0, markerIndex);
+      const afterOpener = input[markerIndex + opener.length] ?? '';
+      if (afterOpener && !/[\s\]—]/.test(afterOpener)) {
+        output += '[';
+        input = input.slice(markerIndex + 1);
+        continue;
+      }
+      const headerEnd = input.indexOf(']', markerIndex + opener.length);
+      if (headerEnd < 0) {
+        this.pending = input.slice(markerIndex);
+        break;
+      }
+      input = input.slice(headerEnd + 1);
+      this.insideLanguageBlock = true;
+    }
+
+    return output;
+  }
+
+  flush(): string {
+    this.pending = '';
+    this.insideLanguageBlock = false;
+    return '';
+  }
 }
 
 // OpenAI reasoning effort for the interactive path. Per the openai-node docs,
@@ -5477,6 +5581,7 @@ let isMultimodal = !!(imagePaths?.length);
     // stateless reducer turned `nums[i] - 1` into `nums[i], 1`). It also skips
     // inline code/math and only rewrites a true prose connector.
     const dashReducer = new StreamingDashReducer();
+    const languageMarkerFilter = new LanguageMarkerStreamFilter();
     // Pull the optional abort signal (always the last positional arg).
     // Use `instanceof AbortSignal` rather than duck-typing — duck-typing on
     // `.aborted` is ambiguous because future params (extraDataScopes, options
@@ -5518,8 +5623,10 @@ let isMultimodal = !!(imagePaths?.length);
         outcome.reason = 'provider_failed_after_first_token';
         return;
       }
-      yield dashReducer.reduce(chunk);
-      emittedChars += typeof chunk === 'string' ? chunk.length : 0;
+      const visibleChunk = languageMarkerFilter.push(chunk);
+      if (!visibleChunk) continue;
+      yield dashReducer.reduce(visibleChunk);
+      emittedChars += visibleChunk.length;
       if (emittedChars > outputCeiling) {
         outcome.truncated = true;
         outcome.reason = 'output_cap_reached';
@@ -5738,7 +5845,9 @@ let isMultimodal = !!(imagePaths?.length);
     // Mirrors the priority order the previous hardcoded cascade used
     // (OpenAI/Claude ahead of Groq's low TPM ceiling; Gemini as the deep
     // multi-rung ladder; DeepSeek last, text-only).
-    const order: ProviderFamily[] = ['openai', 'claude', 'gemini', 'groq', 'deepseek'];
+    const order: ProviderFamily[] = excludeFamilies.has('gemini')
+      ? ['groq', 'openai', 'claude', 'deepseek']
+      : ['openai', 'claude', 'gemini', 'groq', 'deepseek'];
     const clientFor: Partial<Record<ProviderFamily, unknown>> = {
       openai: this.openaiClient,
       claude: this.claudeClient,
@@ -7428,20 +7537,11 @@ let isMultimodal = !!(imagePaths?.length);
 
     await this.rateLimiters.groq.acquire();
 
-    const fittedSystem = systemPrompt
-      ? keepGroqHeadAndTail(systemPrompt, GROQ_INTERACTIVE_SYSTEM_TOKENS)
-      : undefined;
-    const systemTokens = fittedSystem ? estimateTokens(fittedSystem) : 0;
-    const userBudget = Math.max(
-      900,
-      GROQ_INTERACTIVE_INPUT_TOKENS - Math.min(systemTokens, GROQ_INTERACTIVE_SYSTEM_TOKENS),
-    );
-    const fittedUser = keepGroqHeadAndTail(userMessage, userBudget);
     const messages: any[] = [];
-    if (fittedSystem) {
-      messages.push({ role: "system", content: fittedSystem });
+    if (systemPrompt) {
+      messages.push({ role: "system", content: systemPrompt });
     }
-    messages.push({ role: "user", content: fittedUser });
+    messages.push({ role: "user", content: userMessage });
 
     if (abortSignal?.aborted) return;
     const request = {
@@ -7450,7 +7550,7 @@ let isMultimodal = !!(imagePaths?.length);
       stream: true as const,
       temperature: INTERACTIVE_TEMPERATURE,
       seed: INTERACTIVE_SEED,
-      max_tokens: GROQ_INTERACTIVE_OUTPUT_TOKENS,
+      max_tokens: resolveInteractiveGroqOutputLimit(modelId),
     };
     require('./llm/providerPayloadCapture').captureProviderPayload({
       provider: 'groq', classification: 'sdk_request_object_before_serialization', payload: request,
@@ -7906,7 +8006,11 @@ let isMultimodal = !!(imagePaths?.length);
       // (off, fast) for budget≤0, 'low' for Pro (which can't disable), or an
       // explicit numeric budget when a caller passes a positive one. Threaded
       // budget comes from the caller; model picks the level/floor.
-      thinkingConfig: buildThinkingConfig(model, thinkingBudget),
+      thinkingConfig: buildThinkingConfig(
+        model,
+        thinkingBudget,
+        thinkingBudget <= 0 ? resolveInteractiveThinkingLevel(fullMessage) : undefined,
+      ),
       // Propagate the caller's AbortSignal into the SDK so cancelling a stream
       // (supersession or gemini-chat-stream-stop) aborts the client-side HTTP
       // request and rejects the in-flight iterator immediately — instead of us

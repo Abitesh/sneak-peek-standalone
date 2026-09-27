@@ -26,7 +26,7 @@ const { getModelCapabilities, resolveMaxOutputTokens, estimateTokens } =
   await import(pathToFileURL(path.join(distLlm, 'modelCapabilities.js')).href);
 
 const CLOUD_CAPS = getModelCapabilities('gemini-2.5-flash', false);
-const GROQ_CAPS = getModelCapabilities('qwen/qwen3.6-27b', false); // isLargeGroqModel → tier 'cloud'
+const GROQ_CAPS = getModelCapabilities('qwen/qwen3.8-27b', false); // isLargeGroqModel → tier 'cloud'
 
 describe('isTrivialQuery / assembleContext — trivial-query gate', () => {
   test('bare greetings are trivial', () => {
@@ -82,7 +82,7 @@ describe('fitPromptToBudget — Groq preflight skips when over ceiling', () => {
 
   test('a large layer is dropped under the Groq ceiling even though the model tier reports a 128k window', () => {
     assert.ok(GROQ_CAPS.maxContextTokens >= 100_000, 'sanity: Groq model tier reports a large context window');
-    assert.equal(GROQ_CAPS.outputBudgetTokens, 2048);
+    assert.equal(GROQ_CAPS.outputBudgetTokens, 4096);
     const bigLayer = { id: 'fileChunks', text: 'x'.repeat(60_000), priority: 0 }; // ~15k estimated tokens
     const result = fitPromptToBudget({
       system: 'System prompt.',

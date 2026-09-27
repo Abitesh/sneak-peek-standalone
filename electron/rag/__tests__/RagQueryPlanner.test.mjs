@@ -66,6 +66,41 @@ test('Change 29 does not skip when a generative verb is about a meeting or file'
   assert.ok(plan.sources.includes('meeting'));
 });
 
+test('simple general technical questions skip document retrieval even when files exist', async () => {
+  const { RagQueryPlanner } = await loadPlanner();
+  const plan = new RagQueryPlanner().plan('What is DBMS?', undefined, {
+    hasPersonalFiles: true,
+    hasProjectFiles: true,
+    hasModeReferenceFiles: true,
+    projectFileNames: ['Linkship-architecture.pdf'],
+  });
+  assert.equal(plan.needsDocumentEvidence, false);
+  assert.equal(plan.retrievalMode, 'skip');
+  assert.deepEqual(plan.sources, []);
+});
+
+test('a named project file routes project questions to project-tagged My Files only', async () => {
+  const { RagQueryPlanner } = await loadPlanner();
+  const context = {
+    hasPersonalFiles: true,
+    hasProjectFiles: true,
+    hasModeReferenceFiles: true,
+    projectFileNames: ['Linkship-architecture.pdf'],
+  };
+  const planner = new RagQueryPlanner();
+
+  for (const question of ['Explain Linkship', 'Tell me about Linkship', 'What is Linkship?']) {
+    const plan = planner.plan(question, undefined, context);
+    assert.equal(plan.needsDocumentEvidence, true, question);
+    assert.deepEqual(plan.sources, ['personal-files']);
+    assert.equal(plan.projectFilesOnly, true);
+  }
+
+  const motivation = planner.plan('Why did we use PostGIS?', undefined, context);
+  assert.deepEqual(motivation.sources, ['personal-files']);
+  assert.equal(motivation.projectFilesOnly, true);
+});
+
 test('Change 29 search honors skip unless the caller forces grounding or sources', () => {
   const src = read('electron/rag/RAGManager.ts');
   const start = src.indexOf('async search(query: string');

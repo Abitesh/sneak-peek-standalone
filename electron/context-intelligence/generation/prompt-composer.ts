@@ -472,8 +472,35 @@ if (!d.questionTypes.includes('PERSONAL_EXPERIENCE') || !evidence.some((e) => e.
 return '# Interview answer source\n'
 + 'A user-attached reference file may contain a prepared answer for this interview question. '
 + 'If the evidence contains a matching prepared answer, use its project-specific facts and reasoning as the primary basis. '
-+ 'Answer in first person as the candidate and do NOT replace it with a generic comparison of technologies. '
-+ 'Keep the answer concise and natural to speak aloud.';
++ 'Answer in first person as the candidate and do not replace it with a generic comparison of technologies. '
++ 'Keep the answer natural to speak aloud and honor any explicit request for more detail.';
+}
+function projectSourceGuidance(evidence: EvidenceItem[]): string {
+if (!evidence.some((e) => e.sourceType === 'PROJECT_FILE')) return '';
+return '# Project source authority\n'
++ 'For project-specific facts, PROJECT_FILE evidence is authoritative and résumé evidence is supporting context only. '
++ 'Do not let résumé wording override project-file details. State a personal implementation choice or reason only when the project evidence supports it; if a reason is absent, say the material does not state it. '
++ 'Any general technical rationale must be clearly identified as general reasoning, not as the candidate\'s actual reason.';
+}
+function answerLengthGuidance(question: string, evidence: EvidenceItem[]): string {
+const q = String(question ?? '').trim();
+if (/\b(?:2\s*(?:-|to)\s*3\s*(?:minute|minutes)|\d+\s*(?:-|to)?\s*\d?\s*(?:minute|minutes))\b/i.test(q)) {
+return 'Honor the requested duration; for a 2-3 minute answer, target roughly 250-400 spoken words and cover the supported points in sequence.';
+}
+if (/\b(?:in detail|complete architecture|full architecture|full workflow|walk me through|complete explanation)\b/i.test(q)) {
+return evidence.some((item) => item.sourceType === 'PROJECT_FILE')
+? 'Give a detailed, ordered explanation grounded in the project evidence, covering the supported request flow, components, data stores, and outcomes. Do not force a short sentence count.'
+: 'Give a complete, structured explanation of the requested subject. Do not force a short sentence count.';
+}
+if (/\b(?:normalization|acid properties|jwt|access token|refresh token|polymorphism)\b/i.test(q)
+  && /\b(?:explain|compare|difference|vs\.?|versus)\b/i.test(q)) {
+return 'Use a concise structure that defines the concept and explains its key parts or distinctions; do not reduce a requested explanation to a bare definition.';
+}
+if (evidence.some((item) => item.sourceType === 'PROJECT_FILE')
+  && /\b(?:architecture|workflow|how does|how do|what happens|walk)\b/i.test(q)) {
+return 'Explain the project flow in order using the matching project evidence, with enough detail to make the implementation understandable.';
+}
+return 'For a simple factual or definitional question, answer concisely and completely.';
 }
 /**
 * Explicit secondary/decoy source separation (deep-run 2, issue 8). Rendered
@@ -594,6 +621,7 @@ push('precedence_contract', precedenceContract(evidence)),
 push('precedence_history', precedenceHistory(d)),
 push('secondary_source', secondarySourceGuidance(d)),
 push('evidence_coverage', weakEvidenceGuidance(d, input.fallbackUsed, Boolean(packed.evidenceBlock))),
+push('project_source_authority', projectSourceGuidance(evidence)),
 push('interview_reference', interviewReferenceGuidance(d, evidence)),
 push('direct_answer_contract', `# Direct answer contract
 Answer the user's actual question directly. Do not respond with a generic acknowledgement such as "Understood, I'll do my best", "Please proceed with your question", or "I need more information" when the question itself is already clear.
@@ -602,7 +630,7 @@ For GENERAL_TECHNICAL, GENERAL_KNOWLEDGE, conceptual, SQL, DBMS, OOP, DSA, frame
 
 For PERSONAL_PROJECT, USER_MOTIVATION, or other candidate-specific questions: use matching retrieved/reference evidence when available. Never invent a candidate-specific fact. If exact candidate evidence is missing, clearly separate the general technical explanation from the unsupported personal claim instead of refusing the entire question.
 
-For interview use, keep the answer concise, natural to speak aloud, and directly usable by the candidate. For a technical interview, prefer 2-5 sentences unless the user explicitly asks for a detailed explanation. Do not turn a clear question into a clarification request.`),
+For interview use, keep the answer natural to speak aloud and directly usable by the candidate. ${answerLengthGuidance(d.resolvedQuestion, evidence)} Do not turn a clear question into a clarification request.`),
     push('capabilities', `# Capabilities\n${capabilityLines(policy)}`),
 ].filter((s) => s.trim()).join('\n\n');
 const user = [

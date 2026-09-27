@@ -83,6 +83,31 @@ export function isAuthoritativeFor(source: SourceType, claim: ClaimType): boolea
   return CLAIM_AUTHORITY[claim].authoritative.includes(source);
 }
 
+const GENERIC_MOTIVATION_ENTITIES = new Set([
+  'postgresql', 'postgres', 'mysql', 'sqlite', 'redis', 'mongodb', 'react', 'nodejs', 'django', 'flask',
+  'python', 'javascript', 'typescript', 'java', 'kotlin', 'swift', 'rust', 'kafka', 'docker', 'kubernetes',
+]);
+
+function motivationIsProjectSpecific(question: string): boolean {
+  const q = String(question ?? '').trim();
+  if (/\b(?:project|built|build|shipped|implemented|designed|architecture|workflow|challenges?)\b/i.test(q)) return true;
+  return [...q.matchAll(/\b([A-Z][A-Za-z0-9-]{2,})\b/g)]
+    .some((match) => !GENERIC_MOTIVATION_ENTITIES.has(match[1].toLowerCase()));
+}
+
+/** Add project authority only for a project-specific technical-interview motivation turn. */
+export function authoritativeSourcesForTurn(
+  claim: ClaimType,
+  modeId: string,
+  question: string,
+): SourceType[] {
+  const sources = [...CLAIM_AUTHORITY[claim].authoritative];
+  if (claim === 'USER_MOTIVATION' && modeId === 'technical-interview' && motivationIsProjectSpecific(question)) {
+    sources.push('PROJECT_FILE');
+  }
+  return sources;
+}
+
 export function isProhibitedFor(source: SourceType, claim: ClaimType): boolean {
   return CLAIM_AUTHORITY[claim].prohibited.includes(source);
 }

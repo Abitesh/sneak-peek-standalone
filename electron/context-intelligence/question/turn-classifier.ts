@@ -18,7 +18,7 @@
 
 import type { QuestionType, ClaimType, RetrievalPath, SourceType } from '../contracts/types';
 import type { ModePolicy } from '../policies/mode-policy-registry';
-import { CLAIM_AUTHORITY } from '../policies/source-authority-policy';
+import { CLAIM_AUTHORITY, authoritativeSourcesForTurn } from '../policies/source-authority-policy';
 
 export interface ClassificationInput {
   resolvedQuestion: string;
@@ -1108,7 +1108,12 @@ export function classifyTurn(input: ClassificationInput): Classification {
   const wanted = new Set<SourceType>();
   const unreachable = new Set<SourceType>();
   for (const c of claims) {
-    const srcs = CLAIM_TO_SOURCE[c] ?? [];
+    const srcs = (c === 'DOCUMENT_FACT'
+      ? CLAIM_TO_SOURCE[c] ?? []
+      : authoritativeSourcesForTurn(c, input.policy.id, c === 'USER_MOTIVATION'
+        ? input.resolvedQuestion
+        : clauses[c] ?? input.resolvedQuestion))
+      .filter((source) => !NON_RETRIEVABLE.includes(source));
     const availableSources = c === 'USER_MOTIVATION' && input.hasAttachedDocuments !== true
       ? srcs.filter((source) => source !== 'REFERENCE_FILE')
       : srcs;

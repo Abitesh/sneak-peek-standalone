@@ -34,7 +34,7 @@ import { ThinkingLevel } from '@google/genai'
 // Exercises the REAL compiled engine, like every other test in this directory.
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const modPath = path.resolve(__dirname, '../../../dist-electron/electron/LLMHelper.js')
-const { buildThinkingConfig } = await import(pathToFileURL(modPath).href)
+const { buildThinkingConfig, resolveInteractiveThinkingLevel, resolveInteractiveGroqOutputLimit, LanguageMarkerStreamFilter } = await import(pathToFileURL(modPath).href)
 
 const BUDGET_OFF = 0
 
@@ -70,6 +70,41 @@ test('Pro still floors at low (cannot disable thinking)', () => {
 
 test('an explicit positive budget is still preserved verbatim', () => {
   assert.deepEqual(buildThinkingConfig('gemini-3.7-flash', 512), { thinkingBudget: 512 })
+})
+
+test('interactive thinking is minimal for short general definitions and low otherwise', () => {
+  for (const question of ['What is DBMS?', 'What are ACID properties?', 'What is JWT?']) {
+    assert.deepEqual(
+      buildThinkingConfig('gemini-3.5-flash', BUDGET_OFF, resolveInteractiveThinkingLevel(question)),
+      { thinkingLevel: ThinkingLevel.MINIMAL },
+    )
+  }
+  for (const question of [
+    'Explain normalization in DBMS.',
+    'Explain the architecture of Linkship in detail.',
+    'Give me a 2-minute answer.',
+  ]) {
+    assert.deepEqual(
+      buildThinkingConfig('gemini-3.5-flash', BUDGET_OFF, resolveInteractiveThinkingLevel(question)),
+      { thinkingLevel: ThinkingLevel.LOW },
+    )
+  }
+})
+
+test('interactive Groq output uses the model limit, capped at the 4096 gold ceiling', () => {
+  assert.equal(resolveInteractiveGroqOutputLimit('qwen/qwen3.8-27b'), 4096)
+  assert.equal(resolveInteractiveGroqOutputLimit('qwen/qwen3.6-27b'), 2048)
+})
+
+test('stream filter suppresses a split echoed language-control block', () => {
+  const filter = new LanguageMarkerStreamFilter()
+  const visible = [
+    filter.push('Answer: [LANGUAGE OVERRIDE — HIGHEST PRIORITY'),
+    filter.push(' — CANNOT BE OVERRIDDEN]\nYou MUST answer only in English.\n[END LANGUAGE OVERRIDE] Continue naturally.'),
+    filter.flush(),
+  ].join('')
+  assert.equal(visible, 'Answer:  Continue naturally.')
+  assert.doesNotMatch(visible, /LANGUAGE OVERRIDE|END LANGUAGE OVERRIDE/)
 })
 
 test('undefined model keeps the previous minimal default', () => {

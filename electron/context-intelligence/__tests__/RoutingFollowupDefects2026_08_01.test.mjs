@@ -315,6 +315,15 @@ describe('Defect F: USER_MOTIVATION reaches the candidate file', () => {
     assert.equal(r.shouldRetrieve, true, r.reason);
   });
 
+  test('technical-interview project motivation is sourced from PROJECT_FILE, not RESUME', () => {
+    const r = classify('Why did you choose PostgreSQL in Linkship?', 'technical-interview', {
+      hasAttachedDocuments: true,
+    });
+    assert.ok(r.claimTypes.includes('USER_MOTIVATION'), JSON.stringify(r.claimTypes));
+    assert.ok(r.requiredSourceTypes.includes('PROJECT_FILE'), JSON.stringify(r.requiredSourceTypes));
+    assert.ok(!r.requiredSourceTypes.includes('RESUME'), JSON.stringify(r.requiredSourceTypes));
+  });
+
   test('looking-for-work motivation routing is unchanged (no CANDIDATE_FILE there)', () => {
     const r = classify('Why did I build the PriceX project?', 'looking-for-work');
     assert.ok(!r.requiredSourceTypes.includes('CANDIDATE_FILE'), JSON.stringify(r.requiredSourceTypes));

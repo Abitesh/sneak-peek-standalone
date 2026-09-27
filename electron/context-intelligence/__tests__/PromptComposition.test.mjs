@@ -18,9 +18,9 @@ const { adaptLegacyChunks } = await import(pathToFileURL(path.join(base, 'retrie
 
 const ADAPT = {
   scope: { userId: 'u1' },
-  sourceTypes: new Map([['resume-1', 'RESUME'], ['jd-1', 'JOB_DESCRIPTION'], ['reference-1', 'REFERENCE_FILE']]),
-  activeVersions: new Map([['resume-1', 'v2'], ['jd-1', 'v1'], ['reference-1', 'v1']]),
-  chunkVersions: new Map([['resume-1', 'v2'], ['jd-1', 'v1'], ['reference-1', 'v1']]),
+  sourceTypes: new Map([['resume-1', 'RESUME'], ['jd-1', 'JOB_DESCRIPTION'], ['reference-1', 'REFERENCE_FILE'], ['project-1', 'PROJECT_FILE']]),
+  activeVersions: new Map([['resume-1', 'v2'], ['jd-1', 'v1'], ['reference-1', 'v1'], ['project-1', 'v1']]),
+  chunkVersions: new Map([['resume-1', 'v2'], ['jd-1', 'v1'], ['reference-1', 'v1'], ['project-1', 'v1']]),
   assumeInScopeWhenUnknown: true,
 };
 const ev = (chunks) => adaptLegacyChunks(chunks, ADAPT).evidence;
@@ -123,6 +123,52 @@ describe('composition contract', () => {
     assert.match(c.system, /Interview answer source/);
     assert.match(c.system, /project-specific facts and reasoning as the primary basis/);
     assert.match(c.system, /Answer in first person as the candidate/);
+  });
+
+  test('project evidence is packed before higher-scoring resume evidence', () => {
+    const d = decision('Tell me about your sample project.');
+    const packed = packContext(d, ev([
+      { sourceId: 'resume-1', text: 'Résumé summary of the sample project.', chunkIndex: 0, score: 0.99 },
+      { sourceId: 'project-1', text: 'The project stores dispatch jobs in PostgreSQL.', chunkIndex: 0, score: 0.4 },
+    ]), { evidenceTokens: 5000, conversationTokens: 0, transcriptTokens: 0 });
+    const projectIndex = packed.evidenceBlock.indexOf('source_type="PROJECT_FILE"');
+    const resumeIndex = packed.evidenceBlock.indexOf('source_type="RESUME"');
+    assert.ok(projectIndex >= 0, 'project file evidence should be packed');
+    assert.ok(resumeIndex < 0 || projectIndex < resumeIndex, 'resume evidence must not precede project evidence');
+  });
+
+  test('project evidence carries explicit source authority and motivation limits', () => {
+    const c = composePrompt({
+      decision: decision('Why did you choose the database for your sample project?'),
+      policy: MODE_POLICIES['technical-interview'],
+      evidence: ev([{ sourceId: 'project-1', text: 'The service uses PostgreSQL.', chunkIndex: 0, score: 0.9 }]),
+    });
+    assert.match(c.system, /PROJECT_FILE evidence is authoritative/);
+    assert.match(c.system, /say the material does not state it/);
+  });
+
+  test('explicit detail requests override the brief interview default without lengthening simple answers', () => {
+    const simple = composePrompt({
+      decision: decision('What is DBMS?'),
+      policy: MODE_POLICIES['technical-interview'],
+      evidence: [],
+    });
+    assert.match(simple.system, /For a simple factual or definitional question, answer concisely and completely/);
+
+    const architecture = composePrompt({
+      decision: decision('Explain the architecture of Linkship in detail.'),
+      policy: MODE_POLICIES['technical-interview'],
+      evidence: ev([{ sourceId: 'project-1', text: 'The service uses PostgreSQL.', chunkIndex: 0, score: 0.9 }]),
+    });
+    assert.match(architecture.system, /Give a detailed, ordered explanation grounded in the project evidence/);
+    assert.match(architecture.system, /Do not force a short sentence count/);
+
+    const timed = composePrompt({
+      decision: decision('Give me a 2-minute answer about the project.'),
+      policy: MODE_POLICIES['technical-interview'],
+      evidence: [],
+    });
+    assert.match(timed.system, /target roughly 250-400 spoken words/);
   });
 
   test('states plainly when nothing was retrieved', () => {

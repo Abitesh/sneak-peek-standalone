@@ -204,6 +204,26 @@ describe('primary fails pre-commit → verified fallback, same prompt preserved'
     assert.equal(openaiAttempts, 1, 'openai must be attempted exactly once, never retried');
     assert.ok(captured.includes('streamGeminiTextCascade'), 'a different verified provider must still be tried');
   });
+
+  test('selected Gemini fails pre-commit → verified Qwen/Groq is tried before other cloud providers', async () => {
+    setCredentials({ health: {
+      groq: verifiedHealth('groq', 'qwen/qwen3.8-27b'),
+      openai: verifiedHealth('openai', 'gpt-4o'),
+    } });
+    const { captured, text, error, routing } = await runInner('Explain Linkship architecture.', {
+      model: 'gemini-3.5-flash',
+      clients: { _client: {}, _groqClient: {}, _openaiClient: {} },
+      streamers: {
+        streamGeminiTextCascade: async function* () { throw Object.assign(new Error('403 PERMISSION_DENIED'), { status: 403 }); },
+        streamWithGroq: 'one grounded Qwen answer',
+        streamWithOpenai: 'must not be called first',
+      },
+    });
+    assert.equal(error, null, `verified Qwen fallback should answer: ${error?.message}`);
+    assert.deepEqual(captured, ['streamGeminiTextCascade', 'streamWithGroq']);
+    assert.equal(text, 'one grounded Qwen answer');
+    assert.equal(routing.actualProvider, 'groq');
+  });
 });
 
 describe('no false "no provider available" when a verified alternative exists', () => {

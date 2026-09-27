@@ -53,10 +53,16 @@ function rank(evidence: EvidenceItem[], required: ClaimRequirement[]): EvidenceI
   const requiredClaims = new Set(
     required.filter((c) => c.authority === 'PRIVATE_SOURCE_REQUIRED').map((c) => c.claimType),
   );
+  const projectTurn = requiredClaims.has('USER_PROJECT') || requiredClaims.has('USER_MOTIVATION');
   return [...evidence].sort((a, b) => {
     const aReq = a.acceptedFor.some((c) => requiredClaims.has(c)) ? 1 : 0;
     const bReq = b.acceptedFor.some((c) => requiredClaims.has(c)) ? 1 : 0;
     if (aReq !== bReq) return bReq - aReq;
+    if (projectTurn && (a.sourceType === 'PROJECT_FILE' || b.sourceType === 'PROJECT_FILE')
+        && (a.sourceType === 'RESUME' || b.sourceType === 'RESUME')
+        && a.sourceType !== b.sourceType) {
+      return a.sourceType === 'PROJECT_FILE' ? -1 : 1;
+    }
     if (b.finalScore !== a.finalScore) return b.finalScore - a.finalScore;
     return a.evidenceId.localeCompare(b.evidenceId);   // total order
   });

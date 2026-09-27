@@ -12,7 +12,7 @@ import { pathToFileURL } from 'node:url';
 
 const dist = (p) => pathToFileURL(path.resolve(process.cwd(), 'dist-electron/electron/context-intelligence', p)).href;
 
-const { CLAIM_AUTHORITY, isAuthoritativeFor, isProhibitedFor, authorityOf, filterByScopeAndVersion } =
+const { CLAIM_AUTHORITY, isAuthoritativeFor, isProhibitedFor, authoritativeSourcesForTurn, authorityOf, filterByScopeAndVersion } =
   await import(dist('policies/source-authority-policy.js'));
 const { freezeTurnDecision, scopeKey } = await import(dist('contracts/types.js'));
 
@@ -26,6 +26,9 @@ describe('source authority', () => {
 
   test('a prepared interview reference may evidence user motivation, but a resume may not', () => {
     assert.equal(isAuthoritativeFor('REFERENCE_FILE', 'USER_MOTIVATION'), true);
+    assert.equal(isAuthoritativeFor('PROJECT_FILE', 'USER_MOTIVATION'), false);
+    assert.ok(authoritativeSourcesForTurn('USER_MOTIVATION', 'technical-interview', 'Why did you choose Linkship?').includes('PROJECT_FILE'));
+    assert.ok(!authoritativeSourcesForTurn('USER_MOTIVATION', 'general', 'Why did you choose Linkship?').includes('PROJECT_FILE'));
     assert.equal(isProhibitedFor('RESUME', 'USER_MOTIVATION'), true);
     assert.equal(isProhibitedFor('JOB_DESCRIPTION', 'USER_MOTIVATION'), true);
   });

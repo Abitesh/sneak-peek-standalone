@@ -57,6 +57,23 @@ test('Analyze falls back to SessionTracker interviewer lines when Listen buffers
   );
 });
 
+test('each Listen turn is timestamp-bounded and opts out of rolling chat context', () => {
+  assert.match(nativelyInterfaceSource, /listenStartedAtRef\.current = Date\.now\(\)/);
+  assert.match(nativelyInterfaceSource, /getListenWindowTranscript\?\.\(secs, listenStartedAt\)/);
+  assert.match(nativelyInterfaceSource, /\{ skipRollingContext: true \}/);
+
+  const intelligenceManagerSource = fs.readFileSync(
+    path.resolve(here, '../../../electron/IntelligenceManager.ts'),
+    'utf8',
+  );
+  assert.match(intelligenceManagerSource, /getListenWindowRolesSince\(startTimeMs: number\)/);
+  assert.match(intelligenceManagerSource, /Number\(item\.timestamp\) >= cutoff/);
+
+  const ipcSource = fs.readFileSync(path.resolve(here, '../../../electron/ipcHandlers.ts'), 'utf8');
+  assert.match(ipcSource, /if \(options\?\.skipRollingContext\) return undefined/);
+  assert.match(ipcSource, /if \(!context && !options\?\.skipRollingContext\)/);
+});
+
 test('Listen accumulates system/interviewer audio during a session (other person on the call)', () => {
   assert.match(
     nativelyInterfaceSource,

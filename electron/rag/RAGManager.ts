@@ -166,6 +166,8 @@ rerankCandidatePoolSize?: number;
 tokenBudget?: number;
 allowRerank?: boolean;
 forceDocumentGrounding?: boolean;
+  /** Internal planner hint: search only My Files tagged as project material. */
+  projectFilesOnly?: boolean;
 /** Existing Mode answer classification forwarded through ModeRagAdapter. */
 answerType?: AnswerType;
 /** Existing Mode custom-context suppression forwarded through ModeRagAdapter. */
@@ -988,9 +990,12 @@ const modeReferenceFiles = activeModeId && modesManager
 ? (modesManager.getReferenceFiles(activeModeId) ?? [])
 : [];
 const personalFiles = personalKnowledge?.listFiles?.() ?? [];
+const projectFiles = personalFiles.filter((file: any) => String(file?.fileType ?? '') === 'project');
 const planningContext: RagQueryPlanningContext = {
 hasModeReferenceFiles: modeReferenceFiles.length > 0,
 hasPersonalFiles: personalFiles.length > 0,
+hasProjectFiles: projectFiles.length > 0,
+projectFileNames: projectFiles.map((file: any) => String(file?.fileName ?? '')).filter(Boolean),
 // Meeting retrieval can search globally when no meetingId is supplied, so
 // keep the meeting source available to the planner. The final query's
 // intent still decides whether it is actually selected.
@@ -1157,7 +1162,8 @@ console.warn('[RAGManager] Knowledge adapter retrieval failed:', error);
 
 if (effectiveSourceSet.has('personal-files')) {
 try {
-const personalResults = canonicalRead
+const personalSearchOptions = queryPlan.projectFilesOnly ? { ...options, projectFilesOnly: true } : options;
+const personalResults = canonicalRead && !queryPlan.projectFilesOnly
 ? await canonicalRead.readSource({
 query: normalizedQuery,
 sourceType: 'personal',
@@ -1165,13 +1171,13 @@ limit: candidatePoolSize,
 ...canonicalEmbedFields,
 fallback: () => this.personalAdapter.retrieve({
 query: normalizedQuery,
-options,
+options: personalSearchOptions,
 candidatePoolSize,
 }),
 })
 : { results: await this.personalAdapter.retrieve({
 query: normalizedQuery,
-options,
+options: personalSearchOptions,
 candidatePoolSize,
 }), usedCanonical: false, fallbackReason: 'disabled' as const };
 results.push(...personalResults.results);
@@ -1190,7 +1196,7 @@ console.warn('[RAGManager] Personal retrieval failed:', error);
 }
 }
 
-if (!canonicalReadEnabled) {
+  if (!canonicalReadEnabled && !queryPlan.projectFilesOnly) {
 // Change 25 Phase 7: canonical lexical retrieval comparison.
 // This is observe-only and independently gated from the Phase 6.3 shadow.
 // It runs after all legacy source adapters and before rerank/gate. The

@@ -281,7 +281,7 @@ export const MODE_POLICIES: Record<ModeId, ModePolicy> = {
     id: 'technical-interview', version: '1.1.0', name: 'Technical Interview',
     purpose: 'Whiteboard-style coding and system design support.',
     allowedSourceTypes: ['RESUME', 'JOB_DESCRIPTION', 'PROJECT_FILE', 'CODING_SAMPLE', 'SCREEN_CONTEXT', 'CONVERSATION_STATE'],
-    sourcePriorities: { RESUME: 1, PROJECT_FILE: 2, CODING_SAMPLE: 3, JOB_DESCRIPTION: 4 },
+    sourcePriorities: { PROJECT_FILE: 1, RESUME: 2, CODING_SAMPLE: 3, JOB_DESCRIPTION: 4 },
     // Same latent defect as looking-for-work: RESUME was planned but had no
     // pool without duplicate attachments. JD/résumé hydrate; PROFILE_FACT is
     // not in this mode's allowlist so it is not opted in.

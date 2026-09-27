@@ -770,15 +770,24 @@ return [...byChunk.values()]
 * requests are resolved from persisted file/chunk order; semantic requests
 * use the existing FTS/lexical index with a small concept-expansion set.
 */
-private async searchSemantic(query: string, limit = MAX_RESULTS): Promise<PersonalFileSearchResult[]> {
+private async searchSemantic(query: string, limit = MAX_RESULTS, fileIds?: readonly string[]): Promise<PersonalFileSearchResult[]> {
 if (!this.embeddingPipeline || !this.vectorStore) return [];
+if (fileIds && fileIds.length === 0) return [];
 try {
 await this.embeddingPipeline.waitForReady(15000);
 const embedded = await this.embeddingPipeline.getEmbeddingsWithFallback([query]);
 const queryEmbedding = embedded.embeddings[0];
 if (!queryEmbedding) return [];
-const hits = await this.vectorStore.searchSimilarPersonal(queryEmbedding, {
-limit: Math.max(limit * 3, 12),
+const semanticLimit = Math.max(limit * 3, 12);
+const hits = fileIds
+? (await Promise.all(fileIds.map((fileId) => this.vectorStore!.searchSimilarPersonal(queryEmbedding, {
+fileId,
+limit: Math.max(8, Math.ceil(semanticLimit / fileIds.length)),
+minSimilarity: 0.25,
+spaceKey: embedded.space,
+})))).flat()
+: await this.vectorStore.searchSimilarPersonal(queryEmbedding, {
+limit: semanticLimit,
 minSimilarity: 0.25,
 spaceKey: embedded.space,
 });
@@ -824,10 +833,10 @@ return [];
 }
 }
 
-searchRelevant(query: string, limit = MAX_RESULTS): PersonalFileSearchResult[] {
+searchRelevant(query: string, limit = MAX_RESULTS, fileType?: PersonalFileType): PersonalFileSearchResult[] {
 const q = String(query ?? '').trim();
 if (!q) return [];
-const files = this.listFiles();
+const files = this.listFiles().filter((file) => !fileType || file.fileType === fileType);
 const lower = q.toLowerCase();
 const named = files.filter((file) => {
 const name = file.fileName.toLowerCase().replace(/[_-]+/g, ' ');
@@ -881,7 +890,8 @@ if (chosen.length) return chosen.slice(0, Math.max(1, count));
 }
 const merged = new Map<string, PersonalFileSearchResult>();
 for (const variant of expandedQueries(q)) {
-const scoped = named.length ? this.searchScoped(variant, named.map((file) => file.id), limit) : this.search(variant, limit);
+const scopedFileIds = named.length ? named.map((file) => file.id) : fileType ? files.map((file) => file.id) : null;
+const scoped = scopedFileIds ? this.searchScoped(variant, scopedFileIds, limit) : this.search(variant, limit);
 for (const result of scoped) {
 const previous = merged.get(result.chunkId);
 if (!previous || result.score > previous.score) merged.set(result.chunkId, result);
@@ -889,11 +899,12 @@ if (!previous || result.score > previous.score) merged.set(result.chunkId, resul
 }
 return [...merged.values()].sort((a, b) => b.score - a.score).slice(0, Math.max(1, Math.min(MAX_RESULTS, limit)));
 }
-async searchRelevantAsync(query: string, limit = MAX_RESULTS): Promise<PersonalFileSearchResult[]> {
+async searchRelevantAsync(query: string, limit = MAX_RESULTS, fileType?: PersonalFileType): Promise<PersonalFileSearchResult[]> {
 await this.repairLegacyChunking();
 await this.repairUnreadableIndexes();
-const lexical = this.searchRelevant(query, limit * 2);
-const semantic = await this.searchSemantic(String(query ?? '').trim(), limit * 2);
+const scopedFiles = fileType ? this.listFiles().filter((file) => file.fileType === fileType) : undefined;
+const lexical = this.searchRelevant(query, limit * 2, fileType);
+const semantic = await this.searchSemantic(String(query ?? '').trim(), limit * 2, scopedFiles?.map((file) => file.id));
 if (!semantic.length) return lexical.slice(0, Math.max(1, Math.min(MAX_RESULTS, limit)));
 
 const merged = new Map<string, PersonalFileSearchResult>();
