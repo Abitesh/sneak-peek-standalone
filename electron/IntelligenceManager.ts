@@ -185,6 +185,22 @@ export class IntelligenceManager extends EventEmitter {
         };
     }
 
+    /** Return only transcript context recorded at or after a Listen press. */
+    getListenWindowRolesSince(startTimeMs: number): { interviewer: string; user: string } {
+        const cutoff = Number.isFinite(startTimeMs) ? Math.max(0, startTimeMs) : Date.now();
+        const items = this.session.getContextWithInterim(Infinity)
+            .filter((item) => Number(item.timestamp) >= cutoff);
+        const interviewer: string[] = [];
+        const user: string[] = [];
+        for (const item of items) {
+            const text = (item.text || '').trim();
+            if (!text) continue;
+            if (item.role === 'interviewer') interviewer.push(text);
+            else if (item.role === 'user') user.push(text);
+        }
+        return { interviewer: interviewer.join(' ').trim(), user: user.join(' ').trim() };
+    }
+
     getLastInterviewerTurn(): string | null {
         return this.session.getLastInterviewerTurn();
     }

@@ -472,7 +472,7 @@ screenDenied: boolean;
 sameDevice: string | null;
 message?: string;
 }>;
-getListenWindowTranscript: (lastSeconds?: number) => Promise<{ interviewer: string; user: string }>;
+getListenWindowTranscript: (lastSeconds?: number, sinceMs?: number) => Promise<{ interviewer: string; user: string }>;
 getRecentMeetings: () => Promise<
 Array<{ id: string; title: string; date: string; duration: string; summary: string }>
 >;
@@ -677,7 +677,7 @@ streamGeminiChat: (
 message: string,
 imagePaths?: string[],
 context?: string,
-options?: { skipSystemPrompt?: boolean; ignoreKnowledgeMode?: boolean },
+options?: { skipSystemPrompt?: boolean; ignoreKnowledgeMode?: boolean; skipRollingContext?: boolean },
 ) => Promise<void>;
 onGeminiStreamToken: (callback: (token: string, meta?: { streamId?: number }) => void) => () => void;
 onGeminiStreamDone: (callback: (data?: { finalText?: string; streamId?: number; citationMarkers?: Record<string, RagCitationMarker>; text?: string; citations?: Record<string, RagCitationMarker>; ragUsed?: boolean; confidence?: number; sources?: string[] }) => void) => () => void;
@@ -1829,8 +1829,8 @@ debugInjectTranscript: (segments: Array<{ speaker?: string; text: string; timest
 ipcRenderer.invoke('debug-inject-transcript', segments),
 finalizeMicSTT: () => ipcRenderer.invoke('finalize-mic-stt'),
 ensureListenAudioCapture: () => ipcRenderer.invoke('ensure-listen-audio-capture'),
-getListenWindowTranscript: (lastSeconds?: number) =>
-ipcRenderer.invoke('get-listen-window-transcript', lastSeconds),
+getListenWindowTranscript: (lastSeconds?: number, sinceMs?: number) =>
+ipcRenderer.invoke('get-listen-window-transcript', lastSeconds, sinceMs),
 getRecentMeetings: () => ipcRenderer.invoke('get-recent-meetings'),
 getMeetingDetails: (id: string) => ipcRenderer.invoke('get-meeting-details', id),
 searchGlobalMeetings: (query: string, filters?: any) => ipcRenderer.invoke('search:global-meetings', { query, filters }),
@@ -2057,7 +2057,7 @@ streamGeminiChat: (
 message: string,
 imagePaths?: string[],
 context?: string,
-options?: { skipSystemPrompt?: boolean; ignoreKnowledgeMode?: boolean },
+options?: { skipSystemPrompt?: boolean; ignoreKnowledgeMode?: boolean; skipRollingContext?: boolean },
 ) => ipcRenderer.invoke('gemini-chat-stream', message, imagePaths, context, options),
 onGeminiStreamToken: (callback: (token: string, meta?: { streamId?: number }) => void) => {
 // meta is an optional 2nd arg carrying { streamId } (audit finding #3). Existing

@@ -871,7 +871,7 @@ sourceScopes.set(id, { userId: options.userId });
 for (const file of personalKnowledge?.listFiles?.() ?? []) {
 const id = String(file?.id ?? '');
 if (!id) continue;
-sourceTypes.set(id, 'REFERENCE_FILE');
+ sourceTypes.set(id, String((file as any)?.fileType ?? '') === 'project' ? 'PROJECT_FILE' : 'REFERENCE_FILE');
 activeVersions.set(id, 'current');
 chunkVersions.set(id, 'current');
 sourceScopes.set(id, {
@@ -907,7 +907,8 @@ userId: options.userId,
 meetingId: options.scope?.meetingId ?? sourceId,
 });
 } else if (result.source.sourceType === 'personal') {
-sourceType = 'REFERENCE_FILE';
+const personalFileType = String(result.source.metadata?.fileType ?? '');
+sourceType = personalFileType === 'project' ? 'PROJECT_FILE' : 'REFERENCE_FILE';
 activeVersions.set(sourceId, activeVersions.get(sourceId) ?? 'current');
 chunkVersions.set(sourceId, chunkVersions.get(sourceId) ?? 'current');
 sourceScopes.set(sourceId, sourceScopes.get(sourceId) ?? {

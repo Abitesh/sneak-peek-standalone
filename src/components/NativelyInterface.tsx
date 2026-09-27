@@ -6504,24 +6504,26 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
       // lines that the Listen UI buffers missed (late IPC, Ambient Chat late
       // start, throttle drop). Fill only empty sides to avoid double-paste.
       if (!them || !me) {
-        const listenMs = listenStartedAtRef.current
-          ? Date.now() - listenStartedAtRef.current
+        const listenStartedAt = listenStartedAtRef.current;
+        const listenMs = listenStartedAt
+          ? Date.now() - listenStartedAt
           : 30_000;
         const secs = Math.max(8, Math.ceil(listenMs / 1000) + 3);
         try {
-          const snap = await window.electronAPI.getListenWindowTranscript?.(secs);
+          const snap = listenStartedAt
+            ? await window.electronAPI.getListenWindowTranscript?.(secs, listenStartedAt)
+            : await window.electronAPI.getListenWindowTranscript?.(secs);
           if (snap?.interviewer && !them) them = snap.interviewer.trim();
           if (snap?.user && !me) me = snap.user.trim();
         } catch {
           /* non-fatal — keep renderer buffers */
         }
       }
-      listenStartedAtRef.current = 0;
-
       const question = [them && `Interviewer: ${them}`, me && `Me: ${me}`]
         .filter(Boolean)
         .join('\n')
         .trim();
+      listenStartedAtRef.current = 0;
       setVoiceInput('');
       voiceInputRef.current = '';
       setManualTranscript('');
@@ -6644,6 +6646,8 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
           await window.electronAPI.streamGeminiChat(
             question,
             currentAttachments.length > 0 ? currentAttachments.map((s) => s.path) : undefined,
+            undefined,
+            { skipRollingContext: true },
           );
         } catch (err) {
           // R-17: a throw from invoke() never reaches the main process, so no

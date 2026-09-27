@@ -20,8 +20,8 @@ import type { RAGManager } from '../rag/RAGManager';
 import { shouldWriteLegacyRagChunks } from '../intelligence/intelligenceFlags';
 import { VectorStore } from '../rag/VectorStore';
 import { invalidateIndexAttempt } from '../rag/IndexAttemptRegistry';
-export type PersonalFileType = 'resume' | 'job_description' | 'general';
-const PERSONAL_FILE_TYPES: ReadonlySet<string> = new Set(['resume', 'job_description', 'general']);
+export type PersonalFileType = 'resume' | 'job_description' | 'project' | 'general';
+const PERSONAL_FILE_TYPES: ReadonlySet<string> = new Set(['resume', 'job_description', 'project', 'general']);
 export interface PersonalFileRecord {
 id: string;
 fileName: string;
@@ -618,7 +618,7 @@ return row ? this.mapFile(row, this.garbledFileIds()) : null;
 }
 setFileType(id: string, fileType: string): PersonalFileRecord {
 if (!PERSONAL_FILE_TYPES.has(fileType)) {
-throw new Error(`Invalid file type "${fileType}". Expected resume, job_description, or general.`);
+throw new Error(`Invalid file type "${fileType}". Expected resume, job_description, project, or general.`);
 }
 const result = this.db.prepare(
 `UPDATE personal_files SET file_type = ?, updated_at = ? WHERE id = ?`
@@ -675,7 +675,7 @@ const ftsQuery = makeFtsQuery(q);
 const candidates: PersonalFileSearchResult[] = [];
 const fileTypes = this.fileTypeMap();
 const boostFor = (fileId: string): number =>
-fileTypes.get(fileId) === 'resume' || fileTypes.get(fileId) === 'job_description' ? TAGGED_FILE_BOOST : 1;
+fileTypes.get(fileId) !== 'general' ? TAGGED_FILE_BOOST : 1;
 if (ftsQuery) {
 try {
 const rows = this.db.prepare(`

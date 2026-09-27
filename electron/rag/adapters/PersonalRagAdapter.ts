@@ -21,14 +21,27 @@ export class PersonalRagAdapter implements RagSourceAdapter {
     if (!personalKnowledge) return [];
 
     const { query, candidatePoolSize } = context;
-    const items = await (
-      personalKnowledge.searchRelevantAsync?.(query, candidatePoolSize)
-      ?? Promise.resolve(
-        personalKnowledge.searchRelevant?.(query, candidatePoolSize)
-        ?? personalKnowledge.search?.(query, candidatePoolSize)
-        ?? [],
-      )
-    );
+    let items: any[] = [];
+    try {
+      items = await (
+        personalKnowledge.searchRelevantAsync?.(query, candidatePoolSize)
+        ?? Promise.resolve(
+          personalKnowledge.searchRelevant?.(query, candidatePoolSize)
+          ?? personalKnowledge.search?.(query, candidatePoolSize)
+          ?? [],
+        )
+      );
+    } catch (error) {
+      console.warn('[PersonalRagAdapter] semantic personal search failed; using lexical fallback:', error instanceof Error ? error.message : String(error));
+      try {
+        items = personalKnowledge.searchRelevant?.(query, candidatePoolSize)
+          ?? personalKnowledge.search?.(query, candidatePoolSize)
+          ?? [];
+      } catch (fallbackError) {
+        console.warn('[PersonalRagAdapter] lexical personal search also failed:', fallbackError instanceof Error ? fallbackError.message : String(fallbackError));
+        items = [];
+      }
+    }
 
     const documentCache = new Map<string, RagDocument>();
     const results: RagSearchResult[] = [];

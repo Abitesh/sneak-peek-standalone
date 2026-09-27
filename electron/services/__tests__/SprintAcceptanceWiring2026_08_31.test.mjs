@@ -120,7 +120,7 @@ describe('Acceptance step 5: upload file → ask about content → grounded answ
   });
 
   test('file-type tagging (resume/job_description) exists and boosts retrieval for tagged files', () => {
-    assert.match(PERSONAL_KNOWLEDGE_MANAGER, /export type PersonalFileType = 'resume' \| 'job_description' \| 'general'/);
+    assert.match(PERSONAL_KNOWLEDGE_MANAGER, /export type PersonalFileType = 'resume' \| 'job_description' \| 'project' \| 'general'/);
     assert.match(PERSON1_IPC, /safeHandle\('personal-files:set-file-type'/);
     assert.match(PERSONAL_KNOWLEDGE_MANAGER, /TAGGED_FILE_BOOST/);
   });

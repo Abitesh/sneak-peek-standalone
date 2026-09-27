@@ -106,9 +106,9 @@ function formatFetchError(err: any): string {
     .join(' ');
 }
 
-const GROQ_INTERACTIVE_INPUT_TOKENS = 2800;
-const GROQ_INTERACTIVE_OUTPUT_TOKENS = 768;
-const GROQ_INTERACTIVE_SYSTEM_TOKENS = 700;
+const GROQ_INTERACTIVE_INPUT_TOKENS = 5000;
+const GROQ_INTERACTIVE_OUTPUT_TOKENS = 1536;
+const GROQ_INTERACTIVE_SYSTEM_TOKENS = 900;
 
 function keepGroqHeadAndTail(text: string, maxTokens: number): string {
   if (!text || maxTokens <= 0) return '';
@@ -125,8 +125,8 @@ interface OllamaResponse {
 }
 
 // Model constants for Gemini (priority: flash-lite → flash → pro)
-const GEMINI_FLASH_MODEL = "gemini-3.7-flash"
-const GEMINI_FLASH_LITE_MODEL = "gemini-3.1-flash-lite"
+const GEMINI_FLASH_MODEL = "gemini-3.5-flash"
+const GEMINI_FLASH_LITE_MODEL = "gemini-3.5-flash-lite"
 const GEMINI_PRO_MODEL = "gemini-3.1-pro-preview"
 
 // NOTE: tail-latency hedging (racing flash against flash-lite) has been removed
@@ -274,6 +274,8 @@ const PRO_MODEL_RE = /(?:^|[-/])pro(?:[-/]|$)/i;
 // Safe as an allow-list because buildThinkingConfig's only call site is the
 // Gemini-only streaming path, so it never sees an OpenAI/Claude model id.
 const MINIMAL_THINKING_MODELS = new Set<string>([
+  'gemini-3.5-flash-lite',
+  'gemini-3.5-flash',
   'gemini-3.1-flash-lite',
   'gemini-3.6-flash',
 ]);
@@ -3570,7 +3572,7 @@ let isMultimodal = !!(imagePaths?.length);
 
   /**
    * Generate content using only reasoning-capable models.
-   * Priority: OpenAI → Claude → Gemini Pro → Groq (last resort).
+    * Priority: OpenAI → Claude → Gemini Flash-Lite/Flash → Groq Qwen fallback.
    * Used for structured JSON output tasks (resume/JD/company research).
    * NOTE: Does NOT mutate this.geminiModel — calls Gemini Pro directly to avoid race conditions.
    */
@@ -3606,12 +3608,12 @@ let isMultimodal = !!(imagePaths?.length);
 
   public async generateContentStructured(
     message: string,
-    // The Gemini block leads with flash-lite (fastest, cheapest) then 3.7-flash.
+    // The Gemini block leads with 3.5 Flash-Lite then 3.5 Flash.
     // `preferFast` no longer changes ordering (flash-lite is already first); it is
     // retained for API compatibility with latency-critical callers (live coaching).
     //
     // STRUCTURED-EXTRACTION ROUTING (resume/JD/other document ingestion): the
-    // Gemini chain here is intentionally flash-lite → 3.7-flash ONLY. A real
+    // Gemini chain here is intentionally flash-lite → flash ONLY. A real
     // head-to-head on the actual extraction code showed flash-lite fully extracts
     // (18 nodes) fastest; 3.7-flash is the correct single fallback; Gemini Pro
     // gives NO quality gain at ~4× latency; MiniMax-M3 severely UNDER-extracts. So
@@ -3648,14 +3650,14 @@ let isMultimodal = !!(imagePaths?.length);
       providers.push({ name: `Claude (${CLAUDE_MODEL})`, execute: () => this.generateWithClaude(message) });
     }
 
-    // Priority 3: Gemini cascade — flash-lite → 3.7-flash ONLY (cheapest/fastest
+    // Priority 3: Gemini cascade — 3.5 Flash-Lite → 3.5 Flash ONLY (cheapest/fastest
     // first). Each model is a distinct provider so the rotation falls through
     // lite → flash on failure, and each carries its OWN circuit key so a saturated
     // tier (repeated 429s) trips independently without burning the other's backoff.
     // Gemini PRO is intentionally EXCLUDED from structured extraction: benchmarked
     // on the real extraction code it gave no quality gain over flash-lite at ~4×
     // latency. MiniMax is likewise excluded (it under-extracts). This is the
-    // flash-lite→3.7-flash extraction pattern.
+    // 3.5-flash-lite→3.5-flash→Groq extraction pattern.
     if (this.client) {
       const buildGeminiProvider = (modelId: string): ProviderAttempt => ({
         name: `Gemini (${modelId})`,
@@ -3680,6 +3682,40 @@ let isMultimodal = !!(imagePaths?.length);
       });
       providers.push(buildGeminiProvider(GEMINI_FLASH_LITE_MODEL));
       providers.push(buildGeminiProvider(GEMINI_FLASH_MODEL));
+    }
+
+    // Priority 4: Groq Qwen 3.8 fallback for structured document extraction.
+    // If Gemini access is denied for the configured Google project, continue
+    // to a provider that can return the extraction as JSON.
+    if (this.groqClient && !this.isProviderDisabled('groq')) {
+      providers.push({
+        name: `Groq (${GROQ_MODEL})`,
+        execute: async () => {
+          if (this.isLocalOnlyMode) throw new Error('Cloud providers disabled in local-only mode');
+          await this.rateLimiters.groq.acquire();
+          this.assertOutboundScopes('groq', message);
+          const response = await this.createGroqCompletion({
+            model: GROQ_MODEL,
+            messages: [
+              {
+                role: 'system',
+                content: [
+                  'You are a structured document extraction engine.',
+                  'Return ONLY valid JSON. No markdown fences, no commentary.',
+                  'Preserve facts exactly from the supplied document/context.',
+                  'Do not invent missing fields. Use empty arrays/strings when the requested value is absent.',
+                ].join(' '),
+              },
+              { role: 'user', content: message },
+            ],
+            temperature: 0.2,
+            max_tokens: 4096,
+            response_format: { type: 'json_object' },
+            stream: false,
+          });
+          return response.choices[0]?.message?.content || '';
+        },
+      });
     }
 
     // Priority 5: Codex CLI (when enabled AND signed in).
@@ -7234,6 +7270,43 @@ let isMultimodal = !!(imagePaths?.length);
       if (outcome === 'failed-post-commit') { yield LLMHelper.TRUNCATION_SENTINEL; return; }
     }
 
+    // ── GEMINI → QWEN EMERGENCY FALLBACK ────────────────────────────────────
+    // A selected Gemini model may fail before its first token because of
+    // project access or quota restrictions. Use the existing Groq Qwen 3.8
+    // route with the same fitted, grounded content; never switch after commit.
+    if (
+      !isMultimodal
+      && selectedFamily === 'gemini'
+      && !triedFamilies.has('groq')
+      && this.groqClient
+      && !this._groqLocalDisabled
+      && !this.isProviderDisabled('groq')
+    ) {
+      triedFamilies.add('groq');
+      try {
+        console.warn('[LLMHelper] Gemini unavailable pre-commit; using direct Qwen 3.8 interview fallback.');
+        yield* this.trackCommit(
+          this.streamWithGroq(
+            userContent,
+            GROQ_MODEL,
+            this.injectLanguageInstruction(systemPromptOverride || GROQ_SYSTEM_PROMPT),
+            abortSignal,
+          ),
+          commit,
+        );
+        this.recordActualStream('groq', GROQ_MODEL);
+        return;
+      } catch (e: any) {
+        if (abortSignal?.aborted) throw e;
+        if (commit.emitted) {
+          yield LLMHelper.TRUNCATION_SENTINEL;
+          return;
+        }
+        this.recordProviderFailure('Groq Qwen fallback', e?.message || String(e));
+        console.warn('[LLMHelper] Direct Qwen fallback failed:', e?.message || e);
+      }
+    }
+
     // ── OLLAMA AS FALLBACK (Problem 25) ─────────────────────────────────────
     // Every cloud candidate above is exhausted (or never verified) — try the
     // local runtime before giving up entirely. `probeOllama` already respects
@@ -7819,18 +7892,10 @@ let isMultimodal = !!(imagePaths?.length);
     const _gt0 = Date.now();
     const _gmeasure = (() => { try { return process.env.MEASURE_LATENCY === 'true' || process.env.PI_LATENCY_TRACE === 'true'; } catch { return false; } })();
 
-    // CACHE BOUNDARY: static system content lives in `config.cachedContent`
-    // (or `config.systemInstruction` on fallback); dynamic content stays in `contents`.
-    //
-    // LATENCY (perf fix): use the NON-BLOCKING cache resolve. A cache HIT returns
-    // the name synchronously; a MISS returns null instantly and warms the cache
-    // in the BACKGROUND for the next request. This moves the multi-second
-    // `caches.create` round-trip OFF the first-token path — measured at 2.4s of
-    // dead time before any token when create ran inline. On a miss this request
-    // streams immediately with `systemInstruction` (implicit caching still helps).
-    const cacheName = systemInstruction
-      ? this.geminiPromptCache.getCachedOrWarmInBackground(this.client, model, systemInstruction)
-      : null;
+    // LIVE CHAT: bypass explicit Gemini cached-content creation. The configured
+    // project can reject cache creation even while ordinary generation works;
+    // use systemInstruction directly and avoid the cache side request entirely.
+    const cacheName = null;
     if (_gmeasure) console.log(`[Gemini.stream] +${Date.now() - _gt0}ms  cache resolve done (cacheHit=${Boolean(cacheName)}, sysPrompt=${systemInstruction?.length ?? 0}c, model=${model})`);
 
     const buildConfig = (useCacheName: string | null) => ({
@@ -7974,6 +8039,7 @@ let isMultimodal = !!(imagePaths?.length);
     const startIndex =
       this.currentModelId === GEMINI_PRO_MODEL ? 2 :
       this.currentModelId === GEMINI_FLASH_MODEL ? 1 :
+      this.currentModelId === GEMINI_FLASH_LITE_MODEL ? 0 :
       0;
     const providers = ladder.slice(startIndex);
 
@@ -9329,7 +9395,14 @@ let isMultimodal = !!(imagePaths?.length);
         }
       }
     } catch (error: any) {
-      return { success: false, error: error.message };
+      const message = String(error?.message ?? error);
+      if (/403|PERMISSION_DENIED|project has been denied access/i.test(message)) {
+        return {
+          success: false,
+          error: 'Gemini API access is denied for this Google project (HTTP 403). The key is reaching Google, but the project is restricted. Replace the Gemini key with one from a project that can generate content, or restore/upgrade the project in Google AI Studio.',
+        };
+      }
+      return { success: false, error: message };
     }
   }
   /**

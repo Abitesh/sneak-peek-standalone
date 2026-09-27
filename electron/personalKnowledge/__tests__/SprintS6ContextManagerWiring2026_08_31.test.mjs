@@ -45,7 +45,7 @@ describe('Problem 29-30: voice Analyze answers route through V3 like typed chat'
 
 describe('Problem 33-34: résumé/JD tagging exists end-to-end', () => {
   test('PersonalKnowledgeManager exposes fileType tagging + a boost for tagged files', () => {
-    assert.match(PERSONAL_KNOWLEDGE_MANAGER, /export type PersonalFileType = 'resume' \| 'job_description' \| 'general'/);
+    assert.match(PERSONAL_KNOWLEDGE_MANAGER, /export type PersonalFileType = 'resume' \| 'job_description' \| 'project' \| 'general'/);
     assert.match(PERSONAL_KNOWLEDGE_MANAGER, /setFileType\(id: string, fileType: string\)/);
     assert.match(PERSONAL_KNOWLEDGE_MANAGER, /TAGGED_FILE_BOOST/);
   });

@@ -790,15 +790,14 @@ return appState.ensureListenAudioCapture();
 });
 // Analyze safety net: interviewer/user lines SessionTracker already has for
 // the Listen window, in case renderer buffers missed system-audio IPC.
-safeHandle('get-listen-window-transcript', async (_event, lastSeconds?: number) => {
+safeHandle('get-listen-window-transcript', async (_event, lastSeconds?: number, sinceMs?: number) => {
 const secs = typeof lastSeconds === 'number' && lastSeconds > 0 ? Math.min(lastSeconds, 600) : 120;
 try {
-return (
-appState.getIntelligenceManager?.()?.getListenWindowRoles?.(secs) ?? {
-interviewer: '',
-user: '',
+const manager = appState.getIntelligenceManager?.();
+if (typeof sinceMs === 'number' && Number.isFinite(sinceMs) && sinceMs > 0) {
+return manager?.getListenWindowRolesSince?.(sinceMs) ?? { interviewer: '', user: '' };
 }
-);
+return manager?.getListenWindowRoles?.(secs) ?? { interviewer: '', user: '' };
 } catch {
 return { interviewer: '', user: '' };
 }
@@ -927,7 +926,7 @@ event: any,
 message: string,
 imagePaths?: string[],
 context?: string,
-options?: { skipSystemPrompt?: boolean; ignoreKnowledgeMode?: boolean },
+options?: { skipSystemPrompt?: boolean; ignoreKnowledgeMode?: boolean; skipRollingContext?: boolean },
 ): Promise<null> => {
 // Capture the manual turn's active-mode prior at handler scope. This keeps the
 // value available to both the V3 retrieval path and the legacy/manual path,
@@ -1539,6 +1538,7 @@ debugSources: v3DebugSources as never,
 // question clearly refers to that conversation.
 conversationSummary: (() => {
 try {
+if (options?.skipRollingContext) return undefined;
 const meetingActive = Boolean(appState.getIsMeetingActive?.());
 if (!shouldAttachLiveTranscriptToManualChat({
 query: v3Question,
@@ -1549,7 +1549,7 @@ return undefined;
 return appState.getIntelligenceManager?.()?.getFormattedContext?.(180) || undefined;
 } catch { return undefined; }
 })(),
-memoryContext: v3MemoryContext,
+memoryContext: options?.skipRollingContext ? undefined : v3MemoryContext,
 deferDebugCompletion: true,
 requestId: `v3-${myStreamId}`,
 requestSequence: myStreamId,
@@ -2048,7 +2048,7 @@ return null;
 // 100s window would echo back the user's just-typed message as both context and
 // question, confusing small models (the "20-char context" log line was just an echo).
 let autoContextSnapshot: string | undefined;
-if (!context) {
+if (!context && !options?.skipRollingContext) {
 try {
 const snap = intelligenceManager.getFormattedContext(100);
 if (snap && snap.trim().length > 0) autoContextSnapshot = snap;

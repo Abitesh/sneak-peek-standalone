@@ -7,7 +7,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { FileText, Paperclip, Trash2, RefreshCw, Database } from 'lucide-react';
 
-type PersonalFileType = 'resume' | 'job_description' | 'general';
+type PersonalFileType = 'resume' | 'job_description' | 'project' | 'general';
 type RagIndexStatus = 'NOT_INDEXED' | 'QUEUED' | 'EXTRACTING' | 'CHUNKING' | 'EMBEDDING' | 'READY' | 'FAILED' | 'OCR_REQUIRED';
 type PersonalFileIndexStatus = 'indexing' | 'done' | 'lexical_only';
 
@@ -40,6 +40,7 @@ type PersonalFile = {
 const FILE_TYPE_LABELS: Record<PersonalFileType, string> = {
     resume: 'Resume',
     job_description: 'Job description',
+    project: 'Projects',
     general: 'General',
 };
 

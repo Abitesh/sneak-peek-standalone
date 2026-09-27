@@ -87,7 +87,10 @@ function isMeetingQuery(query: string): boolean {
 
 function isPersonalQuery(query: string): boolean {
  const q = clean(query);
- return /\b(?:my|mine|personal|notes?|notebook|saved|resume|cv|curriculum vitae|my files?|personal files?|project notes?|find my)\b/i.test(q);
+ // Project questions are personal-file questions in interview context. Route
+ // them through the existing My Files path instead of relying on generic
+ // technical retrieval, which can otherwise prioritize résumé material.
+ return /\b(?:my|mine|personal|notes?|notebook|saved|resume|cv|curriculum vitae|my files?|personal files?|project notes?|projects?|find my)\b/i.test(q);
 }
 
 function isModeReferenceQuery(query: string): boolean {

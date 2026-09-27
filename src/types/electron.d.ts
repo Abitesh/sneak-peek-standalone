@@ -37,7 +37,7 @@ export interface RagIndexStatusSnapshot {
   updatedAt: number
 }
 
-export type PersonalFileType = 'resume' | 'job_description' | 'general'
+export type PersonalFileType = 'resume' | 'job_description' | 'project' | 'general'
 export interface PersonalFileRecordShape {
 id: string
 fileName: string
@@ -433,7 +433,7 @@ screenDenied: boolean
 sameDevice: string | null
 message?: string
 }>
-getListenWindowTranscript: (lastSeconds?: number) => Promise<{ interviewer: string; user: string }>
+getListenWindowTranscript: (lastSeconds?: number, sinceMs?: number) => Promise<{ interviewer: string; user: string }>
 getRecentMeetings: () => Promise<Array<{ id: string; title: string; date: string; duration: string; summary: string }>>
 getMeetingDetails: (id: string) => Promise<any>
 searchGlobalMeetings: (query: string, filters?: any) => Promise<{ enabled: boolean; results: any[] }>
@@ -494,7 +494,7 @@ onIntelligenceError: (callback: (data: { error: string, mode: string }) => void)
 // Session Management
 onSessionReset: (callback: () => void) => () => void;
 // Streaming listeners
-streamGeminiChat: (message: string, imagePaths?: string[], context?: string, options?: { skipSystemPrompt?: boolean, ignoreKnowledgeMode?: boolean }) => Promise<void>
+streamGeminiChat: (message: string, imagePaths?: string[], context?: string, options?: { skipSystemPrompt?: boolean, ignoreKnowledgeMode?: boolean, skipRollingContext?: boolean }) => Promise<void>
 onGeminiStreamToken: (callback: (token: string, meta?: { streamId?: number }) => void) => () => void
 onGeminiStreamDone: (callback: (data?: { finalText?: string; streamId?: number; citationMarkers?: Record<string, { marker: string; evidenceId: string; citationId: string; citation: { citationId: string; documentId: string; documentName: string; chunkId: string; pageStart?: number; pageEnd?: number; section?: string; sourceType: string } }>; text?: string; citations?: Record<string, { marker: string; evidenceId: string; citationId: string; citation: { citationId: string; documentId: string; documentName: string; chunkId: string; pageStart?: number; pageEnd?: number; section?: string; sourceType: string } }>; ragUsed?: boolean; confidence?: number; sources?: string[] }) => void) => () => void
 onGeminiStreamError: (callback: (error: string, meta?: { streamId?: number | null; source?: string }) => void) => () => void;
