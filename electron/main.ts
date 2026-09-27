@@ -1425,6 +1425,10 @@ export class AppState {
  // Tracks remembered output device so reconfigureAudio can no-op when nothing changed.
  // Mirrors the existing _lastRequestedInputDeviceId for the input side.
  private _lastRequestedOutputDeviceId: string | undefined = undefined;
+ // A healthy Screen Recording grant plus sustained zero-valued CoreAudio buffers
+ // means the device-scoped tap is the failing surface. The next recovery can
+ // switch to the already-supported ScreenCaptureKit backend for this meeting.
+ private _systemAudioPreferSckRecovery = false;
  // Promise representing in-flight endMeeting background teardown (STT.stop +
  // intelligenceManager.stopMeeting + RAG cleanup). startMeeting() awaits this
  // before booting a new session so the shared STT instances are not torn down
@@ -2558,12 +2562,6 @@ export class AppState {
  providerDataScopes
  });
  this.ragManager.setLLMHelper(this.processingHelper.getLLMHelper());
- // Manual document-grounded chat uses the same application-owned RAGManager.
- // Keep the provider lazy so LLMHelper never constructs a second instance and
- // later RAGManager re-initialization is picked up automatically.
- this.processingHelper.getLLMHelper().setRagManagerProvider(
-   () => this.ragManager ?? null,
- );
 
  // Modes reference files must use the same initialized EmbeddingPipeline as
  // the main RAG stack. A private, never-initialized pipeline marks every
@@ -2580,9 +2578,6 @@ export class AppState {
  try {
  this.intelligenceManager?.setRagRetrieverProvider?.(
  () => this.ragManager?.getRetriever() ?? null,
- );
- this.intelligenceManager?.setRagManagerProvider?.(
- () => this.ragManager ?? null,
  );
  } catch (e) { console.warn('[AppState] V3 meeting retriever wiring skipped:', e); }
 
@@ -3807,7 +3802,24 @@ export class AppState {
  if (decision.reason === 'sustained-zero-valued-silence' && process.platform === 'darwin') {
  void resolveMacScreenCaptureCapability('sustained zero-fill diagnosis', { bypassCache: true })
  .then((cap) => {
- if (!cap.effectiveDenied) return;
+ if (!cap.effectiveDenied) {
+ // The CoreAudio tap is alive but its buffers are continuously zero-valued.
+ // Permission is healthy, so retrying the same device-scoped tap is unlikely
+ // to help. Enter the existing recovery pipeline once and make that recovery
+ // use the already-supported ScreenCaptureKit backend.
+ if (!zeroFillRecoveryTriggered && this.systemAudioCapture === capture && this.isMeetingActive) {
+ zeroFillRecoveryTriggered = true;
+ this._systemAudioPreferSckRecovery = true;
+ const fallbackError = new Error('System audio capture produced sustained zero-valued audio; switching to ScreenCaptureKit recovery.');
+ console.warn(`${prefix}${fallbackError.message}`);
+ queueMicrotask(() => {
+ if (this.systemAudioCapture === capture && this.isMeetingActive) {
+ capture.emit('error', fallbackError);
+ }
+ });
+ }
+ return;
+ }
  if (this.systemAudioCapture !== capture) return; // capture replaced mid-probe
  if (!this.isMeetingActive) return;
  const msg = formatPermissionMessage('mac-screen-recording-revoked-rebuild');
@@ -3857,6 +3869,7 @@ export class AppState {
  }
  };
  let stuckTimer: NodeJS.Timeout | null = null;
+ let zeroFillRecoveryTriggered = false;
  const armStuckWatchdog = () => {
  handleSystemAudioHealthDecision(systemAudioHealth.handle({ kind: 'capture-started', nowMs: Date.now() }));
  if (stuckTimer) clearTimeout(stuckTimer);
@@ -5258,6 +5271,9 @@ export class AppState {
  const oldCapture = this.systemAudioCapture;
  this.systemAudioCapture = null;
  this._sysSttRateApplied = false;
+ const recoveryDeviceId = this._systemAudioPreferSckRecovery
+ ? 'sck'
+ : this._lastRequestedOutputDeviceId;
  await oldCapture?.destroy();
 
  const screenCapability = await resolveMacScreenCaptureCapability('system audio recovery');
@@ -5286,7 +5302,7 @@ export class AppState {
  console.warn('[AudioRecovery] Capture rebuilt by another flow mid-await — keeping theirs.');
  return;
  }
- const fresh = new SystemAudioCapture(this._lastRequestedOutputDeviceId);
+ const fresh = new SystemAudioCapture(recoveryDeviceId);
  this.systemAudioCapture = fresh;
  this.wireSystemCapture(fresh, '(Recovery)');
  if (this._listenAudioActive) {
@@ -6223,6 +6239,7 @@ export class AppState {
  this._systemAudioRecoveryInProgress = false;
  this._systemAudioRecoveryAttempts = 0;
  this._systemAudioConsecutiveFailures = 0;
+ this._systemAudioPreferSckRecovery = false;
  this._micRecoveryAttempts = 0;
  if (this._systemAudioRecoveryTimer) {
  clearTimeout(this._systemAudioRecoveryTimer);
