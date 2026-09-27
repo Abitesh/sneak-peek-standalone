@@ -29,7 +29,7 @@ test('generateSuggestion loads active mode prompt suffix and retrieved active mo
   // application-owned retrieval boundary; it must not call the legacy
   // ModesManager retrieval block directly.
   assert.match(generateSuggestionSource,
-    /retrieveUniversalModeContext\(\s*lastQuestion,\s*groundingInfo\?\.modeId,\s*false,/);
+    /retrieveUniversalChatContext\(\s*lastQuestion,\s*groundingInfo\?\.modeId,\s*false,/);
   assert.doesNotMatch(generateSuggestionSource, /buildRetrievedActiveModeContextBlock(?:Hybrid)?\(/);
   assert.match(generateSuggestionSource, /getActiveModeDocumentGroundingInfo/);
   assert.doesNotMatch(generateSuggestionSource, /\|\| modesMgr\.buildActiveModeContextBlock\(\)/);

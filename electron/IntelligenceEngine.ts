@@ -1819,9 +1819,12 @@ export class IntelligenceEngine extends EventEmitter {
             // WhatToAnswerLLM. Do not start a competing legacy retrieval path.
             // Normal application retrieval, when allowed, goes through the same
             // application-owned universal RAGManager used by WTA/manual chat.
+            // Stage 2: WTA/interview prefetch is planner-led chat retrieval
+            // (allowedSources only — personal-files eligible). Mode-document-
+            // grounded turns keep retrieveUniversalModeContext below.
             const modeContextPromise: Promise<string> = options?.activeSkill || docGroundedEnforcementActive || !wtaPrefetchDecision.allowed
                 ? Promise.resolve('')
-                : this.retrieveUniversalModeContext(wtaPrefetchQuery, snapshotModeInfo?.id, {
+                : this.retrieveUniversalChatContext(wtaPrefetchQuery, snapshotModeInfo?.id, {
                     tokenBudget: 1800,
                     allowRerank: (() => {
                         try {
@@ -5190,10 +5193,60 @@ export class IntelligenceEngine extends EventEmitter {
     }
 
     /**
-     * Application-level mode retrieval boundary. Normal IntelligenceEngine
-     * retrieval must use the application-owned universal RAGManager; the
-     * governed EvidenceResolver seam remains the only intentional raw hybrid
-     * dependency.
+     * Planner-led chat / WTA retrieval (Stage 2). Mirrors V3 ipcHandlers:
+     * `allowedSources` only (mode-reference ± knowledge ± personal-files);
+     * omit `selectedSources` so RagQueryPlanner picks within the cap.
+     */
+    private async retrieveUniversalChatContext(
+        query: string,
+        modeId?: string | null,
+        options: {
+            tokenBudget?: number;
+            topK?: number;
+            allowRerank?: boolean;
+            forceDocumentGrounding?: boolean;
+            answerType?: string;
+            followUpReferentHint?: string;
+        } = {},
+    ): Promise<string> {
+        const ragManager = this.ragManagerProvider?.() as any;
+        if (!ragManager || typeof ragManager.search !== 'function') return '';
+
+        try {
+            const { buildUniversalChatAllowedSources } = require('./rag/universalChatAllowedSources') as typeof import('./rag/universalChatAllowedSources');
+            const response = await ragManager.search(query, {
+                allowedSources: buildUniversalChatAllowedSources(),
+                modeId: modeId ?? undefined,
+                tokenBudget: options.tokenBudget ?? 1800,
+                ...(options.topK !== undefined ? { topK: options.topK } : {}),
+                ...(options.allowRerank !== undefined ? { allowRerank: options.allowRerank } : {}),
+                ...(options.forceDocumentGrounding !== undefined
+                    ? { forceDocumentGrounding: options.forceDocumentGrounding }
+                    : {}),
+                ...(options.answerType ? { answerType: options.answerType } : {}),
+                excludeCustomContext: true,
+                ...(options.followUpReferentHint
+                    ? { followUpReferentHint: options.followUpReferentHint }
+                    : {}),
+            });
+
+            if (response?.status !== 'ok' || !response.manualContext?.items?.length) return '';
+            const { renderManualContext } = require('./rag/ManualRenderContext') as typeof import('./rag/ManualRenderContext');
+            return renderManualContext(response.manualContext);
+        } catch (error: any) {
+            console.warn(
+                '[IntelligenceEngine] Universal chat RAG retrieval failed; proceeding without chat evidence:',
+                error?.message ?? error,
+            );
+            return '';
+        }
+    }
+
+    /**
+     * Application-level mode retrieval boundary. Mode-document-grounded / 47ZF
+     * paths stay mode-reference-only. Normal WTA/chat uses
+     * retrieveUniversalChatContext. The governed EvidenceResolver seam remains
+     * the only intentional raw hybrid dependency.
      */
     private async retrieveUniversalModeContext(
         query: string,

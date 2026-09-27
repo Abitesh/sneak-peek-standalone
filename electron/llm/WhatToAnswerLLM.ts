@@ -578,10 +578,21 @@ The user triggered this action with a coding problem on screen and NO new questi
                                         const { isRagSpeculativeRerankEnabled } = require('../intelligence/intelligenceFlags');
                                         allowRerank = isRagSpeculativeRerankEnabled();
                                     } catch { /* flag unavailable → no rerank */ }
+                                    const { buildUniversalChatAllowedSources } = require('../rag/universalChatAllowedSources') as typeof import('../rag/universalChatAllowedSources');
+                                    // Stage 2: non-doc-grounded WTA uses planner-led
+                                    // allowlist (omit selectedSources). Doc-grounded
+                                    // / 47ZF stays mode-reference-only.
+                                    const ragSourceOpts = forceDocumentGrounding
+                                        ? {
+                                            selectedSources: ['mode-reference'] as const,
+                                            allowedSources: ['mode-reference'] as const,
+                                        }
+                                        : {
+                                            allowedSources: buildUniversalChatAllowedSources(),
+                                        };
                                     const { value: ragResponse, timedOut } = await raceWithBudget(
                                         ragManager.buildContext(retrievalQuery, {
-                                            selectedSources: ['mode-reference'],
-                                            allowedSources: ['mode-reference'],
+                                            ...ragSourceOpts,
                                             modeId: requestSnapshot?.modeUniqueId,
                                             topK: forceDocumentGrounding ? 12 : 20,
                                             candidatePoolSize: forceDocumentGrounding ? 48 : 50,

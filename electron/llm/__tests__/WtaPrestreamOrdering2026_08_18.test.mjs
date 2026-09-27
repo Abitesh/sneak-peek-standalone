@@ -67,8 +67,8 @@ describe('F5/F6/F7: pre-stream kicks run on the RESOLVED question, after extract
     const q = engineSrc.indexOf('const wtaPrefetchQuery =');
     assert.ok(q > resolutionDone && q < kickMode, 'query is derived after resolution, before the kick');
     assert.match(engineSrc,
-      /this\.retrieveUniversalModeContext\(\s*wtaPrefetchQuery,\s*snapshotModeInfo\?\.id,\s*\{/,
-      'prefetch must enter the Universal RAG boundary with the resolved question and pinned mode');
+      /this\.retrieveUniversalChatContext\(\s*wtaPrefetchQuery,\s*snapshotModeInfo\?\.id,\s*\{/,
+      'prefetch must enter the Universal chat RAG boundary with the resolved question and pinned mode');
     const modeKickBlock = engineSrc.slice(kickMode, kickMode + 1200);
     assert.doesNotMatch(modeKickBlock, /buildRetrievedActiveModeContextBlock(?:Hybrid)?\(/,
       'prefetch must not call the legacy application-level mode retrieval API');

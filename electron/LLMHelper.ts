@@ -363,6 +363,41 @@ export class LLMHelper {
     this.ragManagerProvider = provider ?? undefined;
   }
 
+  /**
+   * Planner-led general-chat retrieval (Stage 2). allowedSources only —
+   * omit selectedSources so RagQueryPlanner can pick personal-files.
+   * Mode-document-grounded paths use retrieveUniversalModeContext instead.
+   */
+  private async retrieveUniversalChatContext(
+    query: string,
+    modeId?: string,
+    excludeCustomContext = true,
+  ): Promise<string> {
+    const ragManager = this.ragManagerProvider?.();
+    if (!ragManager) return '';
+
+    try {
+      const { buildUniversalChatAllowedSources } = require('./rag/universalChatAllowedSources') as typeof import('./rag/universalChatAllowedSources');
+      const response = await ragManager.search(query, {
+        allowedSources: buildUniversalChatAllowedSources(),
+        modeId,
+        excludeCustomContext,
+      });
+
+      if (response?.status !== 'ok' || !response.manualContext?.items?.length) {
+        return '';
+      }
+
+      return renderManualContext(response.manualContext);
+    } catch (error: any) {
+      console.warn(
+        '[LLMHelper] Universal chat RAG retrieval failed; proceeding without chat evidence:',
+        error?.message ?? error,
+      );
+      return '';
+    }
+  }
+
   private async retrieveUniversalModeContext(
     query: string,
     modeId?: string,
@@ -2507,12 +2542,10 @@ ${IMAGE_TRUST_TRAILER}`;
       // suggestion surface. Universal RAG owns document/source admission now;
       // LLMHelper only passes the mode scope into that canonical boundary.
       const groundingInfo = modesMgr.getActiveModeDocumentGroundingInfo?.();
-      // Change 50B: suggestion retrieval now uses the application-owned
-      // Universal RAG boundary. Keep custom mode context eligible here because
-      // generateSuggestion historically surfaced both reference material and
-      // user-authored mode context; the RAG source policy still owns the final
-      // admission and rendering.
-      modeContextBlock = await this.retrieveUniversalModeContext(
+      // Change 50B / Stage 2: suggestion retrieval uses planner-led chat
+      // allowlist (mode-reference ± personal-files ± knowledge). Mode-document-
+      // grounded paths keep retrieveUniversalModeContext / retrieveManualDocumentGroundedContext.
+      modeContextBlock = await this.retrieveUniversalChatContext(
         lastQuestion,
         groundingInfo?.modeId,
         false,
@@ -3100,13 +3133,12 @@ const shouldSkipModeInjection = skipModeInjection === true || (
 if (!shouldSkipModeInjection) {
   try {
     const modesMgr = modesMgrForInjection || require('./services/ModesManager').ModesManager.getInstance();
-    // Change 50B: application-level mode-reference retrieval is now owned by
-    // Universal RAG. Do not run ModesManager's hybrid or lexical retrieval here.
-    // Universal RAG owns planning, source policy, retrieval, reranking, gating,
-    // and the renderer-facing evidence shape; LLMHelper only consumes the final
-    // rendered context. Custom context remains excluded on this manual answer
-    // path, matching the old call's `excludeCustomContext: true` contract.
-    const modeContextBlock = await this.retrieveUniversalModeContext(
+    // Change 50B / Stage 2: application-level chat retrieval is planner-led
+    // (allowedSources only). Mode-document-grounded paths stay on
+    // retrieveManualDocumentGroundedContext / retrieveUniversalModeContext.
+    // Custom context remains excluded on this manual answer path, matching
+    // the old call's `excludeCustomContext: true` contract.
+    const modeContextBlock = await this.retrieveUniversalChatContext(
       message,
       routeOptions?.pinnedModeId ?? undefined,
       true,
@@ -6338,12 +6370,12 @@ let isMultimodal = !!(imagePaths?.length);
           console.warn('[LLMHelper] EvidenceResolver governed retrieval failed; governed turn will not use legacy retrieval:', _evidenceResolverErr?.message);
         }
         try {
-          // Change 50B: all non-governed application-level mode-reference
-          // retrieval now goes through the application-owned Universal RAG
-          // manager. The governed EvidenceResolver path above remains the
-          // canonical Context OS execution path and is deliberately untouched.
+          // Change 50B / Stage 2: non-governed application-level chat retrieval
+          // goes through planner-led universal chat allowlist. Mode-document-
+          // grounded paths above keep retrieveManualDocumentGroundedContext.
+          // The governed EvidenceResolver path remains untouched.
           if (!resolvedViaEvidenceResolver && !governedEvidenceResolutionStarted) {
-            modeContextBlock = await this.retrieveUniversalModeContext(
+            modeContextBlock = await this.retrieveUniversalChatContext(
               message,
               routeOptions?.pinnedModeId ?? undefined,
               true,

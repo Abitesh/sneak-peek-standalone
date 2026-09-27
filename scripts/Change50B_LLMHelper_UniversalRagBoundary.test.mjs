@@ -4,12 +4,13 @@ import assert from 'node:assert/strict';
 const src = fs.readFileSync('electron/LLMHelper.ts', 'utf8');
 
 assert.match(src, /private async retrieveUniversalModeContext\(/, 'Universal Mode RAG helper is missing');
+assert.match(src, /private async retrieveUniversalChatContext\(/, 'Universal chat RAG helper is missing');
 assert.match(src, /selectedSources:\s*\['mode-reference'\]/, 'Universal Mode RAG must be scoped to mode-reference');
 assert.match(src, /allowedSources:\s*\['mode-reference'\]/, 'Universal Mode RAG must constrain allowed sources');
-assert.match(src, /modeId,\s*\n\s*excludeCustomContext,/, 'Universal Mode RAG must pass mode scope and custom-context policy');
-assert.match(src, /generateSuggestion[\s\S]*retrieveUniversalModeContext\(/, 'suggestion retrieval must use Universal Mode RAG');
-assert.match(src, /chatWithGemini[\s\S]*retrieveUniversalModeContext\(/, 'non-streaming manual mode retrieval must use Universal Mode RAG');
-assert.match(src, /streamChat[\s\S]*retrieveUniversalModeContext\(/, 'streaming manual mode retrieval must use Universal Mode RAG');
+assert.match(src, /buildUniversalChatAllowedSources\s*\(/, 'chat helper must use shared allowlist');
+assert.match(src, /generateSuggestion[\s\S]*retrieveUniversalChatContext\(/, 'suggestion retrieval must use planner-led chat RAG');
+assert.match(src, /retrieveUniversalChatContext\(\s*message,\s*routeOptions\?\.pinnedModeId/, 'manual mode retrieval must use planner-led chat RAG');
+assert.match(src, /retrieveManualDocumentGroundedContext\(\s*message/, 'document-grounded path must remain on mode-only helper');
 
 assert.doesNotMatch(src, /\.buildRetrievedActiveModeContextBlock\s*\(/, 'LLMHelper must not directly call legacy lexical mode retrieval');
 assert.doesNotMatch(src, /\.buildRetrievedActiveModeContextBlockHybrid\s*\(/, 'LLMHelper must not directly call legacy hybrid mode retrieval');
