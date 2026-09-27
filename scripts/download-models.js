@@ -2,6 +2,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const https = require('https');
+const { spawnSync } = require('child_process');
 
 // Required core-fallback model files. The BGE reranker is also required for
 // smart-retrieval Phase 1/3 (confidence-gated local rerank escalation) and is
@@ -28,6 +29,77 @@ const REQUIRED_MODEL_FILES = [
 const OPTIONAL_MODEL_FILES = [
     'pipecat-ai/smart-turn-v3/smart-turn-v3.1-cpu.onnx',
 ];
+
+const MODELS_DIR = path.join(__dirname, '../resources/models');
+
+/** True when GitHub Actions / common CI runners set CI. */
+function isCiEnv(env = process.env) {
+    return env.CI === 'true' || env.CI === '1';
+}
+
+/** Explicit escape hatch — mirrors NATIVELY_SKIP_NOTARIZE / NATIVELY_SKIP_ARCH_GATE. */
+function isSkipModelDownload(env = process.env) {
+    return env.NATIVELY_SKIP_MODEL_DOWNLOAD === '1';
+}
+
+function modelFileOk(modelsDir, rel) {
+    const full = path.join(modelsDir, rel);
+    try {
+        return fs.existsSync(full) && fs.statSync(full).size > 0;
+    } catch {
+        return false;
+    }
+}
+
+function requiredModelsPresent(modelsDir = MODELS_DIR) {
+    return REQUIRED_MODEL_FILES.every((rel) => modelFileOk(modelsDir, rel));
+}
+
+/**
+ * Decide whether postinstall should skip the transformers.js download entirely.
+ * Pure — unit-tested. Skip avoids loading onnxruntime-node (SIGABRT on teardown).
+ */
+function shouldSkipModelDownload(env = process.env, modelsDir = MODELS_DIR) {
+    if (isSkipModelDownload(env)) {
+        return { skip: true, reason: 'NATIVELY_SKIP_MODEL_DOWNLOAD=1' };
+    }
+    if (requiredModelsPresent(modelsDir)) {
+        return { skip: true, reason: 'required model files already present' };
+    }
+    return { skip: false, reason: null };
+}
+
+/**
+ * After the ORT worker exits (often SIGABRT / exit 134 from "mutex lock failed"),
+ * decide the parent install exit code. Models on disk win; CI soft-fails so npm ci
+ * is not poisoned by teardown aborts.
+ */
+function resolvePostWorkerOutcome({
+    status,
+    signal,
+    modelsPresent,
+    env = process.env,
+} = {}) {
+    if (modelsPresent) {
+        const aborted = signal === 'SIGABRT' || status === 134;
+        return {
+            exitCode: 0,
+            message: aborted
+                ? 'worker aborted after download (onnxruntime teardown); required models present — treating as success'
+                : 'required models present',
+        };
+    }
+    if (isSkipModelDownload(env) || isCiEnv(env)) {
+        return {
+            exitCode: 0,
+            message: `download incomplete (status=${status}, signal=${signal}); soft-failing in CI / skip mode so npm install can finish`,
+        };
+    }
+    return {
+        exitCode: status === 0 || status == null ? 1 : status,
+        message: `download failed (status=${status}, signal=${signal}) and required models are missing`,
+    };
+}
 
 /** Plain HTTPS download with redirects, to a temp path, then sha256-verified rename. */
 function downloadVerified(url, dest, expectedSha256, expectedBytes) {
@@ -77,105 +149,161 @@ async function downloadSmartTurn(modelsDir) {
     console.log('[download-models] smart-turn-v3.1 downloaded and sha256-verified.');
 }
 
-function verifyModels() {
-    const modelsDir = path.join(__dirname, '../resources/models');
+function verifyModels({ exitOnFail = true } = {}) {
     const missing = [];
     for (const rel of REQUIRED_MODEL_FILES) {
-        const full = path.join(modelsDir, rel);
-        let ok = false;
-        try { ok = fs.existsSync(full) && fs.statSync(full).size > 0; } catch { ok = false; }
-        if (!ok) missing.push(full);
+        if (!modelFileOk(MODELS_DIR, rel)) missing.push(path.join(MODELS_DIR, rel));
     }
     if (missing.length > 0) {
         console.error('[download-models] VERIFY FAILED — required model files missing or empty:');
         for (const m of missing) console.error('  ✗', m);
-        process.exit(1);
+        if (exitOnFail) process.exit(1);
+        return false;
     }
     for (const rel of OPTIONAL_MODEL_FILES) {
-        const full = path.join(modelsDir, rel);
-        let ok = false;
-        try { ok = fs.existsSync(full) && fs.statSync(full).size > 0; } catch { ok = false; }
-        if (!ok) console.warn(`[download-models] optional asset missing (feature degrades gracefully): ${rel}`);
+        if (!modelFileOk(MODELS_DIR, rel)) {
+            console.warn(`[download-models] optional asset missing (feature degrades gracefully): ${rel}`);
+        }
     }
     console.log('[download-models] VERIFY OK — all required core-fallback model files present.');
+    return true;
 }
 
 async function downloadModels() {
     const { pipeline, env } = await import('@huggingface/transformers');
-    const modelsDir = path.join(__dirname, '../resources/models');
-    
-    // Ensure the directory exists
+    const modelsDir = MODELS_DIR;
+
     if (!fs.existsSync(modelsDir)) {
         fs.mkdirSync(modelsDir, { recursive: true });
     }
 
     // Let Transformers.js handle the download but specify the local directory cache
     env.cacheDir = modelsDir;
-    
+
+    // dtype MUST be explicit on transformers.js v3 (we ship 3.8.1). v2 defaulted to
+    // the quantized variant and honored `quantized: true`; v3 ignores that flag and
+    // defaults to fp32, so a bare `pipeline(...)` call writes onnx/model.onnx while
+    // REQUIRED_MODEL_FILES below — and electron/services/LocalFallbackAssets.ts, and
+    // scripts/verify-packaged-local-assets.mjs — all require onnx/model_quantized.onnx.
+    // Left implicit, every clean install silently produces the wrong filename and the
+    // build dies at verify:packaged-local-assets. 'q8' is what maps to
+    // model_quantized.onnx; see the same reasoning at electron/rag/LocalReranker.ts.
+    const QUANTIZED = { dtype: 'q8' };
+
+    // 1. Embedding model (RAG)
+    console.log('[download-models] Downloading Xenova/all-MiniLM-L6-v2 (q8)...');
+    await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', QUANTIZED);
+    console.log('[download-models] all-MiniLM-L6-v2 downloaded.');
+
+    // 2. Zero-shot classification model (Intent Classifier)
+    console.log('[download-models] Downloading Xenova/mobilebert-uncased-mnli (q8)...');
+    await pipeline('zero-shot-classification', 'Xenova/mobilebert-uncased-mnli', QUANTIZED);
+    console.log('[download-models] mobilebert-uncased-mnli downloaded.');
+
+    // 3. Cross-encoder reranker (smart-retrieval Phase 1/3 — confidence-gated
+    //    rerank escalation). Bundled in resources/models/ so a clean-machine
+    //    install can do offline rerank without a 280MB first-activation
+    //    download. The installer ships the q8 quantized variant (~280MB).
+    //
+    //    The lazy-download provider in electron/rag/rerankerDownloadProvider.ts
+    //    still acts as a no-op fallback if the bundled model is absent
+    //    (e.g. an old installer predating this bundling).
+    console.log('[download-models] Downloading Xenova/bge-reranker-base (q8)...');
+    // Use dtype:'q8' so transformers.js selects the quantized ONNX variant
+    // (~280 MB) instead of the fp32 one (~1.1 GB). NATIVELY_RERANKER_DTYPE
+    // override remains for accuracy experiments.
+    const rerankerDtype = (process.env.NATIVELY_RERANKER_DTYPE || 'q8').trim() || 'q8';
+    await pipeline('text-classification', 'Xenova/bge-reranker-base', { dtype: rerankerDtype });
+    console.log('[download-models] bge-reranker-base downloaded.');
+
+    // 4. Smart Turn v3.1 (Auto Answer V3 TurnPredictor). Raw ONNX, not a
+    //    transformers.js pipeline: fetched by URL and sha256-verified against
+    //    resources/models/pipecat-ai/smart-turn-v3/manifest.json.
+    //    OPTIONAL (review#9): the runtime degrades to the deterministic
+    //    endpoint path without it, so a blocked download must not fail the
+    //    install. Release builds are still gated by
+    //    verify-packaged-local-assets.mjs, which requires the file.
     try {
-        // dtype MUST be explicit on transformers.js v3 (we ship 3.8.1). v2 defaulted to
-        // the quantized variant and honored `quantized: true`; v3 ignores that flag and
-        // defaults to fp32, so a bare `pipeline(...)` call writes onnx/model.onnx while
-        // REQUIRED_MODEL_FILES below — and electron/services/LocalFallbackAssets.ts, and
-        // scripts/verify-packaged-local-assets.mjs — all require onnx/model_quantized.onnx.
-        // Left implicit, every clean install silently produces the wrong filename and the
-        // build dies at verify:packaged-local-assets. 'q8' is what maps to
-        // model_quantized.onnx; see the same reasoning at electron/rag/LocalReranker.ts.
-        const QUANTIZED = { dtype: 'q8' };
+        await downloadSmartTurn(modelsDir);
+    } catch (e) {
+        console.warn('[download-models] smart-turn-v3.1 download failed (optional; Auto Answer runs deterministic-only):', e?.message ?? e);
+    }
 
-        // 1. Embedding model (RAG)
-        console.log('[download-models] Downloading Xenova/all-MiniLM-L6-v2 (q8)...');
-        await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', QUANTIZED);
-        console.log('[download-models] all-MiniLM-L6-v2 downloaded.');
+    console.log('[download-models] All models downloaded successfully!');
+}
 
-        // 2. Zero-shot classification model (Intent Classifier)
-        console.log('[download-models] Downloading Xenova/mobilebert-uncased-mnli (q8)...');
-        await pipeline('zero-shot-classification', 'Xenova/mobilebert-uncased-mnli', QUANTIZED);
-        console.log('[download-models] mobilebert-uncased-mnli downloaded.');
+/**
+ * Run the ORT-touching download in a child process. onnxruntime-node often
+ * SIGABRTs ("mutex lock failed") on teardown even after a successful download;
+ * that Abort trap 6 becomes npm error 134 and kills postinstall. The parent
+ * never loads ORT — it only inspects the filesystem / exit signal.
+ */
+function runDownloadWorker() {
+    const result = spawnSync(process.execPath, [__filename, '--worker'], {
+        env: { ...process.env, NATIVELY_MODEL_DOWNLOAD_WORKER: '1' },
+        stdio: 'inherit',
+    });
+    const outcome = resolvePostWorkerOutcome({
+        status: result.status,
+        signal: result.signal,
+        modelsPresent: requiredModelsPresent(),
+        env: process.env,
+    });
+    console.log(`[download-models] ${outcome.message}`);
+    process.exit(outcome.exitCode);
+}
 
-        // 3. Cross-encoder reranker (smart-retrieval Phase 1/3 — confidence-gated
-        //    rerank escalation). Bundled in resources/models/ so a clean-machine
-        //    install can do offline rerank without a 280MB first-activation
-        //    download. The installer ships the q8 quantized variant (~280MB).
-        //
-        //    The lazy-download provider in electron/rag/rerankerDownloadProvider.ts
-        //    still acts as a no-op fallback if the bundled model is absent
-        //    (e.g. an old installer predating this bundling).
-        console.log('[download-models] Downloading Xenova/bge-reranker-base (q8)...');
-        // Use dtype:'q8' so transformers.js selects the quantized ONNX variant
-        // (~280 MB) instead of the fp32 one (~1.1 GB). NATIVELY_RERANKER_DTYPE
-        // override remains for accuracy experiments.
-        const rerankerDtype = (process.env.NATIVELY_RERANKER_DTYPE || 'q8').trim() || 'q8';
-        await pipeline('text-classification', 'Xenova/bge-reranker-base', { dtype: rerankerDtype });
-        console.log('[download-models] bge-reranker-base downloaded.');
-
-        // 4. Smart Turn v3.1 (Auto Answer V3 TurnPredictor). Raw ONNX, not a
-        //    transformers.js pipeline: fetched by URL and sha256-verified against
-        //    resources/models/pipecat-ai/smart-turn-v3/manifest.json.
-        //    OPTIONAL (review#9): the runtime degrades to the deterministic
-        //    endpoint path without it, so a blocked download must not fail the
-        //    install. Release builds are still gated by
-        //    verify-packaged-local-assets.mjs, which requires the file.
-        try {
-            await downloadSmartTurn(modelsDir);
-        } catch (e) {
-            console.warn('[download-models] smart-turn-v3.1 download failed (optional; Auto Answer runs deterministic-only):', e?.message ?? e);
-        }
-
-        console.log('[download-models] All models downloaded successfully!');
+async function runWorkerDownload() {
+    try {
+        await downloadModels();
+        // Do NOT process.exit() here — a live onnxruntime session + process.exit
+        // SIGABRTs ("mutex lock failed"). Natural unwind still may abort; the
+        // parent treats SIGABRT as success when files are on disk.
+        process.exitCode = requiredModelsPresent() ? 0 : 1;
     } catch (e) {
         console.error('[download-models] Error downloading model:', e);
-        process.exit(1);
+        // Soft exitCode only — never process.exit after ORT may have loaded.
+        process.exitCode = 1;
     }
 }
 
-if (process.argv.includes('--verify')) {
-    // Fail-loud, no-network check that required models are already on disk.
-    verifyModels();
-} else {
-    downloadModels().catch((e) => {
-        console.error('[download-models] Fatal error:', e);
-        process.exit(1);
-    });
+function main() {
+    if (process.argv.includes('--verify')) {
+        verifyModels();
+        return;
+    }
+
+    if (process.argv.includes('--worker') || process.env.NATIVELY_MODEL_DOWNLOAD_WORKER === '1') {
+        runWorkerDownload().catch((e) => {
+            console.error('[download-models] Fatal error:', e);
+            process.exitCode = 1;
+        });
+        return;
+    }
+
+    const decision = shouldSkipModelDownload();
+    if (decision.skip) {
+        console.log(`[download-models] Skipping download (${decision.reason}).`);
+        // Still surface optional-asset warnings when verifying a cached tree.
+        if (requiredModelsPresent()) verifyModels({ exitOnFail: false });
+        return;
+    }
+
+    runDownloadWorker();
 }
 
+module.exports = {
+    REQUIRED_MODEL_FILES,
+    OPTIONAL_MODEL_FILES,
+    MODELS_DIR,
+    isCiEnv,
+    isSkipModelDownload,
+    requiredModelsPresent,
+    shouldSkipModelDownload,
+    resolvePostWorkerOutcome,
+    verifyModels,
+};
+
+if (require.main === module) {
+    main();
+}
