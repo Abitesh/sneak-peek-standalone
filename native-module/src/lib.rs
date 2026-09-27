@@ -367,10 +367,10 @@ impl SystemAudioCapture {
             
             // HEALTH CHECK: Detect if CoreAudio Tap callback is never invoked
             // (known macOS issue where tap starts but callback never fires).
-            // If we get zero samples for 15+ seconds, signal error to trigger JS fallback.
+            // If we get zero samples for 120+ seconds, signal error to trigger JS fallback.
             let mut last_sample_received = std::time::Instant::now();
             let mut no_sample_error_sent = false;
-            const NO_SAMPLE_TIMEOUT_SECS: u64 = 15;
+            const NO_SAMPLE_TIMEOUT_SECS: u64 = 120;
 
             loop {
                 if stop_signal.load(Ordering::Relaxed) {

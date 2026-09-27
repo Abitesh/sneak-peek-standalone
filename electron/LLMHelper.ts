@@ -3861,7 +3861,7 @@ let isMultimodal = !!(imagePaths?.length);
       model: modelId,
       messages,
       temperature: 0.4,
-      max_tokens: 8192,
+      max_tokens: 4096,
       stream: false
     });
 
@@ -7352,7 +7352,10 @@ let isMultimodal = !!(imagePaths?.length);
       stream: true as const,
       temperature: INTERACTIVE_TEMPERATURE,
       seed: INTERACTIVE_SEED, // Groq honors seed for near-deterministic output
-      max_tokens: resolveMaxOutputTokens({ id: modelId, provider: 'groq' }, { fallback: 8192 }),
+      max_tokens: Math.min(
+        resolveMaxOutputTokens({ id: modelId, provider: 'groq' }, { fallback: 8192 }) ?? 4096,
+        4096,
+      ),
     };
     require('./llm/providerPayloadCapture').captureProviderPayload({
       provider: 'groq', classification: 'sdk_request_object_before_serialization', payload: request,
@@ -8804,7 +8807,7 @@ let isMultimodal = !!(imagePaths?.length);
           messages: [{ role: "user", content: groqMessage }],
           stream: true,
           temperature: temperature,
-          max_tokens: maxTokens,
+          max_tokens: Math.min(maxTokens, 4096),
         });
 
         for await (const chunk of stream) {
