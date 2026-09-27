@@ -75,13 +75,14 @@ describe('fitPromptToBudget — "hi" stays under 2000 tokens estimated', () => {
 
 describe('fitPromptToBudget — Groq preflight skips when over ceiling', () => {
   test('resolveProviderCeiling reports the Groq effective input ceiling', () => {
-    assert.equal(resolveProviderCeiling('groq'), 8000);
+    assert.equal(resolveProviderCeiling('groq'), 8192);
     assert.equal(resolveProviderCeiling('gemini'), undefined);
     assert.equal(resolveProviderCeiling(undefined), undefined);
   });
 
   test('a large layer is dropped under the Groq ceiling even though the model tier reports a 128k window', () => {
     assert.ok(GROQ_CAPS.maxContextTokens >= 100_000, 'sanity: Groq model tier reports a large context window');
+    assert.equal(GROQ_CAPS.outputBudgetTokens, 2048);
     const bigLayer = { id: 'fileChunks', text: 'x'.repeat(60_000), priority: 0 }; // ~15k estimated tokens
     const result = fitPromptToBudget({
       system: 'System prompt.',
@@ -92,7 +93,7 @@ describe('fitPromptToBudget — Groq preflight skips when over ceiling', () => {
     });
     assert.deepEqual(result.dropped, ['fileChunks']);
     const totalTokens = estimateTokens(result.system) + estimateTokens(result.user);
-    assert.ok(totalTokens <= 8000, `expected to stay under the Groq ceiling, got ${totalTokens}`);
+    assert.ok(totalTokens <= 8192, `expected to stay under the Groq ceiling, got ${totalTokens}`);
   });
 
   test('without a providerCeiling the same layer would have been kept (proves the ceiling is what triggers the drop)', () => {

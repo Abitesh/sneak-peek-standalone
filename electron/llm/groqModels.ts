@@ -4,7 +4,7 @@
 // falls back to when that model is gone.
 //
 // Why a ladder and not one pinned id: on 2026-08-23 Groq's catalogue held
-// exactly one model that accepts image input — `qwen/qwen3.6-27b` — and it is
+// exactly one model that accepts image input — `qwen/qwen3.8-27b` — and it is
 // PREVIEW tier. Groq's own docs say preview models can be discontinued without
 // notice, which is precisely how the previous pins died (llama-3.3-70b-versatile
 // 2026-08-16, meta-llama/llama-4-scout-17b-16e-instruct 2026-07-17). A pinned
@@ -14,7 +14,7 @@
 // retries once on a PRODUCTION-tier id. Production models carry Groq's
 // deprecation-notice guarantee; preview models do not.
 //
-// The fallback is text-only. That is not an oversight: if qwen3.6-27b goes away
+// The fallback is text-only. That is not an oversight: if qwen3.8-27b goes away
 // Groq has no image-capable model at all, and the vision chain is expected to
 // fall through to another provider rather than pretend otherwise. Only the TEXT
 // paths ladder down.
@@ -25,7 +25,7 @@
 import { classifyVisionError } from './visionStreamFallback';
 
 /** Preview tier, multimodal. What routing uses by default. */
-export const GROQ_PRIMARY_MODEL = 'qwen/qwen3.6-27b';
+export const GROQ_PRIMARY_MODEL = 'qwen/qwen3.8-27b';
 
 /**
  * Production tier, text-only. Survives the primary's retirement.
@@ -90,12 +90,12 @@ export function isGroqModelId(modelId: string | null | undefined): boolean {
  */
 export const GROQ_VISION_MODEL = GROQ_PRIMARY_MODEL;
 export function groqSupportsImages(modelId: string | null | undefined): boolean {
-  return /qwen3\.6/i.test(modelId || '');
+  return /qwen3\.(?:6|8)/i.test(modelId || '');
 }
 
 /**
  * Ids Groq has SHUT DOWN — compare by id, not version: a retirement is not a
- * version bump (llama-4-scout parses 4.0, its replacement qwen3.6-27b 3.6).
+ * version bump (llama-4-scout parses 4.0, its replacement qwen3.8-27b 3.8).
  * Moved here from ModelVersionManager (code-review 2026-08-23) so retirement
  * knowledge lives in the module that declares itself the Groq authority and
  * is importable from lightweight contexts (ipcHandlers' default-model repair).

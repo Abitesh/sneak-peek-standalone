@@ -20,28 +20,35 @@ impl SpeakerInput {
     pub fn new(device_id: Option<String>) -> Result<Self> {
         let force_sck = device_id.as_deref() == Some("sck");
 
-        if !force_sck {
-            // Try CoreAudio Tap first (Default)
-            println!("[SpeakerInput] Initializing CoreAudio Tap backend...");
-            match core_audio::SpeakerInput::new(device_id.clone()) {
-                Ok(input) => {
-                    println!("[SpeakerInput] CoreAudio Tap backend initialized.");
-                    return Ok(Self {
-                        backend: BackendInput::CoreAudio(input),
-                    });
-                }
-                Err(e) => {
-                    println!("[SpeakerInput] CoreAudio Tap initialization failed: {}. Falling back to ScreenCaptureKit.", e);
-                }
-            }
-        } else {
+        if force_sck {
             println!("[SpeakerInput] SCK backend explicitly requested.");
+            let input = sck::SpeakerInput::new(device_id)?;
+            return Ok(Self {
+                backend: BackendInput::Sck(input),
+            });
         }
 
-        // Fallback to ScreenCaptureKit
-        let input = sck::SpeakerInput::new(device_id)?;
+        // Prefer ScreenCaptureKit: production diagnostics showed CoreAudio's
+        // process-tap callback running while delivering zero-valued samples.
+        // Keep CoreAudio as a fallback when ScreenCaptureKit is unavailable.
+        println!("[SpeakerInput] Trying ScreenCaptureKit system-audio backend first...");
+        match sck::SpeakerInput::new(device_id.clone()) {
+            Ok(input) => {
+                println!("[SpeakerInput] ScreenCaptureKit backend initialized.");
+                return Ok(Self {
+                    backend: BackendInput::Sck(input),
+                });
+            }
+            Err(e) => {
+                println!("[SpeakerInput] ScreenCaptureKit initialization failed: {}. Falling back to CoreAudio Tap.", e);
+            }
+        }
+
+        println!("[SpeakerInput] Initializing CoreAudio Tap backend...");
+        let input = core_audio::SpeakerInput::new(device_id)?;
+        println!("[SpeakerInput] CoreAudio Tap backend initialized.");
         Ok(Self {
-            backend: BackendInput::Sck(input),
+            backend: BackendInput::CoreAudio(input),
         })
     }
 

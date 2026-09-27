@@ -106,6 +106,19 @@ function formatFetchError(err: any): string {
     .join(' ');
 }
 
+const GROQ_INTERACTIVE_INPUT_TOKENS = 2800;
+const GROQ_INTERACTIVE_OUTPUT_TOKENS = 768;
+const GROQ_INTERACTIVE_SYSTEM_TOKENS = 700;
+
+function keepGroqHeadAndTail(text: string, maxTokens: number): string {
+  if (!text || maxTokens <= 0) return '';
+  const maxChars = Math.max(1, Math.floor(maxTokens * 3.2));
+  if (text.length <= maxChars) return text;
+  const headChars = Math.floor(maxChars * 0.42);
+  const tailChars = Math.max(1, maxChars - headChars);
+  return `${text.slice(0, headChars).trimEnd()}\n...[context compacted for fast Groq turn]...\n${text.slice(-tailChars).trimStart()}`;
+}
+
 interface OllamaResponse {
   response: string
   done: boolean
@@ -123,8 +136,8 @@ const GEMINI_PRO_MODEL = "gemini-3.1-pro-preview"
 // TEXT_HEDGE_ENABLED / GEMINI_TEXT_HEDGE_CONFIG knobs were removed.
 // Groq retired every Llama id it hosted: `llama-3.3-70b-versatile` shut down
 // 2026-08-16 and `meta-llama/llama-4-scout-17b-16e-instruct` on 2026-07-17.
-// `qwen/qwen3.6-27b` is the replacement for BOTH paths — it is the only model
-// left in Groq's catalogue that accepts image input, so text and vision share
+// `qwen/qwen3.8-27b` is the replacement for BOTH paths — it is the current model
+// in Groq's catalogue that accepts image input, so text and vision share
 // one id. The user's pick in the model selector still wins; these are only the
 // baseline used when nothing is chosen and by the Fast Text / emergency paths.
 //
@@ -3811,6 +3824,10 @@ let isMultimodal = !!(imagePaths?.length);
    */
   private async createGroqCompletion(request: any, opts?: { signal?: AbortSignal }): Promise<any> {
     if (!this.groqClient) throw new Error("Groq client not initialized");
+    if (request && typeof request === 'object') {
+      delete request.reasoning_effort;
+      delete request.reasoningEffort;
+    }
     // KNOWN-GONE MEMO (code-review 2026-08-23): after a retirement, every call
     // used to pay a doomed full-payload round trip to the dead model before
     // laddering — callers keep passing the module const. Skip straight to the
@@ -4426,7 +4443,7 @@ let isMultimodal = !!(imagePaths?.length);
       model: GROQ_VISION_MODEL,
       messages,
       temperature: 1,
-      // Groq caps qwen3.6-27b at 16,384 completion tokens. The old 28,672 was
+      // Groq caps qwen3.8-27b at 16,384 completion tokens. The old 28,672 was
       // llama-4-scout's ceiling; asking for more than a model's limit is a 400,
       // not a silent clamp.
       max_completion_tokens: 16384,
@@ -4844,7 +4861,7 @@ let isMultimodal = !!(imagePaths?.length);
    * and Gemini-only for multimodal (images)
    *
    * TEXT-ONLY FALLBACK CHAIN:
-   * 1. Groq (qwen/qwen3.6-27b) - Primary
+    * 1. Groq (qwen/qwen3.8-27b) - Primary
    * 2. Gemini Flash - 1st fallback
    * 3. Gemini Flash + Pro parallel - 2nd fallback
    * 4. Gemini Flash retries (max 3) - Last resort
@@ -7338,12 +7355,20 @@ let isMultimodal = !!(imagePaths?.length);
 
     await this.rateLimiters.groq.acquire();
 
+    const fittedSystem = systemPrompt
+      ? keepGroqHeadAndTail(systemPrompt, GROQ_INTERACTIVE_SYSTEM_TOKENS)
+      : undefined;
+    const systemTokens = fittedSystem ? estimateTokens(fittedSystem) : 0;
+    const userBudget = Math.max(
+      900,
+      GROQ_INTERACTIVE_INPUT_TOKENS - Math.min(systemTokens, GROQ_INTERACTIVE_SYSTEM_TOKENS),
+    );
+    const fittedUser = keepGroqHeadAndTail(userMessage, userBudget);
     const messages: any[] = [];
-    if (systemPrompt) {
-      // CACHE-CACHEABLE PREFIX: must be byte-identical across turns.
-      messages.push({ role: "system", content: systemPrompt });
+    if (fittedSystem) {
+      messages.push({ role: "system", content: fittedSystem });
     }
-    messages.push({ role: "user", content: userMessage });
+    messages.push({ role: "user", content: fittedUser });
 
     if (abortSignal?.aborted) return;
     const request = {
@@ -7351,11 +7376,8 @@ let isMultimodal = !!(imagePaths?.length);
       messages,
       stream: true as const,
       temperature: INTERACTIVE_TEMPERATURE,
-      seed: INTERACTIVE_SEED, // Groq honors seed for near-deterministic output
-      max_tokens: Math.min(
-        resolveMaxOutputTokens({ id: modelId, provider: 'groq' }, { fallback: 8192 }) ?? 4096,
-        4096,
-      ),
+      seed: INTERACTIVE_SEED,
+      max_tokens: GROQ_INTERACTIVE_OUTPUT_TOKENS,
     };
     require('./llm/providerPayloadCapture').captureProviderPayload({
       provider: 'groq', classification: 'sdk_request_object_before_serialization', payload: request,
@@ -7405,7 +7427,7 @@ let isMultimodal = !!(imagePaths?.length);
       model: GROQ_VISION_MODEL,
       messages,
       stream: true,
-      max_tokens: resolveMaxOutputTokens({ id: GROQ_VISION_MODEL, provider: 'groq' }, { fallback: 8192 }),
+      max_tokens: Math.min(resolveMaxOutputTokens({ id: GROQ_VISION_MODEL, provider: 'groq' }, { fallback: 8192 }) ?? 2048, 2048),
       temperature: 1,
       top_p: 1,
       stop: null

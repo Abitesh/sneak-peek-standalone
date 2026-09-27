@@ -7,6 +7,7 @@ import {
   MessageSquare,
   Mic,
   Monitor,
+  Square,
   Sparkles,
   Zap,
 } from 'lucide-react';
@@ -25,6 +26,7 @@ type TopControlBarProps = {
   onListen: () => void;
   onAnalyze: () => void;
   onAnswer: () => void;
+  onStop: () => void;
   onAsk: () => void;
   onScreen: () => void;
   onModel: (anchor: HTMLElement) => void;
@@ -43,6 +45,7 @@ export function TopControlBar({
   onListen,
   onAnalyze,
   onAnswer,
+  onStop,
   onAsk,
   onScreen,
   onModel,
@@ -137,6 +140,9 @@ export function TopControlBar({
           </button>
           <button type="button" className={`${controlClass} ${isProcessing ? 'text-lime-300' : 'text-lime-200/85'}`} onClick={onAnswer} disabled={isProcessing} title="Answer from the current context">
             <Sparkles size={14} /> <span>Answer</span>
+          </button>
+          <button type="button" className={`${controlClass} ${isProcessing ? 'bg-red-400/20 text-red-300' : ''}`} onClick={onStop} disabled={!isProcessing} title="Stop the current answer" aria-label="Stop current answer">
+            <Square size={12} fill="currentColor" /> <span>Stop</span>
           </button>
           <button type="button" className={controlClass} onClick={onAsk} title={inputValue.trim() ? 'Send question' : 'Focus Ask input'}>
             <MessageSquare size={14} /> <span>Ask</span>

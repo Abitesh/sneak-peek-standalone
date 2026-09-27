@@ -464,6 +464,17 @@ return '# Evidence coverage\nThe retrieved evidence was not confirmed to contain
 + 'not be retrieved from the selected material — do NOT substitute a general definition or a typical value '
 + 'as though it came from the material.';
 }
+function interviewReferenceGuidance(
+d: Readonly<TurnDecision>,
+evidence: EvidenceItem[],
+): string {
+if (!d.questionTypes.includes('PERSONAL_EXPERIENCE') || !evidence.some((e) => e.sourceType === 'REFERENCE_FILE')) return '';
+return '# Interview answer source\n'
++ 'A user-attached reference file may contain a prepared answer for this interview question. '
++ 'If the evidence contains a matching prepared answer, use its project-specific facts and reasoning as the primary basis. '
++ 'Answer in first person as the candidate and do NOT replace it with a generic comparison of technologies. '
++ 'Keep the answer concise and natural to speak aloud.';
+}
 /**
 * Explicit secondary/decoy source separation (deep-run 2, issue 8). Rendered
 * only when the question names a secondary entity/document. The retrieval side
@@ -583,7 +594,16 @@ push('precedence_contract', precedenceContract(evidence)),
 push('precedence_history', precedenceHistory(d)),
 push('secondary_source', secondarySourceGuidance(d)),
 push('evidence_coverage', weakEvidenceGuidance(d, input.fallbackUsed, Boolean(packed.evidenceBlock))),
-push('capabilities', `# Capabilities\n${capabilityLines(policy)}`),
+push('interview_reference', interviewReferenceGuidance(d, evidence)),
+push('direct_answer_contract', `# Direct answer contract
+Answer the user's actual question directly. Do not respond with a generic acknowledgement such as "Understood, I'll do my best", "Please proceed with your question", or "I need more information" when the question itself is already clear.
+
+For GENERAL_TECHNICAL, GENERAL_KNOWLEDGE, conceptual, SQL, DBMS, OOP, DSA, framework, architecture, coding, or other technical questions: answer from your general knowledge even when retrieval returned no evidence. Retrieval is supporting context, not a prerequisite for a normal technical answer.
+
+For PERSONAL_PROJECT, USER_MOTIVATION, or other candidate-specific questions: use matching retrieved/reference evidence when available. Never invent a candidate-specific fact. If exact candidate evidence is missing, clearly separate the general technical explanation from the unsupported personal claim instead of refusing the entire question.
+
+For interview use, keep the answer concise, natural to speak aloud, and directly usable by the candidate. For a technical interview, prefer 2-5 sentences unless the user explicitly asks for a detailed explanation. Do not turn a clear question into a clarification request.`),
+    push('capabilities', `# Capabilities\n${capabilityLines(policy)}`),
 ].filter((s) => s.trim()).join('\n\n');
 const user = [
 push('question', `# Question\n${d.resolvedQuestion}`),

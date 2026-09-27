@@ -18,7 +18,7 @@ import { estimateTokens, type ModelCapabilities } from './modelCapabilities';
 // advertised context window. Only providers with a known real-world gap are
 // listed; everything else falls back to caps.maxContextTokens.
 const PROVIDER_INPUT_CEILINGS: Readonly<Record<string, number>> = {
-  groq: 8000,
+  groq: 8192,
 };
 
 export function resolveProviderCeiling(provider: string | null | undefined): number | undefined {

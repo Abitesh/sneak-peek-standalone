@@ -5846,6 +5846,14 @@ try { stream.controller.abort(); } catch { /* noop */ }
 _chatStreamsBySender.delete(senderId);
 }
 });
+safeOn('natively-answer-stop', () => {
+try {
+appState.getIntelligenceManager?.()?.resetEngine?.();
+console.log('[IPC] Active What-to-Answer generation cancelled by user');
+} catch (error) {
+console.warn('[IPC] Active answer cancellation failed:', error);
+}
+});
 safeHandle('quit-app', () => {
 app.quit();
 });

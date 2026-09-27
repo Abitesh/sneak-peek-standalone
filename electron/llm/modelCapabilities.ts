@@ -158,7 +158,7 @@ export function getModelCapabilities(modelId: string, isOllama: boolean): ModelC
       tier: 'cloud',
       maxContextTokens: b.max,
       promptBudgetTokens: b.system,
-      outputBudgetTokens: b.output,
+      outputBudgetTokens: 2048,
       supportsXmlTags: true,
       supportsImages: groqSupportsImages(id),
       name: id,

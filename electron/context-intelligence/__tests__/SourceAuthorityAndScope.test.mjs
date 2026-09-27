@@ -24,6 +24,12 @@ describe('source authority', () => {
     }
   });
 
+  test('a prepared interview reference may evidence user motivation, but a resume may not', () => {
+    assert.equal(isAuthoritativeFor('REFERENCE_FILE', 'USER_MOTIVATION'), true);
+    assert.equal(isProhibitedFor('RESUME', 'USER_MOTIVATION'), true);
+    assert.equal(isProhibitedFor('JOB_DESCRIPTION', 'USER_MOTIVATION'), true);
+  });
+
   test('a resume cannot state what a job requires (the symmetric rule)', () => {
     for (const claim of ['JOB_RESPONSIBILITY', 'JOB_REQUIRED_SKILL', 'JOB_PREFERRED_SKILL']) {
       assert.equal(isProhibitedFor('RESUME', claim), true);

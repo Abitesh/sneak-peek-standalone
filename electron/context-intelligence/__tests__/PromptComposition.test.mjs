@@ -18,9 +18,9 @@ const { adaptLegacyChunks } = await import(pathToFileURL(path.join(base, 'retrie
 
 const ADAPT = {
   scope: { userId: 'u1' },
-  sourceTypes: new Map([['resume-1', 'RESUME'], ['jd-1', 'JOB_DESCRIPTION']]),
-  activeVersions: new Map([['resume-1', 'v2'], ['jd-1', 'v1']]),
-  chunkVersions: new Map([['resume-1', 'v2'], ['jd-1', 'v1']]),
+  sourceTypes: new Map([['resume-1', 'RESUME'], ['jd-1', 'JOB_DESCRIPTION'], ['reference-1', 'REFERENCE_FILE']]),
+  activeVersions: new Map([['resume-1', 'v2'], ['jd-1', 'v1'], ['reference-1', 'v1']]),
+  chunkVersions: new Map([['resume-1', 'v2'], ['jd-1', 'v1'], ['reference-1', 'v1']]),
   assumeInScopeWhenUnknown: true,
 };
 const ev = (chunks) => adaptLegacyChunks(chunks, ADAPT).evidence;
@@ -105,6 +105,24 @@ describe('composition contract', () => {
   test('carries the JD-as-experience prohibition explicitly', () => {
     const c = composePrompt({ decision: decision(), policy: MODE_POLICIES['technical-interview'], evidence: [] });
     assert.match(c.system, /job-description requirements as the user's own experience/i);
+  });
+
+  test('prepared interview reference evidence is prioritized for motivation answers', () => {
+    const d = decision('Why did you choose WebRTC?');
+    assert.ok(d.questionTypes.includes('PERSONAL_EXPERIENCE'));
+    const c = composePrompt({
+      decision: d,
+      policy: MODE_POLICIES['technical-interview'],
+      evidence: ev([{
+        sourceId: 'reference-1',
+        text: 'I chose WebRTC because it enabled low-latency communication.',
+        chunkIndex: 0,
+        score: 0.9,
+      }]),
+    });
+    assert.match(c.system, /Interview answer source/);
+    assert.match(c.system, /project-specific facts and reasoning as the primary basis/);
+    assert.match(c.system, /Answer in first person as the candidate/);
   });
 
   test('states plainly when nothing was retrieved', () => {

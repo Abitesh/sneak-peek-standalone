@@ -89,11 +89,11 @@ const BASELINE_MODELS: Record<ModelFamily, string> = {
   [ModelFamily.GEMINI_FLASH]: 'gemini-3.7-flash',
   [ModelFamily.GEMINI_PRO]: 'gemini-3.1-pro-preview',
   [ModelFamily.CLAUDE]: 'claude-sonnet-4-20250514',
-  // Groq retired llama-4-scout on 2026-07-17. qwen3.6-27b is the only model
-  // left in Groq's catalogue that accepts image input. The enum key stays
+  // Groq retired llama-4-scout on 2026-07-17. qwen3.8-27b is the current model
+  // in Groq's catalogue that accepts image input. The enum key stays
   // GROQ_LLAMA because it is the persisted state key — renaming it would
   // orphan every existing model_versions.json entry.
-  [ModelFamily.GROQ_LLAMA]: 'qwen/qwen3.6-27b',
+  [ModelFamily.GROQ_LLAMA]: 'qwen/qwen3.8-27b',
 };
 
 /** Hardcoded baseline models for text Tier 1 */
@@ -103,7 +103,7 @@ const TEXT_BASELINE_MODELS: Record<TextModelFamily, string> = {
   [TextModelFamily.GEMINI_PRO]: 'gemini-3.1-pro-preview',
   [TextModelFamily.CLAUDE]: 'claude-sonnet-4-20250514',
   // Groq retired llama-3.3-70b-versatile on 2026-08-16.
-  [TextModelFamily.GROQ]: 'qwen/qwen3.6-27b',
+  [TextModelFamily.GROQ]: 'qwen/qwen3.8-27b',
 };
 
 /** Vision-capable model ordering for screenshot analysis */
@@ -134,7 +134,7 @@ const DISCOVERY_INTERVAL_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
  * The version comparison alone is not enough: it keeps a persisted `latest`
  * whenever its parsed version is >= the new baseline's, and a retirement is not
  * a version bump. Groq's llama-4-scout parses as 4.0 and its replacement
- * qwen3.6-27b as 3.6, so a pure version check would have kept serving a model
+ * qwen3.8-27b as 3.8, so a pure version check would have kept serving a model
  * that now 404s. Compare by id, not by number.
  */
 // Single source: groqModels.ts (code-review 2026-08-23 — retirement knowledge
@@ -339,7 +339,7 @@ export function classifyModel(modelId: string): ModelFamily | null {
   }
 
   // Groq's vision-capable model. Was llama-4-scout until Groq retired it on
-  // 2026-07-17; qwen3.6-27b is now the only Groq id that accepts images, so
+  // 2026-07-17; qwen3.8-27b accepts images, so
   // discovery has to match it or this family never leaves its baseline.
   // Code-review 2026-08-23: a bare 'qwen' substring put EVERY qwen — Groq has
   // repeatedly hosted text-only qwens (qwen3-32b, QwQ) — into the VISION
@@ -403,7 +403,7 @@ export function classifyTextModel(modelId: string): TextModelFamily | null {
  *
  * Three independent reasons to reset, and the third is the one a version
  * comparison alone cannot see: a retirement is not a version bump. Groq's
- * llama-4-scout parses as 4.0 and its replacement qwen3.6-27b as 3.6, so
+ * llama-4-scout parses as 4.0 and its replacement qwen3.8-27b as 3.8, so
  * `latest` would have survived the version check and kept 404ing.
  */
 export function reconcileFamilyEntry(entry: FamilyState, currentBaseline: string): boolean {

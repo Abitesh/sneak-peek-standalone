@@ -8494,6 +8494,10 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
                 onListen={() => handleStartListening()}
                 onAnalyze={() => void handleAnalyzeNow()}
                 onAnswer={() => void handleWhatToSay()}
+                onStop={() => {
+                  cancelActiveChatStream();
+                  window.electronAPI?.stopActiveAnswer?.();
+                }}
                 onAsk={() => {
                   if (inputValue.trim()) {
                     void handleManualSubmit();

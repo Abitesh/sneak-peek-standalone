@@ -20,21 +20,23 @@ function assertNoUserWarning(decision) {
 }
 
 test('no chunks after watchdog tick is log-only and never a user warning', () => {
-  const health = new SystemAudioHealthClassifier({ watchdogMs: 12_000 });
+  const health = new SystemAudioHealthClassifier();
   assertNoUserWarning(health.handle({ kind: 'capture-started', nowMs: 0 }));
 
-  const decision = health.handle({ kind: 'watchdog-tick', nowMs: 12_000 });
+  const beforeThreshold = health.handle({ kind: 'watchdog-tick', nowMs: 119_999 });
+  assert.equal(beforeThreshold.type, 'none');
+  const decision = health.handle({ kind: 'watchdog-tick', nowMs: 120_000 });
 
   assert.equal(decision.type, 'log');
   assert.equal(decision.reason, 'initial-silence-no-chunks');
 });
 
 test('sustained zero-valued chunks are treated as silence, not permission failure', () => {
-  const health = new SystemAudioHealthClassifier({ zeroObservationMs: 12_000 });
+  const health = new SystemAudioHealthClassifier();
   health.handle({ kind: 'capture-started', nowMs: 0 });
 
   const decisions = [];
-  for (let nowMs = 0; nowMs <= 13_000; nowMs += 1000) {
+  for (let nowMs = 0; nowMs <= 121_000; nowMs += 1000) {
     const decision = health.handle({ kind: 'chunk', nowMs, chunk: zeroChunk() });
     assertNoUserWarning(decision);
     decisions.push(decision);

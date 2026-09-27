@@ -1109,10 +1109,13 @@ export function classifyTurn(input: ClassificationInput): Classification {
   const unreachable = new Set<SourceType>();
   for (const c of claims) {
     const srcs = CLAIM_TO_SOURCE[c] ?? [];
-    if (!srcs.length) continue;
-    const allowedSrcs = srcs.filter((s) => input.policy.allowedSourceTypes.includes(s));
+    const availableSources = c === 'USER_MOTIVATION' && input.hasAttachedDocuments !== true
+      ? srcs.filter((source) => source !== 'REFERENCE_FILE')
+      : srcs;
+    if (!availableSources.length) continue;
+    const allowedSrcs = availableSources.filter((s) => input.policy.allowedSourceTypes.includes(s));
     if (allowedSrcs.length) for (const s of allowedSrcs) wanted.add(s);
-    else for (const s of srcs) unreachable.add(s);
+    else for (const s of availableSources) unreachable.add(s);
   }
   if (input.hasAttachedDocuments === true
       && onlyGeneralClaims

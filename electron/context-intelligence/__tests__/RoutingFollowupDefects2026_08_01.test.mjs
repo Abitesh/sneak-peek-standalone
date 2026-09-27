@@ -302,9 +302,17 @@ describe('Defect F: USER_MOTIVATION reaches the candidate file', () => {
 
   test('claim authority matches the planner (two-map consistency)', () => {
     assert.ok(CLAIM_AUTHORITY.USER_MOTIVATION.authoritative.includes('CANDIDATE_FILE'));
+    assert.ok(CLAIM_AUTHORITY.USER_MOTIVATION.authoritative.includes('REFERENCE_FILE'));
     // The operator's own résumé stays prohibited: facts are not motives.
     assert.ok(CLAIM_AUTHORITY.USER_MOTIVATION.prohibited.includes('RESUME'));
     assert.ok(CLAIM_AUTHORITY.USER_MOTIVATION.prohibited.includes('JOB_DESCRIPTION'));
+  });
+
+  test('general interview motivation routes to attached reference files', () => {
+    const r = classify('Why did you choose WebRTC?', 'general', { hasAttachedDocuments: true });
+    assert.ok(r.claimTypes.includes('USER_MOTIVATION'), JSON.stringify(r.claimTypes));
+    assert.ok(r.requiredSourceTypes.includes('REFERENCE_FILE'), JSON.stringify(r.requiredSourceTypes));
+    assert.equal(r.shouldRetrieve, true, r.reason);
   });
 
   test('looking-for-work motivation routing is unchanged (no CANDIDATE_FILE there)', () => {

@@ -1122,6 +1122,7 @@ onMeetingInterfaceThemeChanged: (callback: (theme: string) => void) => () => voi
 // because a subsequent question's first token has to wait for the prior
 // response to drain through the supersession check.
 cancelChatStream: () => void;
+stopActiveAnswer: () => void;
 onDomContextReceived: (
 callback: (dom: string, meta?: DomCaptureMeta, envelope?: unknown) => void,
 ) => () => void;
@@ -2757,6 +2758,9 @@ ipcRenderer.removeListener('interface-theme:changed', handler);
 // Cancel the in-flight chat stream. See ElectronAPI interface for rationale.
 cancelChatStream: () => {
 ipcRenderer.send('gemini-chat-stream-stop');
+},
+stopActiveAnswer: () => {
+ipcRenderer.send('natively-answer-stop');
 },
 onDomContextReceived: (
 callback: (dom: string, meta?: DomCaptureMeta, envelope?: unknown) => void,

@@ -52,7 +52,7 @@ export const CLAIM_AUTHORITY: Record<ClaimType, ClaimAuthority> = {
   // candidate-motivation question unreachable — the résumé was never queried
   // and the answer claimed no résumé existed. When the file states no reason,
   // retrieval now runs and the absence is disclosed as grounded absence.
-  USER_MOTIVATION: { authoritative: ['PROFILE_FACT', 'CONVERSATION_STATE', 'CANDIDATE_FILE'], prohibited: ['JOB_DESCRIPTION', 'RESUME'] },
+  USER_MOTIVATION: { authoritative: ['PROFILE_FACT', 'CONVERSATION_STATE', 'CANDIDATE_FILE', 'REFERENCE_FILE'], prohibited: ['JOB_DESCRIPTION', 'RESUME'] },
 
   // Symmetric rule: a resume cannot state what a job requires.
   JOB_RESPONSIBILITY:   { authoritative: ['JOB_DESCRIPTION'], prohibited: ['RESUME'] },
