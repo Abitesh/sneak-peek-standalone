@@ -1,25 +1,30 @@
-// Regression test for the "app hangs / crashes the system right after entering
-// the Natively API key or Pro license" bug (2026-06-05).
+// Regression test for the "app hangs / crashes the system right after an STT
+// provider or model change that fires concurrent audio-pipeline rebuilds"
+// bug (2026-06-05; originally triggered by saving a Natively API key).
 //
-// ROOT CAUSE: saving a Natively API key fired up to TWO audio-pipeline rebuilds
-// nearly simultaneously:
-//   1. main-process `set-natively-api-key` handler auto-promotes the STT
-//      provider to 'natively' and calls `reconfigureSttProvider()`.
-//   2. the renderer's `handleSave` then ALSO fired `setSttProvider('natively')`,
-//      whose handler calls `reconfigureSttProvider()` a second time.
-// `reconfigureSttProvider` tears down and reconstructs the native captures
-// (SystemAudioCapture / MicrophoneCapture → CoreAudio / ScreenCaptureKit /
-// WASAPI). Two interleaved teardown+construct sequences against the same native
-// device handles raced → native deadlock / process crash on BOTH macOS and
-// Windows.
+// ROOT CAUSE: a single user action could fire up to TWO audio-pipeline
+// rebuilds nearly simultaneously (e.g. main-process auto-promote + renderer
+// follow-up setSttProvider). `reconfigureSttProvider` tears down and
+// reconstructs the native captures (SystemAudioCapture / MicrophoneCapture →
+// CoreAudio / ScreenCaptureKit / WASAPI). Two interleaved teardown+construct
+// sequences against the same native device handles raced → native deadlock /
+// process crash on BOTH macOS and Windows.
+//
+// The hosted Natively API settings surface (`NativelyApiSettings.tsx` +
+// `set-natively-api-key`) has since been removed. Live triggers that still
+// call `reconfigureSttProvider` are:
+//   - `set-stt-provider` (SettingsOverlay STT dropdown)
+//   - `local-whisper-set-model` / `local-whisper-set-channel-config`
+//     (LocalWhisperModelPanel under Settings → Audio)
 //
 // FIXES UNDER TEST:
 //   #1 reconfigureSttProvider is serialized via `_sttReconfigureChain` — the
 //      actual work lives in `_doReconfigureSttProvider`, and concurrent callers
 //      are queued so the critical section is never re-entered.
-//   #2 the renderer no longer double-fires setSttProvider/setDefaultModel.
-//   #3 the ~8s Pro license activation is detached from the key-save critical
-//      path (not awaited inline).
+//   #2 the local-whisper model UI does not also fire setSttProvider, and
+//      provider changes broadcast credentials-changed so SettingsOverlay
+//      refreshes.
+//   #3 live reconfigure callers await the serialized path (no fire-and-forget).
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -32,10 +37,31 @@ const root = path.resolve(__dirname, '../../..');
 
 const mainSrc = fs.readFileSync(path.join(root, 'electron/main.ts'), 'utf8');
 const ipcSrc = fs.readFileSync(path.join(root, 'electron/ipcHandlers.ts'), 'utf8');
-const settingsSrc = fs.readFileSync(
-  path.join(root, 'src/components/settings/NativelyApiSettings.tsx'),
+const panelSrc = fs.readFileSync(
+  path.join(root, 'src/components/LocalWhisperModelPanel.tsx'),
   'utf8',
 );
+const overlaySrc = fs.readFileSync(
+  path.join(root, 'src/components/SettingsOverlay.tsx'),
+  'utf8',
+);
+
+function sliceSafeHandle(source, channel, nextChannel) {
+  // Handlers are commonly formatted as safeHandle(\n  'channel', …) so match
+  // the channel literal rather than a single-line safeHandle('channel' form.
+  const re = new RegExp(`safeHandle\\(\\s*['"]${channel}['"]`);
+  const m = re.exec(source);
+  assert.ok(m, `${channel} handler must exist`);
+  const start = m.index;
+  let end = -1;
+  if (nextChannel) {
+    const nextRe = new RegExp(`safeHandle\\(\\s*['"]${nextChannel}['"]`);
+    nextRe.lastIndex = start + 1;
+    const next = nextRe.exec(source);
+    end = next ? next.index : -1;
+  }
+  return source.slice(start, end > start ? end : start + 2500);
+}
 
 describe('Fix #1: reconfigureSttProvider is serialized (source contract)', () => {
   it('declares a serialization chain field', () => {
@@ -49,10 +75,13 @@ describe('Fix #1: reconfigureSttProvider is serialized (source contract)', () =>
   });
 
   it('the public reconfigureSttProvider delegates through the chain, not the body directly', () => {
-    // Isolate the public method body.
+    // Isolate ONLY the public method body — stop at the private worker so a
+    // nearby setupSystemAudioPipeline inside _doReconfigureSttProvider cannot
+    // false-fail a fixed-window scan of main.ts.
     const pubStart = mainSrc.indexOf('public async reconfigureSttProvider(');
     assert.ok(pubStart >= 0, 'public reconfigureSttProvider must exist');
-    const pubBody = mainSrc.slice(pubStart, pubStart + 1200);
+    const doStart = mainSrc.indexOf('private async _doReconfigureSttProvider(', pubStart);
+    const pubBody = mainSrc.slice(pubStart, doStart > pubStart ? doStart : pubStart + 1200);
     assert.match(
       pubBody,
       /_sttReconfigureChain/,
@@ -68,7 +97,7 @@ describe('Fix #1: reconfigureSttProvider is serialized (source contract)', () =>
     // The teardown/rebuild must NOT be inlined in the public method — that
     // would mean it runs unserialized.
     assert.ok(
-      !/public async reconfigureSttProvider[\s\S]{0,1200}setupSystemAudioPipeline/.test(mainSrc),
+      !/setupSystemAudioPipeline/.test(pubBody),
       'BUG: setupSystemAudioPipeline is called directly inside the PUBLIC ' +
         'reconfigureSttProvider — the native rebuild must live in the serialized ' +
         '_doReconfigureSttProvider instead.',
@@ -154,40 +183,63 @@ describe('Fix #1: serialization semantics (behavioral)', () => {
   });
 });
 
-describe('Fix #2: renderer no longer double-fires; server compensates the UI refresh', () => {
-  it('handleSave does not call setSttProvider/setDefaultModel after saving the key', () => {
-    const start = settingsSrc.indexOf('const handleSave');
-    assert.ok(start >= 0, 'handleSave must exist in NativelyApiSettings.tsx');
-    const end = settingsSrc.indexOf('const handleClear', start);
-    const handleSaveBody = settingsSrc.slice(start, end > start ? end : start + 1500);
-    // Match the actual IPC CALL form (`electronAPI?.setSttProvider`), not bare
-    // mentions — the explanatory comment legitimately names the removed calls.
-    assert.ok(
-      !/electronAPI\s*\?\.\s*setSttProvider/.test(handleSaveBody),
-      'BUG: handleSave fires electronAPI.setSttProvider again after set-natively-api-key. The main ' +
-        'process already promotes + reconfigures STT server-side; the redundant call races a SECOND ' +
-        'audio-pipeline rebuild — the crash/hang this whole fix removes.',
+describe('Fix #2: local-whisper UI does not double-fire; provider IPC refreshes SettingsOverlay', () => {
+  it('SettingsOverlay mounts LocalWhisperModelPanel for the local-whisper provider', () => {
+    assert.match(
+      overlaySrc,
+      /LocalWhisperModelPanel/,
+      'BUG: SettingsOverlay no longer mounts LocalWhisperModelPanel — local model reconfigure has no settings surface.',
     );
-    assert.ok(
-      !/electronAPI\s*\?\.\s*setDefaultModel/.test(handleSaveBody),
-      'BUG: handleSave fires electronAPI.setDefaultModel again after set-natively-api-key. The main ' +
-        'process already syncs the default model server-side; the redundant call is unnecessary work.',
+    assert.match(
+      overlaySrc,
+      /sttProvider\s*===\s*['"]local-whisper['"]/,
+      'BUG: LocalWhisperModelPanel must be gated on sttProvider === local-whisper.',
     );
   });
 
-  it("set-natively-api-key broadcasts 'credentials-changed' so the SettingsOverlay STT dropdown refreshes", () => {
-    // The SettingsOverlay STT dropdown re-reads credentials ONLY on the
-    // 'credentials-changed' event. Removing the renderer's setSttProvider call
-    // (above) deleted the transitive source of that event for this flow, so the
-    // handler must now emit it directly — otherwise the dropdown shows a stale
-    // provider after a key save/clear.
-    const start = ipcSrc.indexOf("safeHandle('set-natively-api-key'");
-    assert.ok(start >= 0, 'set-natively-api-key handler must exist');
-    const end = ipcSrc.indexOf("safeHandle('get-natively-pricing'", start);
-    const handlerBody = ipcSrc.slice(start, end > start ? end : start + 4000);
-    // Accept either the direct call or the shared broadcastCredentialsChanged()
-    // helper it was later refactored into — assert the helper itself really
-    // sends the event, so this test still catches the helper being hollowed out.
+  it('LocalWhisperModelPanel model mutators do not also call setSttProvider/setDefaultModel', () => {
+    // Model / channel changes already reconfigure (or invalidate) STT in main.
+    // A redundant setSttProvider from the same UI action would race a SECOND
+    // audio-pipeline rebuild — the crash/hang this whole fix removes.
+    const mutators = ['setGlobalModel', 'setMicModel', 'setSystemModel', 'toggleDualChannel'];
+    for (const name of mutators) {
+      const start = panelSrc.indexOf(`const ${name}`);
+      assert.ok(start >= 0, `${name} must exist in LocalWhisperModelPanel.tsx`);
+      // Bound each mutator by the next const/function or the loading early-return.
+      const nextConst = panelSrc.indexOf('\n    const ', start + 1);
+      const nextIf = panelSrc.indexOf('\n    if (loading)', start + 1);
+      const endCandidates = [nextConst, nextIf].filter((i) => i > start);
+      const end = endCandidates.length ? Math.min(...endCandidates) : start + 800;
+      const body = panelSrc.slice(start, end);
+      assert.ok(
+        !/electronAPI\s*\?\.\s*setSttProvider/.test(body) &&
+          !/window\.electronAPI\s*\?\.\s*setSttProvider/.test(body),
+        `BUG: ${name} fires setSttProvider after a local-whisper model/config write. ` +
+          'Main already reconfigures/invalidates STT for that write; the redundant call ' +
+          'races a SECOND audio-pipeline rebuild.',
+      );
+      assert.ok(
+        !/electronAPI\s*\?\.\s*setDefaultModel/.test(body) &&
+          !/window\.electronAPI\s*\?\.\s*setDefaultModel/.test(body),
+        `BUG: ${name} fires setDefaultModel after a local-whisper model/config write.`,
+      );
+    }
+    assert.match(
+      panelSrc,
+      /localWhisperSetModel/,
+      'BUG: LocalWhisperModelPanel must call localWhisperSetModel for global model changes.',
+    );
+    assert.match(
+      panelSrc,
+      /localWhisperSetChannelConfig/,
+      'BUG: LocalWhisperModelPanel must call localWhisperSetChannelConfig for channel overrides.',
+    );
+  });
+
+  it("set-stt-provider broadcasts 'credentials-changed' so the SettingsOverlay STT dropdown refreshes", () => {
+    // SettingsOverlay re-reads credentials on onCredentialsChanged. Provider
+    // changes must emit that event so the dropdown stays in sync across windows.
+    const handlerBody = sliceSafeHandle(ipcSrc, 'set-stt-provider', 'get-stt-provider');
     const usesHelper = /broadcastCredentialsChanged\s*\(\s*\)/.test(handlerBody);
     if (usesHelper) {
       const helperStart = ipcSrc.indexOf('const broadcastCredentialsChanged');
@@ -197,41 +249,54 @@ describe('Fix #2: renderer no longer double-fires; server compensates the UI ref
         helperBody,
         /send\(\s*['"]credentials-changed['"]\s*\)/,
         "BUG: broadcastCredentialsChanged no longer sends 'credentials-changed'. The Settings STT " +
-          'dropdown will show a stale provider after the Natively key is saved or cleared.',
+          'dropdown will show a stale provider after set-stt-provider.',
       );
     } else {
       assert.match(
         handlerBody,
         /send\(\s*['"]credentials-changed['"]\s*\)/,
-        "BUG: set-natively-api-key no longer broadcasts 'credentials-changed'. The Settings STT " +
-          'dropdown will show a stale provider after the Natively key is saved or cleared.',
+        "BUG: set-stt-provider no longer broadcasts 'credentials-changed'. The Settings STT " +
+          'dropdown will show a stale provider after a provider change.',
       );
     }
+    assert.match(
+      overlaySrc,
+      /onCredentialsChanged/,
+      'BUG: SettingsOverlay must subscribe to credentials-changed to refresh the STT dropdown.',
+    );
   });
 });
 
-describe('Fix #3: Pro license activation stays awaited inline (no detached billing race)', () => {
-  it('activateWithApiKey is awaited inline, not detached in a fire-and-forget IIFE', () => {
-    const start = ipcSrc.indexOf("safeHandle('set-natively-api-key'");
-    assert.ok(start >= 0, 'set-natively-api-key handler must exist');
-    const end = ipcSrc.indexOf("safeHandle('get-natively-pricing'", start);
-    const handlerBody = ipcSrc.slice(start, end > start ? end : start + 4000);
-
-    // The inline await is the backpressure that serializes rapid set→clear:
-    // it keeps the renderer button disabled until the license mutation lands,
-    // so a fire-and-forget activate can't store a license AFTER a clear's
-    // deactivate (entitlement leak). LicenseManager has no cross-call mutex,
-    // so the await is the only thing preventing the ordering race.
+describe('Fix #3: live reconfigure callers await the serialized path', () => {
+  it('set-stt-provider awaits reconfigureSttProvider (no fire-and-forget)', () => {
+    const handlerBody = sliceSafeHandle(ipcSrc, 'set-stt-provider', 'get-stt-provider');
     assert.match(
       handlerBody,
-      /await\s+LicenseManager\.getInstance\(\)\.activateWithApiKey/,
-      'BUG: activateWithApiKey must be awaited inline in the handler.',
+      /await\s+appState\.reconfigureSttProvider\s*\(/,
+      'BUG: set-stt-provider must await reconfigureSttProvider so concurrent provider ' +
+        'changes queue on _sttReconfigureChain instead of racing native teardown.',
     );
     assert.ok(
-      !/void\s*\(async\s*\(\s*\)\s*=>/.test(handlerBody),
-      'BUG: the license activation was detached into a fire-and-forget IIFE. That removes the ' +
-        'renderer backpressure and opens a set→clear ordering race (Pro left active with no key). ' +
-        'Keep it awaited inline; the crash fix is handled by reconfigureSttProvider serialization.',
+      !/void\s+appState\.reconfigureSttProvider\s*\(/.test(handlerBody),
+      'BUG: set-stt-provider detached reconfigureSttProvider into a fire-and-forget call.',
+    );
+  });
+
+  it('local-whisper-set-model awaits reconfigureSttProvider when a meeting is active', () => {
+    const handlerBody = sliceSafeHandle(
+      ipcSrc,
+      'local-whisper-set-model',
+      'local-whisper-reset-to-default',
+    );
+    assert.match(
+      handlerBody,
+      /await\s+appState\.reconfigureSttProvider\s*\(/,
+      'BUG: local-whisper-set-model must await reconfigureSttProvider during an active ' +
+        'meeting so model switches serialize with other STT rebuilds.',
+    );
+    assert.ok(
+      !/void\s+appState\.reconfigureSttProvider\s*\(/.test(handlerBody),
+      'BUG: local-whisper-set-model detached reconfigureSttProvider into a fire-and-forget call.',
     );
   });
 });
