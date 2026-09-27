@@ -6623,6 +6623,19 @@ export class AppState {
  this._isDraining = true;
  this.broadcastMeetingState();
 
+ // Mirror startMeetingTransition / power-resume: disarm in-flight system-audio
+ // recovery so leave mid-1.5s-delay cannot recreate a capture after Stop.
+ // clearTimeout orphans the delay Promise; reset inProgress because that
+ // await never reaches finally. Prefer-SCK is meeting-scoped.
+ this._systemAudioRecoveryInProgress = false;
+ this._systemAudioRecoveryAttempts = 0;
+ this._systemAudioConsecutiveFailures = 0;
+ this._systemAudioPreferSckRecovery = false;
+ if (this._systemAudioRecoveryTimer) {
+ clearTimeout(this._systemAudioRecoveryTimer);
+ this._systemAudioRecoveryTimer = null;
+ }
+
  //  ABORT + AWAIT IN-FLIGHT AUDIO INIT (before any capture teardown) 
  // If startMeeting()'s async audio init is still mid-`setupSystemAudioPipeline()`
  // it can construct/start a FRESH native capture AFTER our stop()/destroy() runs,
