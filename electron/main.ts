@@ -5271,6 +5271,14 @@ export class AppState {
  const oldCapture = this.systemAudioCapture;
  this.systemAudioCapture = null;
  this._sysSttRateApplied = false;
+ // FATAL no-samples with callback_invocations=0 means the CoreAudio IO
+ // callback never fired (dead tap / wrong device path). Prefer-SCK was
+ // previously only set on sustained zero-fill; without this, recovery
+ // rebuilt CoreAudio via _lastRequestedOutputDeviceId and looped.
+ // Screen-recording denial is still gated below before construct.
+ if (/callback_invocations\s*=\s*0\b/.test(err?.message ?? '')) {
+ this._systemAudioPreferSckRecovery = true;
+ }
  const recoveryDeviceId = this._systemAudioPreferSckRecovery
  ? 'sck'
  : this._lastRequestedOutputDeviceId;
