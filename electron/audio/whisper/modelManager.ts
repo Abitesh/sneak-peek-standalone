@@ -106,7 +106,9 @@ export const MODEL_CATALOG: WhisperModelInfo[] = [
  * validation gates: a persisted `localWhisperModel` / `localWhisperModelMic` /
  * `localWhisperModelSystem` setting must be one of these, otherwise the
  * worker crashes on init and the user is locked out of audio. Callers should
- * fall back to `Xenova/whisper-tiny.en` (always present) on miss.
+ * fall back to `SAFE_LOCAL_WHISPER_FALLBACK` (`Xenova/whisper-tiny.en`) on
+ * poison / invalid-id recovery, and `preferredLocalWhisperModel()` for the
+ * first-run preferred default (Stage 7).
  */
 export const MODEL_CATALOG_IDS: Set<string> = new Set(MODEL_CATALOG.map(m => m.id));
 

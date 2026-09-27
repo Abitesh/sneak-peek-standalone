@@ -8695,7 +8695,7 @@ const models = getAvailableModels().map((m: any) => ({
 ...m,
 languageSupport: getLocalModelLanguageSupport(m.id),
 }));
-const activeModelId = SettingsManager.getInstance().get('localWhisperModel') ?? '';
+const activeModelId = SettingsManager.getInstance().getLocalWhisperModel();
 return { models, activeModelId };
 } catch (e: any) {
 console.error('[IPC] local-whisper-get-models error:', e.message);
@@ -8802,11 +8802,14 @@ return { success: false, error: e.message };
 // fall back to localWhisperModel (the existing global setting).
 safeHandle('local-whisper-get-channel-config', async () => {
 const sm = SettingsManager.getInstance();
+const ch = sm.getLocalWhisperPerChannel();
 return {
-enabled: !!sm.get('localWhisperPerChannelEnabled'),
+enabled: ch.enabled,
+// Raw stored slots (may be '') so the Settings UI can show "use shared".
 micModelId: sm.get('localWhisperModelMic') ?? '',
 systemModelId: sm.get('localWhisperModelSystem') ?? '',
-globalModelId: sm.get('localWhisperModel') ?? '',
+// Resolved preferred default when shared setting is unset (Stage 7).
+globalModelId: ch.globalModelId,
 };
 });
 safeHandle(
@@ -8912,8 +8915,7 @@ const { resolveInferenceConfig } = require('./audio/whisper/inferenceConfig');
 const { SettingsManager } = require('./services/SettingsManager');
 const id =
 modelId ||
-SettingsManager.getInstance().get('localWhisperModel') ||
-'Xenova/whisper-tiny.en';
+SettingsManager.getInstance().getLocalWhisperModel();
 // Pass active dtype so the cache check verifies the SPECIFIC ONNX
 // files (e.g. encoder_model.onnx for fp32) are present — not just
 // "directory non-empty". Otherwise a v2-cached _quantized.onnx-only

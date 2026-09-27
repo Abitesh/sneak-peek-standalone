@@ -13,6 +13,18 @@ export interface HardwareInfo {
     recommendedModel: string;
 }
 
+/**
+ * Poison / invalid-id recovery only — small catalog entry that can be
+ * re-downloaded. Do NOT use as the first-run preferred default; that is
+ * `preferredLocalWhisperModel()` (Stage 7 measure-then-pick).
+ */
+export const SAFE_LOCAL_WHISPER_FALLBACK = 'Xenova/whisper-tiny.en';
+
+/** Platform preferred shared `localWhisperModel` when the setting is unset. */
+export function preferredLocalWhisperModel(): string {
+    return detectHardware().recommendedModel;
+}
+
 export function detectHardware(): HardwareInfo {
     const arch = process.arch;
     const platform = process.platform;

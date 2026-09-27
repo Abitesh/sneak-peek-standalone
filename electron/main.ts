@@ -1595,7 +1595,9 @@ export class AppState {
  // (main.ts:1721-1726), not at this preload block — leaving it
  // un-validated here means a corrupt per-channel id would still
  // crash the meeting even though the global gate passes.
- const FALLBACK = 'Xenova/whisper-tiny.en';
+ const FALLBACK = 'Xenova/whisper-tiny.en'; // poison / invalid-id only
+ const { preferredLocalWhisperModel } = require('./audio/whisper/hardwareDetect');
+ const PREFERRED = preferredLocalWhisperModel();
  const poisoned = modelPreloader.consumePoisonedLoadSentinel?.();
  if (poisoned?.modelId) {
  let resetAny = false;
@@ -1618,7 +1620,7 @@ export class AppState {
  console.warn(`[AppState] Previous local Whisper load for ${poisoned.modelId} did not finish cleanly; current settings no longer reference it.`);
  }
  }
- const rawModelId = settingsManager.get('localWhisperModel') ?? FALLBACK;
+ const rawModelId = settingsManager.get('localWhisperModel') ?? PREFERRED;
  const modelId = MODEL_CATALOG_IDS.has(rawModelId) ? rawModelId : FALLBACK;
  if (modelId !== rawModelId) {
  console.warn(`[AppState] Persisted localWhisperModel "${rawModelId}" not in catalog — resetting to ${modelId}`);
@@ -3437,18 +3439,14 @@ export class AppState {
  } else if (sttProvider === 'local-whisper') {
  const { LocalWhisperSTT } = require('./audio/LocalWhisperSTT');
  const sm = SettingsManager.getInstance();
- const globalModel = sm.get('localWhisperModel') ?? 'Xenova/whisper-tiny.en';
+ const channel = sm.getLocalWhisperPerChannel();
  // Per-channel override: when enabled the two STT instances may load
  // different models (e.g. Moonshine Tiny for mic, Moonshine Base for
  // system audio). Falls back to globalModel if the per-channel slot is
  // empty or the feature is disabled.
- let modelId = globalModel;
- if (sm.get('localWhisperPerChannelEnabled')) {
- const override = speaker === 'interviewer'
- ? sm.get('localWhisperModelSystem')
- : sm.get('localWhisperModelMic');
- if (override) modelId = override;
- }
+ const modelId = channel.enabled
+  ? (speaker === 'interviewer' ? channel.systemModelId : channel.micModelId)
+  : channel.globalModelId;
  console.log(`[Main] Using LocalWhisperSTT for ${speaker}, model: ${modelId}`);
  const lws = new LocalWhisperSTT(modelId);
  // Channel label disambiguates the two concurrent instances in latency logs.

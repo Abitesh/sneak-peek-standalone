@@ -106,6 +106,11 @@ export interface AppSettings {
     // pick their own model (mic / system) instead of sharing localWhisperModel.
     // Use case: tiny model for the user's own voice (predictable, fast) + a
     // larger one for system audio (varied accents / jargon).
+    //
+    // Stage 7 (docs/ASR_MODEL_BENCHMARK.md): when unset, shared
+    // default is preferredLocalWhisperModel() (Moonshine Base on Apple Silicon /
+    // capable Windows). Per-channel stays OFF while mic and system would resolve
+    // to the same measured model; enable after a second model is measured.
     localWhisperPerChannelEnabled?: boolean;
     localWhisperModelMic?: string;
     localWhisperModelSystem?: string;
@@ -312,6 +317,44 @@ export class SettingsManager {
 
     public getTechnicalInterviewVisionFirst(): boolean {
         return this.settings.technicalInterviewVisionFirst !== false;
+    }
+
+    /**
+     * Shared local Whisper model id. Unset → Stage 7 preferred default from
+     * hardwareDetect (Moonshine Base on Apple Silicon). Poison recovery still
+     * writes SAFE_LOCAL_WHISPER_FALLBACK (tiny.en) via main/ipcHandlers.
+     */
+    public getLocalWhisperModel(): string {
+        const stored = this.settings.localWhisperModel;
+        if (stored && typeof stored === 'string' && stored.trim()) return stored;
+        try {
+            const { preferredLocalWhisperModel } = require('../audio/whisper/hardwareDetect');
+            return preferredLocalWhisperModel();
+        } catch {
+            return 'onnx-community/moonshine-base-ONNX';
+        }
+    }
+
+    /**
+     * Per-channel local Whisper selection. `enabled` defaults false (Stage 7:
+     * mic and system share the same measured model). Empty mic/system slots
+     * fall back to getLocalWhisperModel().
+     */
+    public getLocalWhisperPerChannel(): {
+        enabled: boolean;
+        micModelId: string;
+        systemModelId: string;
+        globalModelId: string;
+    } {
+        const globalModelId = this.getLocalWhisperModel();
+        const mic = this.settings.localWhisperModelMic;
+        const system = this.settings.localWhisperModelSystem;
+        return {
+            enabled: this.settings.localWhisperPerChannelEnabled === true,
+            micModelId: (mic && mic.trim()) || globalModelId,
+            systemModelId: (system && system.trim()) || globalModelId,
+            globalModelId,
+        };
     }
 
     // ── Smart Browser Context v2 — resolved settings (single default source) ──

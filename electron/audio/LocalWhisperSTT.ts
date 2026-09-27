@@ -259,10 +259,13 @@ private static resolveStreamingProfile(modelId: string): { intervalMs: number; m
 // Loose match — covers `onnx-community/moonshine-*`, `usefulsensors/
 // moonshine-*`, and any future fork that keeps "moonshine" in the
 // path. Falls back to Whisper-safe defaults on no match.
-// TODO: validate the 750/400 numbers against measured first-partial
-// p50 once a Moonshine model is downloaded; expect <600ms.
+// Stage 7 ASR bench (docs/ASR_MODEL_BENCHMARK.md, Apple M3):
+// Moonshine Base median partial ≈ 280–400 ms. The old 750 ms poll gate
+// dominated first-partial wall time (gate 750 > ~1.5× inference). Retuned
+// interval to match minAudio so the wait is ~400 ms + inference, not
+// ~750–1150 ms + inference. Re-measure before raising again.
 if (modelId.toLowerCase().includes('moonshine')) {
-return { intervalMs: 750, minAudioMs: 400, skipAgreement: true };
+return { intervalMs: 400, minAudioMs: 400, skipAgreement: true };
 }
 // Nemotron 3.5 ASR Streaming (sessionLayout: 'nemotron-rnnt' in
 // MODEL_CATALOG) — the ONLY model in this catalog with genuinely
