@@ -1,0 +1,143 @@
+{
+  "meta": {
+    "date": "2026-09-27T09:48:31.531Z",
+    "cpu": "Apple M3",
+    "arch": "arm64",
+    "platform": "darwin",
+    "ramGb": 8,
+    "modelsDir": "/Users/sriramvanga/Library/Application Support/natively/whisper-models",
+    "audioMs": 2463,
+    "warmups": 1,
+    "runs": 3
+  },
+  "rows": [
+    {
+      "id": "onnx-community/moonshine-tiny-ONNX",
+      "name": "Moonshine Tiny",
+      "sizeMb": 26,
+      "status": "needs run",
+      "notes": "not in whisper-models cache"
+    },
+    {
+      "id": "onnx-community/moonshine-base-ONNX",
+      "name": "Moonshine Base",
+      "sizeMb": 60,
+      "status": "measured",
+      "loadMs": 1087,
+      "warmupMs": null,
+      "partialMs": 275,
+      "finalMs": 316,
+      "rtf": 0.12824747949654894,
+      "overlap": 1,
+      "rssMb": 588,
+      "cpuPct": 68.3,
+      "text": "The quick brown fox jumps over the lazy dog.",
+      "notes": "\"The quick brown fox jumps over the lazy dog.\""
+    },
+    {
+      "id": "onnx-community/parakeet-ctc-0.6b-ONNX",
+      "name": "Parakeet CTC 0.6B",
+      "sizeMb": 583,
+      "status": "needs run",
+      "notes": "not in whisper-models cache"
+    },
+    {
+      "id": "onnx-community/nemotron-3.5-asr-streaming-0.6b-onnx-int4",
+      "name": "Nemotron 3.5 ASR Streaming",
+      "sizeMb": 793,
+      "status": "needs run",
+      "notes": "not in whisper-models cache"
+    },
+    {
+      "id": "distil-whisper/distil-small.en",
+      "name": "Distil Small EN",
+      "sizeMb": 164,
+      "status": "needs run",
+      "notes": "not in whisper-models cache"
+    },
+    {
+      "id": "distil-whisper/distil-medium.en",
+      "name": "Distil Medium EN",
+      "sizeMb": 383,
+      "status": "needs run",
+      "notes": "not in whisper-models cache"
+    },
+    {
+      "id": "distil-whisper/distil-large-v3",
+      "name": "Distil Large v3",
+      "sizeMb": 731,
+      "status": "needs run",
+      "notes": "not in whisper-models cache"
+    },
+    {
+      "id": "distil-whisper/distil-large-v2",
+      "name": "Distil Large v2",
+      "sizeMb": 731,
+      "status": "needs run",
+      "notes": "not in whisper-models cache"
+    },
+    {
+      "id": "onnx-community/whisper-large-v3-turbo-ONNX",
+      "name": "Whisper Large v3 Turbo",
+      "sizeMb": 1031,
+      "status": "needs run",
+      "notes": "not in whisper-models cache"
+    },
+    {
+      "id": "Xenova/whisper-tiny.en",
+      "name": "Tiny English",
+      "sizeMb": 39,
+      "status": "needs run",
+      "notes": "not in whisper-models cache"
+    },
+    {
+      "id": "Xenova/whisper-tiny",
+      "name": "Tiny Multilingual",
+      "sizeMb": 74,
+      "status": "needs run",
+      "notes": "not in whisper-models cache"
+    },
+    {
+      "id": "Xenova/whisper-base.en",
+      "name": "Base English",
+      "sizeMb": 142,
+      "status": "needs run",
+      "notes": "not in whisper-models cache"
+    },
+    {
+      "id": "Xenova/whisper-base",
+      "name": "Base Multilingual",
+      "sizeMb": 145,
+      "status": "needs run",
+      "notes": "not in whisper-models cache"
+    },
+    {
+      "id": "Xenova/whisper-small.en",
+      "name": "Small English",
+      "sizeMb": 244,
+      "status": "needs run",
+      "notes": "not in whisper-models cache"
+    },
+    {
+      "id": "Xenova/whisper-small",
+      "name": "Small Multilingual",
+      "sizeMb": 466,
+      "status": "needs run",
+      "notes": "not in whisper-models cache"
+    },
+    {
+      "id": "Xenova/whisper-medium.en",
+      "name": "Medium English",
+      "sizeMb": 1500,
+      "status": "needs run",
+      "notes": "not in whisper-models cache"
+    },
+    {
+      "id": "Xenova/whisper-medium",
+      "name": "Medium Multilingual",
+      "sizeMb": 1530,
+      "status": "needs run",
+      "notes": "not in whisper-models cache"
+    }
+  ]
+}

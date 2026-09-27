@@ -49,6 +49,7 @@
     "test:e2e:parity": "node scripts/run-with-env.mjs --set ELECTRON_E2E=1 --default ELECTRON_APP_PORT=5173 -- playwright test tests/e2e/parity-gaps-evidence.spec.ts",
     "test:e2e:screen-understanding": "npm run build:electron && echo 'screen-understanding tests were in removed natively-api'",
     "bench:screen-understanding": "npm run build:electron && node scripts/bench-screen-understanding.mjs",
+    "benchmark:asr": "node scripts/benchmark-asr-models.mjs",
     "benchmark:vision": "npm run build:electron && node dist-electron/electron/visionBenchmark/cli.js",
     "benchmark:vision:live": "npm run build:electron && node scripts/run-live-vision-benchmark.mjs",
     "test:vision-benchmark": "npm run build:electron && node --test \"electron/visionBenchmark/__tests__/*.test.mjs\"",
