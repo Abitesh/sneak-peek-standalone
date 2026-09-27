@@ -1,6 +1,10 @@
 import type { EvidencePack } from '../intelligence/context-os/evidencePack';
 import { escapeXml, renderEvidencePackForPrompt } from '../intelligence/context-os/promptRenderer';
 import type { RAGConversationTurn } from './RAGRetriever';
+import {
+  findEvidenceTerminologyHints,
+  renderTerminologyHintXml,
+} from './evidenceTerminologyHint';
 
 export function renderConversationContext(
   turns?: readonly RAGConversationTurn[],
@@ -29,9 +33,18 @@ function renderMemoryBlock(memoryBlock?: string): string {
   ].join('\n');
 }
 
+function renderTerminologyNoteFromPack(pack: EvidencePack): string {
+  const evidenceTexts = pack.items
+    .filter((item) => item.authority === 'evidence')
+    .map((item) => item.text);
+  const query = pack.originalQuery ?? '';
+  return renderTerminologyHintXml(findEvidenceTerminologyHints(query, evidenceTexts));
+}
+
 /**
  * Change 38: prompt-time assembly of conversation + retrieved evidence + memory.
  * Hindsight stays out of RAGManager.search(). Memory is never serialized as <evidence>.
+ * Stage 8: optional non-authoritative ASR near-miss note after evidence (not on the pack).
  */
 export function buildRagContext(input: {
   pack: EvidencePack;
@@ -43,6 +56,7 @@ export function buildRagContext(input: {
     prompt: [
       renderConversationContext(input.conversation),
       renderEvidencePackForPrompt(input.pack),
+      renderTerminologyNoteFromPack(input.pack),
       renderMemoryBlock(input.memoryBlock),
     ].filter(Boolean).join('\n\n'),
     usedDocumentEvidence,

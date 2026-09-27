@@ -19,6 +19,10 @@ import type { TurnDecision, EvidenceItem } from '../contracts/types';
 import type { ModePolicy } from '../policies/mode-policy-registry';
 import { packContext, type PackBudget, type PackedContext } from './context-packer';
 import { scopeLabels } from '../policies/provider-scope-policy';
+import {
+  findEvidenceTerminologyHints,
+  renderTerminologyHintMarkdown,
+} from '../../rag/evidenceTerminologyHint';
 export interface ComposeInput {
 decision: Readonly<TurnDecision>;
 policy: ModePolicy;
@@ -544,6 +548,14 @@ conversationTokens: policy.contextBudget.conversationTokens,
 transcriptTokens: policy.contextBudget.transcriptTokens,
 };
 const packed = packContext(d, evidence, budget);
+const terminologyNote = packed.evidenceBlock
+  ? renderTerminologyHintMarkdown(
+      findEvidenceTerminologyHints(
+        d.resolvedQuestion,
+        evidence.map((e) => e.content),
+      ),
+    )
+  : '';
 const sections: string[] = [];
 const push = (name: string, body: string) => { if (body.trim()) sections.push(name); return body; };
 // An instruction-extraction/override request gets an explicit refusal
@@ -607,6 +619,9 @@ packed.evidenceBlock
 packed.evidenceBlock && input.withheldScopes?.length
 ? push('privacy_withheld', privacyWithholdingNotice(input.withheldScopes, true))
 : '',
+// Stage 8: non-authoritative ASR near-miss hint after evidence. Prompt-only —
+// never mutates the displayed transcript or EvidencePack.
+terminologyNote ? push('terminology', terminologyNote) : '',
 // Change 43: memory is LAST of the three context concepts, matching
 // RagContextBuilder (Change 38). The subordination rule already on the
 // recalled block ("MUST NOT override current sources") must be read after
