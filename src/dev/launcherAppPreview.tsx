@@ -57,6 +57,8 @@ const MEETINGS = [
 }));
 
 const noop = async () => undefined;
+const previewNotes = new Map<string, { id: string; title: string; content: string; createdAt: string; updatedAt: string }>();
+let previewNoteSequence = 0;
 
 // A plain object, deliberately not a Proxy: the components read non-function
 // properties too (platformUtils does `electronAPI?.platform.startsWith(...)` at
@@ -80,6 +82,23 @@ const stub = {
     getUndetectable: async () => true,
     seedDemo: noop,
     searchGlobalMeetings: async () => ({ enabled: false, results: [] }),
+    notesList: async () => [...previewNotes.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+    notesGet: async (id: string) => previewNotes.get(id) ?? null,
+    notesCreate: async (title: string) => {
+        const id = `preview-note-${++previewNoteSequence}`;
+        const now = new Date().toISOString();
+        const note = { id, title: title.trim(), content: '', createdAt: now, updatedAt: now };
+        if (note.title) previewNotes.set(id, note);
+        return note.title ? note : null;
+    },
+    notesUpdate: async (id: string, title: string, content: string) => {
+        const existing = previewNotes.get(id);
+        if (!existing || !title.trim()) return null;
+        const note = { ...existing, title: title.trim(), content, updatedAt: new Date().toISOString() };
+        previewNotes.set(id, note);
+        return note;
+    },
+    notesDelete: async (id: string) => previewNotes.delete(id),
 };
 
 // Effects DO call methods that are not optional-chained (ConnectCalendarButton

@@ -34,6 +34,13 @@ section?: string;
 sourceType: string;
 };
 }
+interface LocalNote {
+id: string;
+title: string;
+content: string;
+createdAt: string;
+updatedAt: string;
+}
 // Types for the exposed Electron API
 interface ElectronAPI {
 updateContentDimensions: (dimensions: { width: number; height: number }) => Promise<void>;
@@ -43,6 +50,11 @@ personalFilesList: () => Promise<{ success: boolean; files?: any[]; error?: stri
 personalFilesDelete: (fileId: string) => Promise<{ success: boolean; error?: string }>;
 personalFilesSearch: (query: string) => Promise<{ success: boolean; results?: any[]; error?: string }>;
 personalFilesSetFileType: (fileId: string, fileType: string) => Promise<{ success: boolean; file?: any; error?: string }>;
+notesList: () => Promise<LocalNote[]>;
+notesGet: (id: string) => Promise<LocalNote | null>;
+notesCreate: (title: string) => Promise<LocalNote | null>;
+notesUpdate: (id: string, title: string, content: string) => Promise<LocalNote | null>;
+notesDelete: (id: string) => Promise<boolean>;
 sendOverlayUiState: (state: Record<string, unknown>) => Promise<void>;
 onOverlayUiState: (callback: (state: Record<string, unknown>) => void) => () => void;
 sendOverlayToggleAnchor: (payload: { panelRight: number }) => Promise<void>;
@@ -1171,6 +1183,11 @@ personalFilesList: () => ipcRenderer.invoke('personal-files:list'),
 personalFilesDelete: (fileId: string) => ipcRenderer.invoke('personal-files:delete', fileId),
 personalFilesSearch: (query: string) => ipcRenderer.invoke('personal-files:search', query),
 personalFilesSetFileType: (fileId: string, fileType: string) => ipcRenderer.invoke('personal-files:set-file-type', fileId, fileType),
+notesList: () => ipcRenderer.invoke('notes:list'),
+notesGet: (id: string) => ipcRenderer.invoke('notes:get', id),
+notesCreate: (title: string) => ipcRenderer.invoke('notes:create', title),
+notesUpdate: (id: string, title: string, content: string) => ipcRenderer.invoke('notes:update', { id, title, content }),
+notesDelete: (id: string) => ipcRenderer.invoke('notes:delete', id),
 // Overlay aux windows (pill / resize toggle) coordination
 // Overlay renderer main aux windows: UI-state broadcast.
 sendOverlayUiState: (state: Record<string, unknown>) =>

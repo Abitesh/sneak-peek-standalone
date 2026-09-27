@@ -7,6 +7,7 @@ import mainui from "../UI_comp/mainui.png";
 import UpcomingCalendarCard from './ui/UpcomingCalendarCard';
 import { useToggleInit } from './settings/useToggleInit';
 import MeetingDetails from './MeetingDetails';
+import NotesPage from './NotesPage';
 import TopSearchPill from './TopSearchPill';
 import GlobalChatOverlay from './GlobalChatOverlay';
 import { motion, AnimatePresence, useReducedMotion, type TargetAndTransition, type Variants } from 'framer-motion';
@@ -94,8 +95,8 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings, onO
     // Global search state (for AI chat overlay)
     const [isGlobalChatOpen, setIsGlobalChatOpen] = useState(false);
     const [submittedGlobalQuery, setSubmittedGlobalQuery] = useState('');
+    const [isNotesOpen, setIsNotesOpen] = useState(false);
 
-    const [showModesOnboarding, setShowModesOnboarding] = useState(false);
     const [showProfileOnboarding, setShowProfileOnboarding] = useState(false);
     const [launchCount, setLaunchCount] = useState<number>(0);
     // StrictMode-safe guard for mount-only side-effects: the dev build
@@ -336,7 +337,7 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings, onO
     // Notify parent if we are on the main launcher list view; also feed the
     // orchestrator's homepage-mounted clock.
     useEffect(() => {
-        const isMain = !selectedMeeting && !isGlobalChatOpen;
+        const isMain = !selectedMeeting && !isGlobalChatOpen && !isNotesOpen;
         if (onPageChange) onPageChange(isMain);
         if (isMain) {
             emitOrchestratorEvent({ type: 'launcher:mounted' });
@@ -345,7 +346,7 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings, onO
         }
         // Cleanup on unmount: ensure unmount is fired
         return () => emitOrchestratorEvent({ type: 'launcher:unmounted' });
-    }, [selectedMeeting, isGlobalChatOpen, onPageChange]);
+    }, [selectedMeeting, isGlobalChatOpen, isNotesOpen, onPageChange]);
 
     const handleOpenMeeting = async (meeting: Meeting) => {
         setForwardMeeting(null); // Clear forward history on new navigation
@@ -434,6 +435,11 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings, onO
     //      only ever fades the *text* — the background never flickers, and the
     //      20px the content travels only ever uncovers more of the same colour.
     const prefersReducedMotion = useReducedMotion();
+
+    if (isNotesOpen) {
+        return <NotesPage onBack={() => setIsNotesOpen(false)} onOpenModes={onOpenModes} />;
+    }
+
     // iOS/Ionic panel curve — strong ease-out, no overshoot. Used for the parts
     // that are mechanical rather than expressive: the veil landing and lifting.
     const NAV_EASE: [number, number, number, number] = [0.32, 0.72, 0, 1];
@@ -721,16 +727,12 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings, onO
                             )}
                         </AnimatePresence>
                     </div>
-                    <div className="relative group/modes-btn select-none">
+                    <div className="relative group/notes-btn select-none">
                         <button
-                            data-testid="open-modes-manager"
-                            onClick={() => {
-                                setShowModesOnboarding(false);
-                                localStorage.setItem('natively_seen_modes_onboarding_v5', 'true');
-                                window.electronAPI?.onboardingSetFlag?.('seenModesOnboarding', true).catch(() => {});
-                                onOpenModes?.();
-                            }}
-                            title={t("Modes")}
+                            data-testid="open-notes-page"
+                            onClick={() => setIsNotesOpen(true)}
+                            title={t('Notes')}
+                            aria-label={t('Notes')}
                             className={`p-2 text-text-secondary hover:text-text-primary transition-all duration-300 ${isLight ? 'hover:drop-shadow-[0_0_6px_rgba(0,0,0,0.25)]' : 'hover:drop-shadow-[0_0_8px_rgba(255,255,255,0.5)]'}`}
                         >
                             <svg width={18} height={18} viewBox="0 0 14 14" fill="none">
@@ -740,95 +742,6 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings, onO
                                 <rect x="7.5" y="7.5" width="5.5" height="5.5" rx="1.5" fill="currentColor" opacity="0.35"/>
                             </svg>
                         </button>
-                        
-                        <AnimatePresence>
-                            {showModesOnboarding && (
-                                <motion.div
-                                    key="modes-onboarding-pill"
-                                    initial={{ opacity: 0, y: 6, scale: 0.96, filter: "blur(4px)" }}
-                                    animate={{ opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }}
-                                    exit={{ opacity: 0, y: -2, scale: 0.98, filter: "blur(2px)", transition: { duration: 0.15, ease: "easeOut" } }}
-                                    transition={{ type: "spring", stiffness: 350, damping: 25, mass: 1 }}
-                                    className={`absolute top-[38px] right-2 w-[270px] rounded-[20px] p-4 z-[300] origin-top-right backdrop-blur-[40px] saturate-[180%] transform-gpu ${
-                                        isLight 
-                                        ? 'bg-white/70 shadow-[0_8px_30px_rgb(0,0,0,0.12),0_0_0_1px_rgba(0,0,0,0.04)]' 
-                                        : 'bg-[#18181A]/70 shadow-[0_8px_30px_rgb(0,0,0,0.6),0_0_0_1px_rgba(255,255,255,0.08)]'
-                                    }`}
-                                >
-                                    {/* Triangle Pointer */}
-                                    <div className={`absolute -top-[5px] right-[14px] w-2.5 h-2.5 rotate-45 rounded-tl-[3px] ${
-                                        isLight 
-                                        ? 'bg-white/70 border-t border-l border-black/5 backdrop-blur-[40px]' 
-                                        : 'bg-[#18181A]/70 border-t border-l border-white/5 backdrop-blur-[40px]'
-                                    }`} />
-                                    
-                                    <div className="relative flex gap-3">
-                                        <div className={`w-9 h-9 flex items-center justify-center shrink-0 rounded-full ${
-                                            isLight
-                                            ? 'bg-orange-500 bg-opacity-10 text-orange-500'
-                                            : 'bg-orange-500 bg-opacity-15 text-orange-400'
-                                        }`}>
-                                            <svg width="18" height="18" viewBox="0 0 14 14" fill="none">
-                                                <rect x="1" y="1" width="5.5" height="5.5" rx="1.5" fill="currentColor" opacity="0.9"/>
-                                                <rect x="7.5" y="1" width="5.5" height="5.5" rx="1.5" fill="currentColor" opacity="0.9"/>
-                                                <rect x="1" y="7.5" width="5.5" height="5.5" rx="1.5" fill="currentColor" opacity="0.9"/>
-                                                <rect x="7.5" y="7.5" width="5.5" height="5.5" rx="1.5" fill="currentColor" opacity="0.4"/>
-                                            </svg>
-                                        </div>
-                                        <div className="flex-1 pt-[2px]">
-                                            <h3 className="text-[14px] font-semibold tracking-[-0.015em] mb-1 flex items-center gap-2">
-                                                <span className={isLight ? 'text-slate-900' : 'text-slate-100'}>{t('Modes')}</span>
-                                                <span className={`text-[10px] font-medium px-1.5 py-[1px] rounded-[5px] ${
-                                                    isLight
-                                                    ? 'bg-orange-50 text-orange-600 border border-orange-100/50'
-                                                    : 'bg-orange-500/10 text-orange-400'
-                                                }`}>
-                                                    {t('Beta')}
-                                                </span>
-                                            </h3>
-                                            <p className={`text-[12px] leading-[1.35] mb-3.5 tracking-[-0.01em] ${
-                                                isLight ? 'text-slate-500' : 'text-slate-400'
-                                            }`}>
-                                                {t('Custom instructions and formulas designed for different meeting contexts.')}
-                                            </p>
-                                            <div className="flex justify-end gap-1.5 isolate">
-                                                <button 
-                                                    onClick={(e) => { 
-                                                        e.stopPropagation(); 
-                                                        setShowModesOnboarding(false); 
-                                                        localStorage.setItem('natively_seen_modes_onboarding_v5', 'true'); 
-                                                        window.electronAPI?.onboardingSetFlag?.('seenModesOnboarding', true).catch(() => {});
-                                                    }}
-                                                    className={`text-[12px] font-medium px-3.5 py-[6px] rounded-full transition-all active:scale-95 ${
-                                                        isLight
-                                                        ? 'text-slate-500 hover:text-slate-800 hover:bg-slate-100/60'
-                                                        : 'text-slate-400 hover:text-slate-100 hover:bg-white/10'
-                                                    }`}
-                                                >
-                                                    {t('Dismiss')}
-                                                </button>
-                                                <button
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        onOpenModes?.();
-                                                        setShowModesOnboarding(false); 
-                                                        localStorage.setItem('natively_seen_modes_onboarding_v5', 'true'); 
-                                                        window.electronAPI?.onboardingSetFlag?.('seenModesOnboarding', true).catch(() => {});
-                                                    }}
-                                                    className={`text-[12px] font-medium px-4 py-[6px] rounded-full transition-all active:scale-95 shadow-sm ${
-                                                        isLight
-                                                        ? 'bg-slate-900 text-white hover:bg-slate-800'
-                                                        : 'bg-slate-100 text-slate-900 hover:bg-white'
-                                                    }`}
-                                                >
-                                                    {t('Try it out')}
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </motion.div>
-                            )}
-                        </AnimatePresence>
                     </div>
                     <button
                         onClick={() => {

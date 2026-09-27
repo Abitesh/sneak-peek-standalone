@@ -9524,6 +9524,31 @@ safeHandle('get-recent-meetings', async () => {
 // Fetch from SQLite (limit 50)
 return DatabaseManager.getInstance().getRecentMeetings(50);
 });
+const isValidNoteId = (value: unknown): value is string =>
+typeof value === 'string' && value.trim().length > 0 && value.length <= 200;
+safeHandle('notes:list', async () => DatabaseManager.getInstance().listNotes());
+safeHandle('notes:get', async (_event, id: unknown) => {
+if (!isValidNoteId(id)) return null;
+return DatabaseManager.getInstance().getNote(id.trim());
+});
+safeHandle('notes:create', async (_event, title: unknown) => {
+if (typeof title !== 'string') return null;
+const normalizedTitle = title.trim();
+if (!normalizedTitle || normalizedTitle.length > 200) return null;
+return DatabaseManager.getInstance().createNote(normalizedTitle);
+});
+safeHandle('notes:update', async (_event, payload: unknown) => {
+if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+const update = payload as Record<string, unknown>;
+if (!isValidNoteId(update.id) || typeof update.title !== 'string' || typeof update.content !== 'string') return null;
+const title = update.title.trim();
+if (!title || title.length > 200) return null;
+return DatabaseManager.getInstance().updateNote(update.id.trim(), title, update.content);
+});
+safeHandle('notes:delete', async (_event, id: unknown) => {
+if (!isValidNoteId(id)) return false;
+return DatabaseManager.getInstance().deleteNote(id.trim());
+});
 safeHandle('get-meeting-details', async (event, id) => {
 // Helper to fetch full details
 return DatabaseManager.getInstance().getMeetingDetails(id);

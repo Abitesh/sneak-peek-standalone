@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { randomUUID } from 'node:crypto';
 import path from 'path';
 import os from 'os';
 import { app } from 'electron';
@@ -60,6 +61,14 @@ calendarEventId?: string;
 source?: 'manual' | 'calendar';
 isProcessed?: boolean;
 summaryStatus?: SummaryStatus;
+}
+
+export interface UserNote {
+id: string;
+title: string;
+content: string;
+createdAt: string;
+updatedAt: string;
 }
 /**
 * CR-06: marks the v28 page-count DATA repair as still owed. It is deliberately
@@ -1668,13 +1677,10 @@ console.log(`[DatabaseManager] v30: rebuilt vec0 indexes with cosine distance ($
 this.db.pragma('user_version = 30');
 } catch (e) {
 console.error('[DatabaseManager] v30 vec0 cosine rebuild failed (leaving version at 29 to retry next launch):', e);
-// R-22: stop here, as v28/v29 do. v30 is currently the LAST
-// migration, so falling through is harmless TODAY — which is
-// precisely why it would not stay harmless: the next migration
-// added below would run and stamp user_version past a v30 that
-// never applied, and `version < 30` would be false forever after.
-// That is R-05 verbatim, and R-05 only became reachable because
-// an earlier block was written this same way.
+// R-22: stop here, as v28/v29 do. This return remains required as new
+// migrations are appended: otherwise a later migration could stamp
+// user_version past a v30 rebuild that never applied, and `version < 30`
+// would be false forever after. That is R-05 verbatim.
 return;
 }
 }
@@ -1906,6 +1912,27 @@ installCanonicalRagSchema(this.db);
 this.db.pragma('user_version = 37');
 } catch (e) {
 console.error('[DatabaseManager] v37 canonical RAG storage migration failed; leaving schema version at 36 for retry:', e);
+return;
+}
+}
+
+// Version 37 → 38: persistent local user notes. This is separate from
+// meeting summaries and personal-file/RAG storage.
+if (version < 38) {
+console.log('[DatabaseManager] Applying migration v37 → v38: local notes');
+try {
+this.db.exec(`
+CREATE TABLE IF NOT EXISTS notes (
+id TEXT PRIMARY KEY,
+title TEXT NOT NULL,
+content TEXT NOT NULL DEFAULT '',
+created_at TEXT NOT NULL,
+updated_at TEXT NOT NULL
+);
+`);
+this.db.pragma('user_version = 38');
+} catch (e) {
+console.error('[DatabaseManager] v38 notes migration failed; leaving schema version at 37 for retry:', e);
 return;
 }
 }
@@ -3373,6 +3400,86 @@ transcript: [] as any[],
 usage: [] as any[]
 };
 });
+}
+public listNotes(): UserNote[] {
+if (!this.db) return [];
+try {
+const rows = this.db.prepare(`
+SELECT id, title, content, created_at, updated_at
+FROM notes
+ORDER BY updated_at DESC, created_at DESC, id ASC
+`).all() as Array<{ id: string; title: string; content: string; created_at: string; updated_at: string }>;
+return rows.map((row) => ({
+id: row.id,
+title: row.title,
+content: row.content,
+createdAt: row.created_at,
+updatedAt: row.updated_at,
+}));
+} catch (error) {
+console.warn('[DatabaseManager] Failed to list notes:', error instanceof Error ? error.message : String(error));
+return [];
+}
+}
+public getNote(id: string): UserNote | null {
+if (!this.db || typeof id !== 'string' || !id.trim()) return null;
+try {
+const row = this.db.prepare(`
+SELECT id, title, content, created_at, updated_at
+FROM notes WHERE id = ? LIMIT 1
+`).get(id.trim()) as { id: string; title: string; content: string; created_at: string; updated_at: string } | undefined;
+return row ? {
+id: row.id,
+title: row.title,
+content: row.content,
+createdAt: row.created_at,
+updatedAt: row.updated_at,
+} : null;
+} catch (error) {
+console.warn('[DatabaseManager] Failed to get note:', error instanceof Error ? error.message : String(error));
+return null;
+}
+}
+public createNote(title: string): UserNote | null {
+if (!this.db || typeof title !== 'string') return null;
+const normalizedTitle = title.trim();
+if (!normalizedTitle) return null;
+const id = randomUUID();
+const now = new Date().toISOString();
+try {
+this.db.prepare(`
+INSERT INTO notes (id, title, content, created_at, updated_at)
+VALUES (?, ?, '', ?, ?)
+`).run(id, normalizedTitle, now, now);
+return this.getNote(id);
+} catch (error) {
+console.warn('[DatabaseManager] Failed to create note:', error instanceof Error ? error.message : String(error));
+return null;
+}
+}
+public updateNote(id: string, title: string, content: string): UserNote | null {
+if (!this.db || typeof id !== 'string' || !id.trim() || typeof title !== 'string' || typeof content !== 'string') return null;
+const normalizedTitle = title.trim();
+if (!normalizedTitle) return null;
+try {
+const updatedAt = new Date().toISOString();
+const result = this.db.prepare(`
+UPDATE notes SET title = ?, content = ?, updated_at = ? WHERE id = ?
+`).run(normalizedTitle, content, updatedAt, id.trim());
+return result.changes > 0 ? this.getNote(id) : null;
+} catch (error) {
+console.warn('[DatabaseManager] Failed to update note:', error instanceof Error ? error.message : String(error));
+return null;
+}
+}
+public deleteNote(id: string): boolean {
+if (!this.db || typeof id !== 'string' || !id.trim()) return false;
+try {
+return this.db.prepare('DELETE FROM notes WHERE id = ?').run(id.trim()).changes > 0;
+} catch (error) {
+console.warn('[DatabaseManager] Failed to delete note:', error instanceof Error ? error.message : String(error));
+return false;
+}
 }
 public getMeetingDetails(id: string): Meeting | null {
 if (!this.db) return null;

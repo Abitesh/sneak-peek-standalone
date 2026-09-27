@@ -50,6 +50,13 @@ fileType: PersonalFileType
 indexStatus: 'indexing' | 'done' | 'lexical_only'
   ragIndexStatus?: RagIndexStatus
 }
+export interface LocalNote {
+id: string
+title: string
+content: string
+createdAt: string
+updatedAt: string
+}
 export interface ProviderHealth {
 status: 'disconnected' | 'verified' | 'degraded'
 authOk: boolean
@@ -106,6 +113,11 @@ success: boolean
 file?: PersonalFileRecordShape
 error?: string
 }>
+notesList: () => Promise<LocalNote[]>
+notesGet: (id: string) => Promise<LocalNote | null>
+notesCreate: (title: string) => Promise<LocalNote | null>
+notesUpdate: (id: string, title: string, content: string) => Promise<LocalNote | null>
+notesDelete: (id: string) => Promise<boolean>
 // Overlay aux windows (pill / resize toggle) coordination
 sendOverlayUiState?: (state: Record<string, unknown>) => Promise<void>
 onOverlayUiState?: (
