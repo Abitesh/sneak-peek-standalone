@@ -921,6 +921,16 @@ export async function orchestrate(
       evidenceIds: evidence.map((e) => e.evidenceId),
       sourceIds: [...new Set(evidence.map((e) => e.sourceId))],
       decision: turnDecision,
+      requestSequence: req.requestSequence,
+      // Manual questions are user turns; transcript-derived questions are
+      // interviewer turns. The canonical state keeps both as atomic messages
+      // instead of collapsing them into a formatted transcript blob.
+      source: req.transcriptQuestion?.trim() && !req.manualQuestion?.trim() ? 'transcript' : 'manual-chat',
+      speaker: req.transcriptQuestion?.trim() && !req.manualQuestion?.trim() ? 'interviewer' : 'user',
+      metadata: {
+        surface: req.surface,
+        questionSource: req.manualQuestion?.trim() ? 'manual' : 'transcript',
+      },
     });
   } catch { /* continuity must never break a turn */ }
 

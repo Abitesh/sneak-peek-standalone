@@ -18,14 +18,51 @@ import type { EvidenceScope, PriorTurnDecision } from '../contracts/types';
 import { scopeKey } from '../contracts/types';
 import { isBareFollowUp, isResponseRequest, isContinuationFragment } from './turn-classifier';
 
+/**
+ * Canonical conversational turn.
+ *
+ * This is deliberately a MESSAGE/SEGMENT, not a user+assistant text blob.
+ * `role` describes the conversation role, while `speaker` preserves the
+ * concrete speaker label used by live transcript/chat surfaces. `finalized`
+ * lets the same state represent an interim transcript segment and its later
+ * finalized form without creating a second conversation representation.
+ */
+export type ConversationTurnRole = 'user' | 'interviewer' | 'assistant' | 'system';
+
+export type ConversationTurnSource =
+  | 'manual'
+  | 'manual-chat'
+  | 'transcript'
+  | 'live-transcript'
+  | 'meeting'
+  | 'assistant'
+  | 'system'
+  | 'imported'
+  | 'conversation-memory'
+  | 'unknown';
+
 export interface ConversationTurn {
-  role: 'user' | 'interviewer' | 'assistant';
+  id: string;
+  role: ConversationTurnRole;
+  speaker: string;
   text: string;
   timestamp: number;
+  finalized: boolean;
+  source: ConversationTurnSource;
+  /** The request that caused this turn, when the surface has one. */
+  requestSequence?: number;
+  /** Small structured annotations; never required for core state operations. */
+  metadata?: Readonly<Record<string, unknown>>;
 }
 
 export interface ConversationState {
   scopeId: string;
+  /** Canonical ordered conversation history for this session. */
+  turns: readonly ConversationTurn[];
+  /** The newest/current turn id, even when that turn is an interim segment. */
+  currentTurnId?: string;
+  /** Request sequence associated with the current turn. */
+  currentRequestSequence?: number;
   activeTopic?: string;
   /**
    * The PERSON the conversation is about (deep-test D9, 2026-08-01). A single
@@ -199,6 +236,7 @@ export function extractPersonEntities(text: string): string[] {
 export function emptyState(scope: EvidenceScope): ConversationState {
   return {
     scopeId: scopeKey(scope),
+    turns: [],
     activeEntities: [],
     previousEvidenceIds: [],
     previousSourceIds: [],
@@ -246,6 +284,13 @@ export function advance(prev: ConversationState | null, input: AdvanceInput): Co
 
   return {
     scopeId: sid,
+    // Turn history is owned by conversation-state-store. This pure transition
+    // updates the derived referent state while preserving the canonical turns.
+    turns: base.turns,
+    ...(base.currentTurnId ? { currentTurnId: base.currentTurnId } : {}),
+    ...(typeof base.currentRequestSequence === 'number'
+      ? { currentRequestSequence: base.currentRequestSequence }
+      : {}),
     // Lowercase topics ("quantum computing", "a mutex") fall back to phrase
     // extraction — capitalisation-gated entities alone left activeTopic empty
     // for exactly the questions whose follow-ups need resolving (Defect D).
