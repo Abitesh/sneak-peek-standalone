@@ -10,6 +10,7 @@
 import type { RecentConversationContext } from './TranscriptContext';
 import type { TurnUnderstanding } from '../../context-intelligence/question/question-resolver';
 import type { ContextPlan, ContextSource } from './ContextTypes';
+import type { EvidencePack } from '../context-os/evidencePack';
 
 export type IntelligenceSurface =
   | 'manual-chat'
@@ -232,6 +233,8 @@ export interface NativelyIntelligenceResult {
   conversationContext: RecentConversationContext;
   retrievalPlan: NativelyRetrievalPlan;
   evidence: NativelyEvidence;
+  /** Canonical Change 8 evidence boundary consumed by prompt assembly. */
+  evidencePack: EvidencePack;
   prompt: NativelyPrompt;
   providerAttempt: NativelyProviderAttempt;
   streamLifecycle: NativelyStreamLifecycle;

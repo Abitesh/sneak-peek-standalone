@@ -17,8 +17,10 @@ SourceKind,
 SourceOwner,
 TrustLevel,
 } from './types';
-import type { EvidenceSufficiency } from './evidenceSufficiency';
+import { deriveEvidenceSufficiency, type EvidenceSufficiency } from './evidenceSufficiency';
 import type { RagCitation } from '../../rag/RagCitation';
+import type { ContextSource } from '../engine/ContextTypes';
+import type { NativelyEvidence } from '../engine/types';
 export interface EvidencePointer {
 page?: number;
 section?: string;
@@ -32,6 +34,15 @@ speaker?: string;
 }
 export interface EvidenceItem {
 evidenceId: string;
+/** Canonical Natively Intelligence source selected by ContextPlanner. */
+canonicalSource?: ContextSource;
+/** Explicit retrieval scope preserved across the evidence boundary. */
+scope?: { kind: string; id: string | null };
+/** Normalized 0..1 relevance/confidence independent of retrieval implementation. */
+relevance?: number;
+confidence?: number;
+/** Structured provenance retained for validators and later prompt assembly. */
+provenance?: Record<string, unknown>;
 /** Canonical RAG citation retained through EvidencePack and rendering. */
 citation?: RagCitation;
 /** Canonical RAG provenance retained through EvidencePack and rendering. */
@@ -97,7 +108,7 @@ hasDirectEvidence: boolean;
 propertySatisfied: boolean;
 entityMatched: boolean;
 sourceOwnerSatisfied: boolean;
-confidence: number;
+confidence?: number;
 }
 export interface EvidenceSelection {
 candidateEvidenceIds: string[];
@@ -167,6 +178,181 @@ return pack.items.filter((i) => i.authority === 'evidence');
 export function previewText(text: string | undefined | null, max = 80): string {
 return String(text ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 }
+/**
+ * Build the canonical evidence boundary from the Change 7 retrieval result.
+ *
+ * Retrieval is already decided by ContextPlanner/RetrievalCoordinator. This
+ * function does not retrieve, rank, or expand queries. It only validates source
+ * membership and converts returned material into the Context OS EvidencePack
+ * contract so later prompt assembly consumes one representation.
+ */
+export function buildEvidencePackFromNativelyEvidence(input: {
+  turnId: string;
+  query: string;
+  contextPlan: import('../engine/ContextTypes').ContextPlan;
+  evidence: NativelyEvidence;
+  answerPolicy?: AnswerPolicy;
+  sourceOwner?: SourceOwner;
+  requestedProperty?: RequestedProperty;
+}): EvidencePack {
+  const allowed = new Set([
+    ...input.contextPlan.requiredSources,
+    ...input.contextPlan.optionalSources,
+  ]);
+  const rejected: RejectedEvidenceItem[] = [];
+  const items: EvidenceItem[] = [];
+
+  const ownerForSource = (source: ContextSource): SourceOwner => {
+    switch (source) {
+      case 'profile':
+      case 'personal_knowledge': return 'profile';
+      case 'meeting_transcript': return 'transcript';
+      case 'screen': return 'screen_context';
+      case 'mode_documents':
+      case 'my_files': return 'reference_files';
+      case 'project_knowledge':
+      case 'structured_knowledge': return 'mixed';
+      case 'recent_conversation':
+      case 'longer_conversation': return 'mixed';
+      case 'rag': return 'meeting_rag';
+      default: return 'unknown';
+    }
+  };
+
+  const sourceKindFor = (source: ContextSource): SourceKind => {
+    switch (source) {
+      case 'profile': return 'profile_resume';
+      case 'meeting_transcript': return 'live_transcript';
+      case 'screen': return 'screen_context';
+      case 'mode_documents':
+      case 'my_files': return 'mode_reference_chunk';
+      case 'personal_knowledge': return 'hindsight_memory';
+      case 'project_knowledge':
+      case 'structured_knowledge': return 'okf_document_card';
+      case 'recent_conversation':
+      case 'longer_conversation': return 'prior_assistant_message';
+      case 'rag': return 'meeting_rag_chunk';
+      case 'none': return 'system_instruction';
+    }
+  };
+
+  for (const raw of input.evidence.items) {
+    const source = raw.source;
+    if (!allowed.has(source) || input.contextPlan.forbiddenSources.includes(source)) {
+      rejected.push({
+        sourceKind: sourceKindFor(source),
+        sourceId: raw.id,
+        textPreview: previewText(raw.content),
+        reason: 'forbidden_source',
+      });
+      continue;
+    }
+
+    const metadata = raw.metadata ?? {};
+    const relevance = clamp01(
+      typeof metadata.relevance === 'number' ? metadata.relevance : raw.score ?? 0,
+    );
+    const confidence = clamp01(
+      typeof metadata.confidence === 'number' ? metadata.confidence : relevance,
+    );
+    const sourceId = typeof metadata.sourceId === 'string' && metadata.sourceId
+      ? metadata.sourceId
+      : raw.id;
+    const scopeId = typeof metadata.scopeId === 'string' ? metadata.scopeId : null;
+    const authority = metadata.authority === 'referent_only'
+      ? 'referent_only'
+      : metadata.authority === 'instruction'
+        ? 'instruction'
+        : 'evidence';
+
+    items.push({
+      evidenceId: raw.id,
+      canonicalSource: source,
+      scope: { kind: source, id: scopeId },
+      relevance,
+      confidence,
+      provenance: typeof metadata.provenance === 'object' && metadata.provenance !== null
+        ? metadata.provenance as Record<string, unknown>
+        : metadata,
+      sourceKind: sourceKindFor(source),
+      sourceId,
+      sourceOwner: ownerForSource(source),
+      authority,
+      trustLevel: typeof metadata.trustLevel === 'string' ? metadata.trustLevel : 'user_uploaded',
+      text: raw.content,
+      pointer: typeof metadata.pointer === 'object' && metadata.pointer !== null
+        ? metadata.pointer as EvidencePointer
+        : undefined,
+      documentId: typeof metadata.documentId === 'string' ? metadata.documentId : undefined,
+      documentName: typeof metadata.documentName === 'string' ? metadata.documentName : undefined,
+      chunkId: typeof metadata.chunkId === 'string' ? metadata.chunkId : undefined,
+      pageStart: typeof metadata.pageStart === 'number' ? metadata.pageStart : undefined,
+      pageEnd: typeof metadata.pageEnd === 'number' ? metadata.pageEnd : undefined,
+      section: typeof metadata.section === 'string' ? metadata.section : undefined,
+      heading: typeof metadata.heading === 'string' ? metadata.heading : undefined,
+      citation: metadata.citation as RagCitation | undefined,
+      retrievalScore: raw.score,
+      supports: {
+        entity: typeof metadata.entity === 'string' ? metadata.entity : undefined,
+        property: (typeof metadata.requestedProperty === 'string'
+          ? metadata.requestedProperty
+          : input.requestedProperty ?? 'unknown') as RequestedProperty,
+        value: typeof metadata.value === 'string' ? metadata.value : undefined,
+      },
+      score: {
+        final: relevance,
+        ...(typeof metadata.lexical === 'number' ? { lexical: metadata.lexical } : {}),
+        ...(typeof metadata.vector === 'number' ? { vector: metadata.vector } : {}),
+        ...(typeof metadata.rerank === 'number' ? { rerank: metadata.rerank } : {}),
+      },
+      reasonIncluded: typeof metadata.reasonIncluded === 'string'
+        ? metadata.reasonIncluded
+        : `Selected by ContextPlan for ${source}`,
+    });
+  }
+
+  const owners = new Set(items.map((item) => item.sourceOwner));
+  const sourceOwner = input.sourceOwner
+    ?? (owners.size === 1 ? [...owners][0] : 'mixed');
+  const confidence = items.length
+    ? Math.max(...items.map((item) => item.confidence ?? item.score.final ?? 0))
+    : 0;
+  const pack: EvidencePack = {
+    packId: `${input.turnId}:pack:1`,
+    version: 1,
+    turnId: input.turnId,
+    originalQuery: input.query,
+    retrievalQuery: input.query,
+    sourceOwner,
+    requestedProperty: input.requestedProperty ?? 'unknown',
+    items,
+    rejected,
+    coverage: {
+      hasDirectEvidence: items.some((item) => item.authority === 'evidence'),
+      propertySatisfied: items.some((item) => item.authority === 'evidence'),
+      entityMatched: items.length > 0,
+      sourceOwnerSatisfied: rejected.length === 0,
+      confidence,
+    },
+    resolver: {
+      strategy: 'natively_retrieval_coordinator',
+      attemptedSources: input.contextPlan.requiredSources.map(sourceKindFor),
+      retrievedSources: [...new Set(items.map((item) => item.sourceKind))],
+    },
+    conflicts: [],
+    answerPolicy: input.answerPolicy ?? (items.length ? 'answer' : 'answer_with_uncertainty'),
+    ...(items.length === 0 ? { zeroEvidenceReason: input.contextPlan.retrievalRequired ? 'no_match' as const : 'no_sources_configured' as const } : {}),
+  };
+
+  pack.sufficiency = deriveEvidenceSufficiency({ pack });
+  return pack;
+}
+
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(1, value));
+}
+
 /** An empty pack for a turn whose answer policy is decided without retrieval. */
 export function emptyEvidencePack(input: {
 turnId: string;

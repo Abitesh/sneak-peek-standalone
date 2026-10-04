@@ -86,6 +86,7 @@ describe('NativelyIntelligenceEngine contract', () => {
     assert.equal(result.contextPlan.forbiddenSources.includes('project_knowledge'), true);
     assert.equal(result.contextPlan.forbiddenSources.includes('my_files'), true);
     assert.equal(result.retrievalPlan.shouldRetrieve, false);
+    assert.equal(result.evidencePack.items.length, 0);
   });
 
   test('uses the canonical context planner for a project-specific question', async () => {
@@ -140,6 +141,10 @@ describe('NativelyIntelligenceEngine contract', () => {
     assert.deepEqual(calls, ['project_knowledge']);
     assert.equal(result.evidence.items.length, 1);
     assert.equal(result.evidence.items[0].source, 'project_knowledge');
+    assert.equal(result.evidencePack.items.length, 1);
+    assert.equal(result.evidencePack.items[0].canonicalSource, 'project_knowledge');
+    assert.equal(result.evidencePack.items[0].sourceId, 'project-1');
+    assert.ok(result.diagnostics.stages.includes('build-evidence'));
     assert.ok(result.diagnostics.stages.includes('retrieve'));
   });
 

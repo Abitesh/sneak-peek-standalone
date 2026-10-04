@@ -13,6 +13,7 @@ import { understandTurn } from '../../context-intelligence/question/question-res
 import { planContext } from './ContextPlanner';
 import type { ContextSource } from './ContextTypes';
 import { RetrievalCoordinator } from './RetrievalCoordinator';
+import { buildEvidencePackFromNativelyEvidence } from '../context-os/evidencePack';
 
 /**
  * Central entry boundary for Natively Intelligence.
@@ -84,6 +85,12 @@ export class NativelyIntelligenceEngine {
     );
 
     stages.push('build-evidence');
+    const evidencePack = buildEvidencePackFromNativelyEvidence({
+      turnId: request.currentTurn.id || request.requestId,
+      query: turnUnderstanding.question || resolvedQuestion,
+      contextPlan,
+      evidence: retrievalResult.evidence,
+    });
     stages.push('assemble-prompt');
 
     return {
@@ -97,6 +104,7 @@ export class NativelyIntelligenceEngine {
       conversationContext,
       retrievalPlan,
       evidence: retrievalResult.evidence,
+      evidencePack,
       prompt: { user: resolvedQuestion },
       providerAttempt: { status: 'not-started' },
       streamLifecycle: { status: 'not-started' },
@@ -150,6 +158,21 @@ export class NativelyIntelligenceEngine {
         maximumResults: 0,
       },
       evidence: { items: [], sufficient: false },
+      evidencePack: buildEvidencePackFromNativelyEvidence({
+        turnId: request.currentTurn.id || request.requestId,
+        query: request.userMessage,
+        contextPlan: planContext({
+          request,
+          understanding: understandTurn({
+            manualQuestion: request.manualQuestion ?? request.userMessage,
+            sessionId: request.sessionId,
+            conversationState: getConversationState(request.sessionId),
+            hasScreenContext: Boolean(request.screenContext),
+          }),
+        }),
+        evidence: { items: [], sufficient: false },
+        answerPolicy: 'ask_clarification',
+      }),
       prompt: { user: '' },
       providerAttempt: { status: 'cancelled' },
       streamLifecycle: { status: 'cancelled' },
