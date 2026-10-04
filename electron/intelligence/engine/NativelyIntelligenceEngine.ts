@@ -10,6 +10,8 @@ import { getRecentConversationContext } from './TranscriptContext';
 import type { ConversationTurn } from '../../context-intelligence/question/conversation-state';
 import { getConversationState } from '../../context-intelligence/question/conversation-state-store';
 import { understandTurn } from '../../context-intelligence/question/question-resolver';
+import { planContext } from './ContextPlanner';
+import type { ContextSource } from './ContextTypes';
 
 /**
  * Central entry boundary for Natively Intelligence.
@@ -52,10 +54,20 @@ export class NativelyIntelligenceEngine {
       currentTurn: this.toConversationTurn(request.currentTurn),
       currentQuestion: request.userMessage,
     });
-    const selectedContext = this.selectContext(request);
+    const contextPlan = planContext({
+      request,
+      understanding: turnUnderstanding,
+      availability: {
+        recentConversation: conversationContext.immediatePreviousTurns.length > 0 || Boolean(conversationContext.currentTurnIncluded),
+        longerConversation: Boolean(conversationContext.olderConversationTurnsAvailable),
+        meetingTranscript: request.transcriptContext?.source === 'meeting',
+        screen: Boolean(request.screenContext),
+      },
+    });
+    const selectedContext = this.projectSelectedContext(request, contextPlan);
 
     stages.push('plan-retrieval');
-    const retrievalPlan = this.planRetrieval(request, resolvedQuestion, intent, selectedContext);
+    const retrievalPlan = this.planRetrieval(resolvedQuestion, contextPlan);
 
     stages.push('build-evidence');
     stages.push('assemble-prompt');
@@ -67,6 +79,7 @@ export class NativelyIntelligenceEngine {
       intent,
       responseType,
       selectedContext,
+      contextPlan,
       conversationContext,
       retrievalPlan,
       evidence: { items: [], sufficient: !retrievalPlan.shouldRetrieve },
@@ -99,6 +112,15 @@ export class NativelyIntelligenceEngine {
       intent: 'ambiguous',
       responseType: request.responseShape?.type ?? 'answer',
       selectedContext: { items: [] },
+      contextPlan: planContext({
+        request,
+        understanding: understandTurn({
+          manualQuestion: request.manualQuestion ?? request.userMessage,
+          sessionId: request.sessionId,
+          conversationState: getConversationState(request.sessionId),
+          hasScreenContext: Boolean(request.screenContext),
+        }),
+      }),
       conversationContext: getRecentConversationContext({
         sessionId: request.sessionId,
         currentTurn: this.toConversationTurn(request.currentTurn),
@@ -172,48 +194,41 @@ export class NativelyIntelligenceEngine {
     return 'answer';
   }
 
-  private selectContext(request: NativelyIntelligenceRequest): NativelySelectedContext {
-    const p = request.contextPermissions;
+  private projectSelectedContext(
+    request: NativelyIntelligenceRequest,
+    plan: import('./ContextTypes').ContextPlan,
+  ): NativelySelectedContext {
+    const selected = new Set(plan.requiredSources);
+    const optional = new Set(plan.optionalSources);
+    const isSelected = (source: import('./ContextTypes').ContextSource) => selected.has(source) || optional.has(source);
+
     return {
       items: [
-        { kind: 'conversation', selected: p.conversation, reason: p.conversation ? 'Conversation context permitted' : 'Conversation context disabled' },
-        { kind: 'transcript', selected: Boolean(p.transcript && request.transcriptContext), reason: request.transcriptContext && p.transcript ? 'Transcript context available and permitted' : 'No permitted transcript context' },
+        { kind: 'conversation', selected: isSelected('recent_conversation') || isSelected('longer_conversation'), reason: plan.sources.find((s) => s.source === 'recent_conversation')?.reason ?? 'Not selected by context planner' },
+        { kind: 'transcript', selected: isSelected('meeting_transcript'), reason: plan.sources.find((s) => s.source === 'meeting_transcript')?.reason ?? 'Not selected by context planner' },
         { kind: 'manual-question', selected: Boolean(request.manualQuestion), reason: request.manualQuestion ? 'Explicit manual question supplied' : 'No separate manual question supplied' },
-        { kind: 'screen', selected: Boolean(p.screen && request.screenContext), reason: request.screenContext && p.screen ? 'Screen context available and permitted' : 'No permitted screen context' },
-        { kind: 'mode', selected: Boolean(p.mode && request.activeContext?.modeId), reason: request.activeContext?.modeId && p.mode ? 'Active mode available and permitted' : 'No permitted active mode' },
-        { kind: 'project', selected: Boolean(p.project && request.activeContext?.projectId), reason: request.activeContext?.projectId && p.project ? 'Active project available and permitted' : 'No permitted active project' },
-        { kind: 'profile', selected: Boolean(p.profile && request.activeContext?.profileId), reason: request.activeContext?.profileId && p.profile ? 'Active profile available and permitted' : 'No permitted active profile' },
-        { kind: 'files', selected: p.files, reason: p.files ? 'File context permitted' : 'File context disabled' },
-        { kind: 'memory', selected: p.memory, reason: p.memory ? 'Memory context permitted' : 'Memory context disabled' },
+        { kind: 'screen', selected: isSelected('screen'), reason: plan.sources.find((s) => s.source === 'screen')?.reason ?? 'Not selected by context planner' },
+        { kind: 'mode', selected: isSelected('mode_documents'), reason: plan.sources.find((s) => s.source === 'mode_documents')?.reason ?? 'Not selected by context planner' },
+        { kind: 'project', selected: isSelected('project_knowledge'), reason: plan.sources.find((s) => s.source === 'project_knowledge')?.reason ?? 'Not selected by context planner' },
+        { kind: 'profile', selected: isSelected('profile'), reason: plan.sources.find((s) => s.source === 'profile')?.reason ?? 'Not selected by context planner' },
+        { kind: 'files', selected: isSelected('my_files'), reason: plan.sources.find((s) => s.source === 'my_files')?.reason ?? 'Not selected by context planner' },
+        { kind: 'memory', selected: isSelected('personal_knowledge') || isSelected('structured_knowledge'), reason: plan.sources.find((s) => s.source === 'personal_knowledge')?.reason ?? 'Not selected by context planner' },
       ],
     };
   }
 
   private planRetrieval(
-    request: NativelyIntelligenceRequest,
     question: string,
-    intent: IntelligenceIntent,
-    selectedContext: NativelySelectedContext,
+    plan: import('./ContextTypes').ContextPlan,
   ): NativelyRetrievalPlan {
-    const sourceKinds = selectedContext.items
-      .filter((item) => item.selected && item.kind !== 'conversation' && item.kind !== 'manual-question')
-      .map((item) => item.kind);
-
-    const intentNeedsContext = new Set<IntelligenceIntent>([
-      'personal-question',
-      'project-question',
-      'document-question',
-      'meeting-question',
-      'screen-question',
-      'follow-up',
-    ]).has(intent);
-    const shouldRetrieve = intentNeedsContext && sourceKinds.length > 0;
+    const shouldRetrieve = plan.retrievalRequired;
+    const sources: ContextSource[] = plan.requiredSources.filter((source) => source === 'rag');
 
     return {
       shouldRetrieve,
       mode: shouldRetrieve ? 'hybrid' : 'none',
-      query: question,
-      sources: sourceKinds,
+      query: shouldRetrieve ? question : '',
+      sources,
       maximumResults: shouldRetrieve ? 8 : 0,
     };
   }

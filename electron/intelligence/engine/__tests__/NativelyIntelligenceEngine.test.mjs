@@ -65,4 +65,44 @@ describe('NativelyIntelligenceEngine contract', () => {
     assert.equal(result.finalAnswer, null);
     assert.match(result.diagnostics.warnings[0], /cancelled/i);
   });
+
+  test('uses the canonical context planner to block private retrieval for general questions', async () => {
+    const engine = new NativelyIntelligenceEngine();
+    const result = await engine.handle({
+      requestId: 'req-general-context',
+      sessionId: 'session-1',
+      surface: 'manual-chat',
+      userMessage: 'What is Python?',
+      currentTurn: { id: 'turn-3', role: 'user', content: 'What is Python?' },
+      recentConversation: [],
+      activeContext: { projectId: 'linkship', projectName: 'Linkship' },
+      contextPermissions: permissions,
+    });
+
+    assert.equal(result.contextPlan.retrievalRequired, false);
+    assert.equal(result.contextPlan.forbiddenSources.includes('project_knowledge'), true);
+    assert.equal(result.contextPlan.forbiddenSources.includes('my_files'), true);
+    assert.equal(result.retrievalPlan.shouldRetrieve, false);
+  });
+
+  test('uses the canonical context planner for a project-specific question', async () => {
+    const engine = new NativelyIntelligenceEngine();
+    const result = await engine.handle({
+      requestId: 'req-project-context',
+      sessionId: 'session-1',
+      surface: 'manual-chat',
+      userMessage: 'Why did you use Redis in Linkship?',
+      currentTurn: { id: 'turn-4', role: 'user', content: 'Why did you use Redis in Linkship?' },
+      recentConversation: [],
+      activeContext: { projectId: 'linkship', projectName: 'Linkship' },
+      contextPermissions: permissions,
+    });
+
+    assert.equal(result.contextPlan.retrievalRequired, true);
+    assert.equal(result.contextPlan.requiredSources.includes('project_knowledge'), true);
+    assert.equal(result.contextPlan.requiredSources.includes('rag'), true);
+    assert.equal(result.retrievalPlan.shouldRetrieve, true);
+    assert.deepEqual(result.retrievalPlan.sources, ['rag']);
+  });
+
 });

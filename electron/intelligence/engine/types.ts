@@ -9,6 +9,7 @@
 
 import type { RecentConversationContext } from './TranscriptContext';
 import type { TurnUnderstanding } from '../../context-intelligence/question/question-resolver';
+import type { ContextPlan, ContextSource } from './ContextTypes';
 
 export type IntelligenceSurface =
   | 'manual-chat'
@@ -150,13 +151,13 @@ export interface NativelyRetrievalPlan {
   shouldRetrieve: boolean;
   mode: NativelyRetrievalMode;
   query: string;
-  sources: IntelligenceContextKind[];
+  sources: ContextSource[];
   maximumResults: number;
 }
 
 export interface NativelyEvidenceItem {
   id: string;
-  source: IntelligenceContextKind;
+  source: ContextSource;
   content: string;
   score?: number;
   metadata?: Record<string, unknown>;
@@ -225,6 +226,8 @@ export interface NativelyIntelligenceResult {
   intent: IntelligenceIntent;
   responseType: IntelligenceResponseType;
   selectedContext: NativelySelectedContext;
+  /** Canonical Change 6 decision: what context is actually necessary. */
+  contextPlan: ContextPlan;
   /** Bounded recent conversation; retrieval and long-term memory are separate layers. */
   conversationContext: RecentConversationContext;
   retrievalPlan: NativelyRetrievalPlan;
