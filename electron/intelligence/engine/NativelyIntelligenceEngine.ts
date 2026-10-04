@@ -8,6 +8,8 @@ import type {
 } from './types';
 import { getRecentConversationContext } from './TranscriptContext';
 import type { ConversationTurn } from '../../context-intelligence/question/conversation-state';
+import { getConversationState } from '../../context-intelligence/question/conversation-state-store';
+import { understandTurn } from '../../context-intelligence/question/question-resolver';
 
 /**
  * Central entry boundary for Natively Intelligence.
@@ -29,7 +31,19 @@ export class NativelyIntelligenceEngine {
 
     stages.push('understand');
     const resolvedQuestion = this.resolveQuestion(request);
-    const intent = this.resolveIntent(request, resolvedQuestion);
+    const turnUnderstanding = understandTurn({
+      manualQuestion: request.manualQuestion ?? request.userMessage,
+      selectedText: request.manualQuestion,
+      sessionId: request.sessionId,
+      conversationState: getConversationState(request.sessionId),
+      hasScreenContext: Boolean(request.screenContext),
+      transcript: request.transcriptContext?.turns?.map((turn) => ({
+        role: turn.role === 'assistant' ? 'assistant' : 'interviewer',
+        text: turn.content,
+        timestamp: turn.createdAt ?? Date.now(),
+      })),
+    });
+    const intent = this.mapIntent(turnUnderstanding.intent);
     const responseType = this.resolveResponseType(request, intent);
 
     stages.push('plan-context');
@@ -48,7 +62,8 @@ export class NativelyIntelligenceEngine {
 
     return {
       requestId: request.requestId,
-      resolvedQuestion,
+      resolvedQuestion: turnUnderstanding.question || resolvedQuestion,
+      turnUnderstanding,
       intent,
       responseType,
       selectedContext,
@@ -75,6 +90,12 @@ export class NativelyIntelligenceEngine {
     return {
       requestId: request.requestId,
       resolvedQuestion: this.resolveQuestion(request),
+      turnUnderstanding: understandTurn({
+        manualQuestion: request.manualQuestion ?? request.userMessage,
+        sessionId: request.sessionId,
+        conversationState: getConversationState(request.sessionId),
+        hasScreenContext: Boolean(request.screenContext),
+      }),
       intent: 'ambiguous',
       responseType: request.responseShape?.type ?? 'answer',
       selectedContext: { items: [] },
@@ -122,33 +143,20 @@ export class NativelyIntelligenceEngine {
     return candidates.find((value) => value?.trim())?.trim() ?? '';
   }
 
-  private resolveIntent(
-    request: NativelyIntelligenceRequest,
-    question: string,
-  ): IntelligenceIntent {
-    const lower = question.toLowerCase();
-
-    if (request.surface === 'follow-up' || /\b(this|that|it|they|them|above)\b/.test(lower)) {
-      return 'follow-up';
+  private mapIntent(intent: import('../../context-intelligence/question/question-resolver').TurnIntent): IntelligenceIntent {
+    switch (intent) {
+      case 'coding-request': return 'coding-task';
+      case 'project-question': return 'project-question';
+      case 'personal-question': return 'personal-question';
+      case 'document-question': return 'document-question';
+      case 'meeting-question': return 'meeting-question';
+      case 'screen-question': return 'screen-question';
+      case 'follow-up': return 'follow-up';
+      case 'system-design': return 'system-design';
+      case 'clarification': return 'clarification';
+      case 'ambiguous': return 'ambiguous';
+      default: return 'general-question';
     }
-    if (request.surface === 'recap') return 'recap';
-    if (request.surface === 'clarify') return 'clarification';
-    if (request.screenContext && /\b(this|screen|image|shown|displayed)\b/.test(lower)) {
-      return 'screen-question';
-    }
-    if (/\b(code|coding|implement|debug|algorithm|function|class)\b/.test(lower)) {
-      return 'coding-task';
-    }
-    if (request.activeContext?.projectId && /\b(project|repo|repository|implementation)\b/.test(lower)) {
-      return 'project-question';
-    }
-    if (request.transcriptContext && /\b(meeting|said|mentioned|discussed)\b/.test(lower)) {
-      return 'meeting-question';
-    }
-    if (request.manualQuestion || request.activeContext?.profileId) {
-      return 'personal-question';
-    }
-    return 'general-question';
   }
 
   private resolveResponseType(

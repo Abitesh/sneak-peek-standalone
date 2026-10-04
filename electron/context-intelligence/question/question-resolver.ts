@@ -175,3 +175,197 @@ export function resolveQuestion(input: ResolveInput): ResolvedQuestion {
     clarificationReason: 'no stable interviewer question in the current window',
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Change 5 — canonical turn understanding
+//
+// Question marks are deliberately only one signal.  Understanding combines
+// the existing question resolver, the proven deterministic turn classifier,
+// conversation continuity, and small semantic shape signals.  This keeps the
+// expensive/retrieval stages downstream of one explicit interpretation.
+
+import type { ModePolicy } from '../policies/mode-policy-registry';
+import { classifyTurn, type Classification } from './turn-classifier';
+import { extractEntities, extractTopicPhrase, resolveReference, type ConversationState, type ResolvedReference } from './conversation-state';
+
+export type TurnIntent =
+  | 'general-question'
+  | 'personal-question'
+  | 'project-question'
+  | 'document-question'
+  | 'meeting-question'
+  | 'screen-question'
+  | 'coding-request'
+  | 'system-design'
+  | 'follow-up'
+  | 'refinement'
+  | 'conversational-response'
+  | 'clarification'
+  | 'ambiguous';
+
+export type ResponseShape = 'concise' | 'normal' | 'detailed' | 'code' | 'clarification';
+
+export interface TurnUnderstanding {
+  question: string;
+  intent: TurnIntent;
+  isQuestion: boolean;
+  followUp: boolean;
+  refersToPreviousContext: boolean;
+  confidence: number;
+  subject?: string;
+  entities: string[];
+  requestedDuration?: number;
+  responseShape: ResponseShape;
+  requiresPersonalContext: boolean;
+  requiresProjectContext: boolean;
+  requiresDocumentContext: boolean;
+  requiresMeetingContext: boolean;
+  requiresScreenContext: boolean;
+  requiresRetrieval: boolean;
+  classification?: Classification;
+  source: QuestionSource;
+}
+
+export interface UnderstandTurnInput extends ResolveInput {
+  sessionId?: string;
+  conversationState?: ConversationState | null;
+  policy?: ModePolicy;
+  hasScreenContext?: boolean;
+  hasAttachedDocuments?: boolean;
+  attachedFileNames?: readonly string[];
+}
+
+const SEMANTIC_QUESTION_CUE = /^(?:what|why|how|when|where|who|which|can|could|would|should|do|does|did|have|has|is|are|will|tell me|explain|describe|walk me through|give me|show me)\b/i;
+const FOLLOW_UP_CUE = /^(?:(?:and|but|so|then)\s+(?:why|how|what about|what if)|can you explain (?:that|this)|explain (?:that|this)(?: again)?|tell me more|go on|really|okay|ok)\b/i;
+const DEICTIC_CUE = /\b(?:this|that|it|they|them|above|earlier|previous(?:ly)?|what you said|what i said|the above)\b/i;
+const REFINEMENT_CUE = /^(?:make|keep|write|say|explain|expand|shorten|simplify|rewrite|give)\s+(?:it|that|this|the answer|the explanation)\b|^(?:make it|keep it|explain that again|say that again|shorter|longer|more detailed|less detailed|simpler)\b/i;
+const CODING_CUE = /\b(?:give me code|write code|code for|implement|implementation|function|class|algorithm|leetcode|debug|fix (?:this|the) (?:code|bug|error)|program|snippet|sql query)\b/i;
+const PROJECT_CUE = /\b(?:my project|our project|the project|project|repo(?:sitory)?|linkship|sneak[- ]?peek|natively|tech stack|architecture|what did i use|why did i use|what did we use|how did i implement|how did i build|what did i build|what did i develop)\b/i;
+const PERSONAL_CUE = /\b(?:my resume|my cv|about me|about myself|tell me about myself|my experience|my skills|my background|my education|my internship|my job|what do i have|what did i do|do i have|did i use)\b/i;
+const DOCUMENT_CUE = /\b(?:document|documents|file|files|pdf|attachment|attached|resume|cv|paper|report|what does .* say|according to)\b/i;
+const MEETING_CUE = /\b(?:meeting|transcript|interview|interviewer|what did .* say|what was .* mentioned|discussed|said earlier)\b/i;
+const SCREEN_CUE = /\b(?:this error|this screen|this screenshot|shown|displayed|on screen|what is this|what am i looking at)\b/i;
+const STATEMENT_RESPONSE_CUE = /^(?:i\s+(?:don't|do not|didn't|did not|can't|cannot|am confused|understand|don't understand)|that (?:doesn't|does not|didn't|did not) make sense|i'm confused|i am confused|i need help)\b/i;
+const DURATION_CUE = /\b(?:in|within|for)\s+(\d+(?:\.\d+)?)\s*(seconds?|secs?|minutes?|mins?)\b/i;
+
+function durationSeconds(text: string): number | undefined {
+  const m = text.match(DURATION_CUE);
+  if (!m) return undefined;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n)) return undefined;
+  return /minute|min\b/i.test(m[2]) ? Math.round(n * 60) : Math.round(n);
+}
+
+function responseShapeOf(text: string, coding: boolean): ResponseShape {
+  if (coding || /\bcode\b/i.test(text)) return 'code';
+  if (REFINEMENT_CUE.test(text) && /\b(?:longer|detailed|expand|more)\b/i.test(text)) return 'detailed';
+  if (/\b(?:shorter|concise|brief|one sentence|quickly)\b/i.test(text)) return 'concise';
+  if (/\b(?:longer|detailed|deep|in detail|expand)\b/i.test(text)) return 'detailed';
+  return 'normal';
+}
+
+function heuristicIntent(text: string, input: UnderstandTurnInput, classification?: Classification): TurnIntent {
+  const q = text.trim();
+  const lower = q.toLowerCase();
+  const types = new Set(classification?.questionTypes ?? []);
+  if (types.has('FOLLOW_UP')) return 'follow-up';
+  if (types.has('CODING_TASK')) return 'coding-request';
+  if (types.has('SYSTEM_DESIGN')) return 'system-design';
+  if ([...types].some((t) => t === 'DOCUMENT_FACT' || t === 'DOCUMENT_EXPLANATION')) return 'document-question';
+  if (types.has('SCREEN_SPECIFIC')) return 'screen-question';
+  if (types.has('MEETING_FACT')) return 'meeting-question';
+  if ([...types].some((t) => t === 'PERSONAL_EXPERIENCE' || t === 'PERSONAL_PROJECT' || t === 'PERSONAL_SKILL' || t === 'JOB_REQUIREMENT' || t === 'ROLE_ALIGNMENT')) {
+    return PROJECT_CUE.test(q) || /\b(?:project|repo|postgresql|redis|django|python|github)\b/i.test(q) ? 'project-question' : 'personal-question';
+  }
+  if (FOLLOW_UP_CUE.test(q)) return 'follow-up';
+  if (REFINEMENT_CUE.test(q)) return 'refinement';
+  if (CODING_CUE.test(q)) return 'coding-request';
+  if (SCREEN_CUE.test(q) && input.hasScreenContext) return 'screen-question';
+  if (DOCUMENT_CUE.test(q)) return 'document-question';
+  if (MEETING_CUE.test(q)) return 'meeting-question';
+  if (PROJECT_CUE.test(q)) return 'project-question';
+  if (PERSONAL_CUE.test(q)) return 'personal-question';
+  if (STATEMENT_RESPONSE_CUE.test(q)) return 'conversational-response';
+  if (SEMANTIC_QUESTION_CUE.test(q) || q.endsWith('?')) return 'general-question';
+  if (DEICTIC_CUE.test(q)) return 'follow-up';
+  return 'conversational-response';
+}
+
+/**
+ * Canonical understanding stage. Existing resolver/classifier behavior remains
+ * available and is composed here rather than deleted or duplicated downstream.
+ */
+export function understandTurn(input: UnderstandTurnInput): TurnUnderstanding {
+  const resolved = resolveQuestion(input);
+  const question = resolved.resolvedQuestion || input.manualQuestion?.trim() || input.selectedText?.trim() || '';
+  const state = input.conversationState;
+  const reference = state ? resolveReference(question, state) : { resolved: question, usedState: false } as ResolvedReference;
+  const normalizedQuestion = reference.resolved || question;
+  const followUp = Boolean(resolved.isFollowUp || reference.usedState || FOLLOW_UP_CUE.test(normalizedQuestion) || DEICTIC_CUE.test(normalizedQuestion));
+
+  let classification: Classification | undefined;
+  if (input.policy) {
+    classification = classifyTurn({
+      resolvedQuestion: normalizedQuestion,
+      policy: input.policy,
+      isFollowUp: followUp,
+      hasScreenContext: input.hasScreenContext,
+      hasAttachedDocuments: input.hasAttachedDocuments,
+      attachedFileNames: input.attachedFileNames,
+    });
+  }
+
+  const intent = heuristicIntent(normalizedQuestion, input, classification);
+  const isQuestion = Boolean(
+    normalizedQuestion.endsWith('?')
+    || SEMANTIC_QUESTION_CUE.test(normalizedQuestion)
+    || followUp
+    || intent === 'refinement'
+    || intent === 'coding-request'
+    || intent === 'system-design',
+  );
+  const entities = [...new Set([
+    ...resolved.activeEntities,
+    ...extractEntities(normalizedQuestion),
+  ])].slice(0, 8);
+  const subject = extractTopicPhrase(normalizedQuestion) ?? entities[0];
+  const coding = intent === 'coding-request' || intent === 'system-design';
+  const requiresPersonalContext = intent === 'personal-question';
+  const requiresProjectContext = intent === 'project-question';
+  const requiresDocumentContext = intent === 'document-question';
+  const requiresMeetingContext = intent === 'meeting-question';
+  const requiresScreenContext = intent === 'screen-question';
+  const requiresRetrieval = Boolean(
+    classification?.shouldRetrieve
+      ?? (requiresPersonalContext
+        || requiresProjectContext
+        || requiresDocumentContext
+        || requiresMeetingContext
+        || requiresScreenContext
+        || followUp),
+  );
+
+  const confidenceBase = resolved.confidence || 0.4;
+  const confidence = Math.min(1, Math.max(0, confidenceBase + (reference.usedState ? 0.05 : 0)));
+
+  return {
+    question: normalizedQuestion,
+    intent,
+    isQuestion,
+    followUp,
+    refersToPreviousContext: Boolean(reference.usedState || DEICTIC_CUE.test(normalizedQuestion) || resolved.isFollowUp),
+    confidence,
+    ...(subject ? { subject } : {}),
+    entities,
+    ...(durationSeconds(normalizedQuestion) !== undefined ? { requestedDuration: durationSeconds(normalizedQuestion) } : {}),
+    responseShape: responseShapeOf(normalizedQuestion, coding),
+    requiresPersonalContext,
+    requiresProjectContext,
+    requiresDocumentContext,
+    requiresMeetingContext,
+    requiresScreenContext,
+    requiresRetrieval,
+    ...(classification ? { classification } : {}),
+    source: resolved.source,
+  };
+}

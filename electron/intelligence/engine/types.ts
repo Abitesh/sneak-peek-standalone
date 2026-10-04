@@ -8,6 +8,7 @@
  */
 
 import type { RecentConversationContext } from './TranscriptContext';
+import type { TurnUnderstanding } from '../../context-intelligence/question/question-resolver';
 
 export type IntelligenceSurface =
   | 'manual-chat'
@@ -219,6 +220,8 @@ export interface NativelyFinalAnswer {
 export interface NativelyIntelligenceResult {
   requestId: string;
   resolvedQuestion: string;
+  /** Canonical Change 5 understanding result used by downstream planning. */
+  turnUnderstanding: TurnUnderstanding;
   intent: IntelligenceIntent;
   responseType: IntelligenceResponseType;
   selectedContext: NativelySelectedContext;
