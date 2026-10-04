@@ -6,6 +6,8 @@ import type {
   NativelySelectedContext,
   NativelyRetrievalPlan,
 } from './types';
+import { getRecentConversationContext } from './TranscriptContext';
+import type { ConversationTurn } from '../../context-intelligence/question/conversation-state';
 
 /**
  * Central entry boundary for Natively Intelligence.
@@ -31,6 +33,11 @@ export class NativelyIntelligenceEngine {
     const responseType = this.resolveResponseType(request, intent);
 
     stages.push('plan-context');
+    const conversationContext = getRecentConversationContext({
+      sessionId: request.sessionId,
+      currentTurn: this.toConversationTurn(request.currentTurn),
+      currentQuestion: request.userMessage,
+    });
     const selectedContext = this.selectContext(request);
 
     stages.push('plan-retrieval');
@@ -45,6 +52,7 @@ export class NativelyIntelligenceEngine {
       intent,
       responseType,
       selectedContext,
+      conversationContext,
       retrievalPlan,
       evidence: { items: [], sufficient: !retrievalPlan.shouldRetrieve },
       prompt: { user: resolvedQuestion },
@@ -70,6 +78,11 @@ export class NativelyIntelligenceEngine {
       intent: 'ambiguous',
       responseType: request.responseShape?.type ?? 'answer',
       selectedContext: { items: [] },
+      conversationContext: getRecentConversationContext({
+        sessionId: request.sessionId,
+        currentTurn: this.toConversationTurn(request.currentTurn),
+        currentQuestion: request.userMessage,
+      }),
       retrievalPlan: {
         shouldRetrieve: false,
         mode: 'none',
@@ -83,6 +96,19 @@ export class NativelyIntelligenceEngine {
       streamLifecycle: { status: 'cancelled' },
       diagnostics: { traceId, stages, warnings: ['Request was cancelled before intelligence processing began'] },
       finalAnswer: null,
+    };
+  }
+
+
+  private toConversationTurn(turn: NativelyIntelligenceRequest['currentTurn']): ConversationTurn {
+    return {
+      id: turn.id,
+      role: turn.role === 'assistant' ? 'assistant' : 'user',
+      speaker: turn.role,
+      text: turn.content,
+      timestamp: turn.createdAt ?? Date.now(),
+      finalized: true,
+      source: 'manual-chat',
     };
   }
 

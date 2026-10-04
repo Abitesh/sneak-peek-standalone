@@ -7,6 +7,8 @@
  * making the engine boundary depend on any one implementation.
  */
 
+import type { RecentConversationContext } from './TranscriptContext';
+
 export type IntelligenceSurface =
   | 'manual-chat'
   | 'what-to-answer'
@@ -220,6 +222,8 @@ export interface NativelyIntelligenceResult {
   intent: IntelligenceIntent;
   responseType: IntelligenceResponseType;
   selectedContext: NativelySelectedContext;
+  /** Bounded recent conversation; retrieval and long-term memory are separate layers. */
+  conversationContext: RecentConversationContext;
   retrievalPlan: NativelyRetrievalPlan;
   evidence: NativelyEvidence;
   prompt: NativelyPrompt;
