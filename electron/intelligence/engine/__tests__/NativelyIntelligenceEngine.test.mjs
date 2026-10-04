@@ -7,6 +7,9 @@ const base = path.resolve(process.cwd(), 'dist-electron/electron/intelligence/en
 const { NativelyIntelligenceEngine } = await import(
   pathToFileURL(path.join(base, 'NativelyIntelligenceEngine.js')).href,
 );
+const { RetrievalCoordinator, createRetrievalCapability } = await import(
+  pathToFileURL(path.join(base, 'RetrievalCoordinator.js')).href,
+);
 
 const permissions = {
   conversation: true,
@@ -103,6 +106,41 @@ describe('NativelyIntelligenceEngine contract', () => {
     assert.equal(result.contextPlan.requiredSources.includes('rag'), true);
     assert.equal(result.retrievalPlan.shouldRetrieve, true);
     assert.deepEqual(result.retrievalPlan.sources, ['rag']);
+  });
+
+
+  test('routes project retrieval through exactly one coordinator decision', async () => {
+    const calls = [];
+    const coordinator = new RetrievalCoordinator({
+      capabilities: [
+        createRetrievalCapability('project_knowledge', async ({ source }) => {
+          calls.push(source);
+          return {
+            items: [{ id: 'project-1', source, content: 'Redis was used for caching.' }],
+          };
+        }),
+        createRetrievalCapability('rag', async ({ source }) => {
+          calls.push(source);
+          return { items: [{ id: 'rag-1', source, content: 'unexpected duplicate retrieval' }] };
+        }),
+      ],
+    });
+    const engine = new NativelyIntelligenceEngine(coordinator);
+    const result = await engine.handle({
+      requestId: 'req-project-retrieval',
+      sessionId: 'session-1',
+      surface: 'manual-chat',
+      userMessage: 'Why did you use Redis in Linkship?',
+      currentTurn: { id: 'turn-5', role: 'user', content: 'Why did you use Redis in Linkship?' },
+      recentConversation: [],
+      activeContext: { projectId: 'linkship', projectName: 'Linkship' },
+      contextPermissions: permissions,
+    });
+
+    assert.deepEqual(calls, ['project_knowledge']);
+    assert.equal(result.evidence.items.length, 1);
+    assert.equal(result.evidence.items[0].source, 'project_knowledge');
+    assert.ok(result.diagnostics.stages.includes('retrieve'));
   });
 
 });

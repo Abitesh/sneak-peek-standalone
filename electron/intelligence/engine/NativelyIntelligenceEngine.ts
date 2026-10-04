@@ -12,6 +12,7 @@ import { getConversationState } from '../../context-intelligence/question/conver
 import { understandTurn } from '../../context-intelligence/question/question-resolver';
 import { planContext } from './ContextPlanner';
 import type { ContextSource } from './ContextTypes';
+import { RetrievalCoordinator } from './RetrievalCoordinator';
 
 /**
  * Central entry boundary for Natively Intelligence.
@@ -22,6 +23,12 @@ import type { ContextSource } from './ContextTypes';
  * → generate pipeline without changing the request/result contract.
  */
 export class NativelyIntelligenceEngine {
+  private readonly retrievalCoordinator: RetrievalCoordinator;
+
+  constructor(retrievalCoordinator?: RetrievalCoordinator) {
+    this.retrievalCoordinator = retrievalCoordinator ?? new RetrievalCoordinator();
+  }
+
   async handle(request: NativelyIntelligenceRequest): Promise<NativelyIntelligenceResult> {
     const traceId = `${request.sessionId}:${request.requestId}`;
     const stages: string[] = [];
@@ -69,6 +76,13 @@ export class NativelyIntelligenceEngine {
     stages.push('plan-retrieval');
     const retrievalPlan = this.planRetrieval(resolvedQuestion, contextPlan);
 
+    stages.push('retrieve');
+    const retrievalResult = await this.retrievalCoordinator.retrieve(
+      contextPlan,
+      request,
+      resolvedQuestion,
+    );
+
     stages.push('build-evidence');
     stages.push('assemble-prompt');
 
@@ -82,14 +96,16 @@ export class NativelyIntelligenceEngine {
       contextPlan,
       conversationContext,
       retrievalPlan,
-      evidence: { items: [], sufficient: !retrievalPlan.shouldRetrieve },
+      evidence: retrievalResult.evidence,
       prompt: { user: resolvedQuestion },
       providerAttempt: { status: 'not-started' },
       streamLifecycle: { status: 'not-started' },
       diagnostics: {
         traceId,
         stages,
-        warnings: [],
+        warnings: retrievalResult.trace.callCount === 0 && contextPlan.retrievalRequired
+          ? ['Retrieval was planned but no matching retrieval capability was registered']
+          : [],
       },
       finalAnswer: null,
     };
