@@ -14,6 +14,7 @@ import type { ContextPlan, ContextSource } from './ContextTypes';
 import type { NativelyIntelligenceRequest, NativelyPrompt } from './types';
 import type { RecentConversationContext } from './TranscriptContext';
 import type { EvidencePack } from '../context-os/evidencePack';
+import type { ResponsePlan } from './ResponsePlanner';
 
 export interface PromptAssemblerInput {
   request: NativelyIntelligenceRequest;
@@ -27,6 +28,8 @@ export interface PromptAssemblerInput {
   projectContext?: string;
   /** Screen context is included only when the ContextPlan selects it. */
   screenContext?: string;
+  /** Canonical answer-shape decision supplied by ResponsePlanner. */
+  responsePlan?: ResponsePlan;
   /** Stable system instructions supplied by the intelligence layer. */
   systemInstructions?: string;
 }
@@ -76,25 +79,36 @@ function isSelected(plan: ContextPlan, source: ContextSource): boolean {
   return plan.requiredSources.includes(source) || plan.optionalSources.includes(source);
 }
 
-function renderResponsePolicy(request: NativelyIntelligenceRequest): string {
+function renderResponsePolicy(
+  request: NativelyIntelligenceRequest,
+  responsePlan?: ResponsePlan,
+): string {
   const shape = request.responseShape;
-  const lines = [
-    '<response_policy>',
-    `  <response_type>${escapeXml(shape?.type ?? 'answer')}</response_type>`,
-  ];
+  const lines = ['<response_policy>'];
 
-  if (typeof shape?.durationSeconds === 'number') {
-    lines.push(`  <duration_seconds>${shape.durationSeconds}</duration_seconds>`);
+  if (responsePlan) {
+    lines.push(`  <response_kind>${escapeXml(responsePlan.kind)}</response_kind>`);
+    lines.push(`  <detail_level>${escapeXml(responsePlan.detailLevel)}</detail_level>`);
+    lines.push(`  <format>${escapeXml(responsePlan.format)}</format>`);
+    lines.push(`  <spoken>${responsePlan.spoken}</spoken>`);
+    lines.push(`  <first_person>${responsePlan.firstPerson}</first_person>`);
+    lines.push(`  <project_grounded>${responsePlan.projectGrounded}</project_grounded>`);
+    if (typeof responsePlan.requestedDurationSeconds === 'number') {
+      lines.push(`  <duration_seconds>${responsePlan.requestedDurationSeconds}</duration_seconds>`);
+      lines.push('  <duration_is_user_requested>true</duration_is_user_requested>');
+    }
+    if (typeof responsePlan.maxTokens === 'number') lines.push(`  <max_tokens>${responsePlan.maxTokens}</max_tokens>`);
+    if (typeof responsePlan.maxSentences === 'number') lines.push(`  <max_sentences>${responsePlan.maxSentences}</max_sentences>`);
+    lines.push('  <instruction>Follow this response shape after using the already-selected context. Do not retrieve or select new context because of response style.</instruction>');
+  } else {
+    lines.push(`  <response_type>${escapeXml(shape?.type ?? 'answer')}</response_type>`);
+    if (typeof shape?.durationSeconds === 'number') lines.push(`  <duration_seconds>${shape.durationSeconds}</duration_seconds>`);
+    if (typeof shape?.maxTokens === 'number') lines.push(`  <max_tokens>${shape.maxTokens}</max_tokens>`);
+    if (typeof shape?.maxSentences === 'number') lines.push(`  <max_sentences>${shape.maxSentences}</max_sentences>`);
+    if (shape?.concise === true) lines.push('  <concise>true</concise>');
+    if (shape?.detailed === true) lines.push('  <detailed>true</detailed>');
+    if (shape?.spoken === true) lines.push('  <spoken>true</spoken>');
   }
-  if (typeof shape?.maxTokens === 'number') {
-    lines.push(`  <max_tokens>${shape.maxTokens}</max_tokens>`);
-  }
-  if (typeof shape?.maxSentences === 'number') {
-    lines.push(`  <max_sentences>${shape.maxSentences}</max_sentences>`);
-  }
-  if (shape?.concise === true) lines.push('  <concise>true</concise>');
-  if (shape?.detailed === true) lines.push('  <detailed>true</detailed>');
-  if (shape?.spoken === true) lines.push('  <spoken>true</spoken>');
 
   lines.push('</response_policy>');
   return lines.join('\n');
@@ -206,7 +220,7 @@ export function assembleNativelyPrompt(input: PromptAssemblerInput): AssembledPr
   selectedSections.push(system);
   sectionNames.push('system_instructions');
 
-  const responsePolicy = renderResponsePolicy(input.request);
+  const responsePolicy = renderResponsePolicy(input.request, input.responsePlan);
   selectedSections.push(responsePolicy);
   sectionNames.push('response_policy');
 

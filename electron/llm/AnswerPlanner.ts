@@ -140,6 +140,8 @@ export type ContextLayer =
 
 export interface AnswerPlan {
   answerType: AnswerType;
+  /** Change 10: coarse response-shape seed consumed by the dedicated ResponsePlanner. */
+  responseShapeSeed?: AnswerResponseShapeSeed;
   source: AnswerSource;
   speakerPerspective: SpeakerPerspective;
   /** @deprecated Backward-compatible alias of `voicePerspective` (Phase 2). */
@@ -1173,6 +1175,37 @@ export const forbiddenLayersFor = (answerType: AnswerType): ContextLayer[] => {
 export const isCodingAnswerType = (answerType: AnswerType): boolean =>
   answerType === 'coding_question_answer' || answerType === 'dsa_question_answer';
 
+/**
+ * Change 10: coarse answer-shape seed for the dedicated ResponsePlanner.
+ *
+ * AnswerPlanner remains the source of truth for routing/grounding classification;
+ * this helper exposes only the already-known answer category so response shape can
+ * be planned in a separate stage without duplicating AnswerType regex logic.
+ */
+export type AnswerResponseShapeSeed =
+  | 'direct-answer'
+  | 'explanation'
+  | 'project-grounded'
+  | 'first-person-interview'
+  | 'coding'
+  | 'troubleshooting'
+  | 'summary';
+
+export const responseShapeSeedForAnswerType = (answerType: AnswerType): AnswerResponseShapeSeed => {
+  if (isCodingAnswerType(answerType)) return 'coding';
+  if (answerType === 'debugging_question_answer') return 'troubleshooting';
+  if (answerType === 'project_answer' || answerType === 'project_followup_answer' || answerType === 'project_about_answer'
+    || answerType === 'project_link_answer' || answerType === 'source_code_evidence_answer') return 'project-grounded';
+  if (answerType === 'behavioral_interview_answer' || answerType === 'experience_answer' || answerType === 'skill_experience_answer'
+    || answerType === 'skills_answer' || answerType === 'profile_fact_answer' || answerType === 'identity_answer'
+    || answerType === 'jd_fit_answer' || answerType === 'gap_analysis_answer' || answerType === 'resume_jd_fit_answer'
+    || answerType === 'resume_jd_gap_answer' || answerType === 'resume_jd_intro_answer') return 'first-person-interview';
+  if (answerType === 'lecture_answer' || answerType === 'document_structure_answer' || answerType === 'document_followup_answer'
+    || answerType === 'general_meeting_answer') return 'summary';
+  if (answerType === 'technical_concept_answer' || answerType === 'definitional_answer') return 'explanation';
+  return 'direct-answer';
+};
+
 // Phase 2: answer types that speak AS the candidate (first person live / second
 // person manual). Profile-directed asks + negotiation (the candidate negotiates).
 const CANDIDATE_VOICE_TYPES: ReadonlySet<AnswerType> = new Set<AnswerType>([
@@ -2134,6 +2167,7 @@ export const planAnswer = (input: PlanAnswerInput): AnswerPlan => {
 
   return {
     answerType,
+    responseShapeSeed: responseShapeSeedForAnswerType(answerType),
     source: input.source,
     speakerPerspective,
     outputPerspective,

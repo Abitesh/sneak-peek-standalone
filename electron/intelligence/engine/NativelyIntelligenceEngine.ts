@@ -15,6 +15,7 @@ import type { ContextSource } from './ContextTypes';
 import { RetrievalCoordinator } from './RetrievalCoordinator';
 import { buildEvidencePackFromNativelyEvidence } from '../context-os/evidencePack';
 import { assembleNativelyPrompt } from './PromptAssembler';
+import { planResponse } from './ResponsePlanner';
 
 /**
  * Central entry boundary for Natively Intelligence.
@@ -53,6 +54,10 @@ export class NativelyIntelligenceEngine {
         text: turn.content,
         timestamp: turn.createdAt ?? Date.now(),
       })),
+    });
+    const responsePlan = planResponse({
+      question: turnUnderstanding.question || resolvedQuestion,
+      turnUnderstanding,
     });
     const intent = this.mapIntent(turnUnderstanding.intent);
     const responseType = this.resolveResponseType(request, intent);
@@ -99,6 +104,7 @@ export class NativelyIntelligenceEngine {
       contextPlan,
       conversationContext,
       evidencePack,
+      responsePlan,
       screenContext: request.screenContext?.text,
     });
 
@@ -106,6 +112,7 @@ export class NativelyIntelligenceEngine {
       requestId: request.requestId,
       resolvedQuestion: turnUnderstanding.question || resolvedQuestion,
       turnUnderstanding,
+      responsePlan,
       intent,
       responseType,
       selectedContext,
@@ -133,15 +140,21 @@ export class NativelyIntelligenceEngine {
     traceId: string,
     stages: string[],
   ): NativelyIntelligenceResult {
+    const cancelledUnderstanding = understandTurn({
+      manualQuestion: request.manualQuestion ?? request.userMessage,
+      sessionId: request.sessionId,
+      conversationState: getConversationState(request.sessionId),
+      hasScreenContext: Boolean(request.screenContext),
+    });
+    const cancelledResponsePlan = planResponse({
+      question: cancelledUnderstanding.question || this.resolveQuestion(request),
+      turnUnderstanding: cancelledUnderstanding,
+    });
     return {
       requestId: request.requestId,
       resolvedQuestion: this.resolveQuestion(request),
-      turnUnderstanding: understandTurn({
-        manualQuestion: request.manualQuestion ?? request.userMessage,
-        sessionId: request.sessionId,
-        conversationState: getConversationState(request.sessionId),
-        hasScreenContext: Boolean(request.screenContext),
-      }),
+      turnUnderstanding: cancelledUnderstanding,
+      responsePlan: cancelledResponsePlan,
       intent: 'ambiguous',
       responseType: request.responseShape?.type ?? 'answer',
       selectedContext: { items: [] },
@@ -199,6 +212,7 @@ export class NativelyIntelligenceEngine {
           currentTurn: this.toConversationTurn(request.currentTurn),
           currentQuestion: request.userMessage,
         }),
+        responsePlan: cancelledResponsePlan,
         evidencePack: buildEvidencePackFromNativelyEvidence({
           turnId: request.currentTurn.id || request.requestId,
           query: request.userMessage,

@@ -25,6 +25,7 @@ import type { ActiveModeDocumentGroundingInfo } from "../services/ModesManager";
 import { isCodeVerificationEnabled } from "./codeVerification/verificationEnabled";
 import type { WhatToAnswerRequestSnapshot } from "./whatToAnswerRequestSnapshot";
 import { getPerson1FileContext, getPerson1FileContextAsync } from '../personalKnowledge/person1PromptContext';
+import { planResponse, formatResponsePlanForPrompt } from '../intelligence/engine/ResponsePlanner';
 
 // Wall-clock budget for the pre-stream mode-context HYBRID retrieval await.
 // The hybrid retriever embeds the live query, and the embedder's own hard
@@ -335,7 +336,16 @@ DETECTED INTENT: ${intentResult.intent}
 ANSWER SHAPE: ${intentResult.answerShape}
 </intent_and_shape>`);
             }
+            const responsePlan = planResponse({
+                question: answerPlan?.question || cleanedTranscript,
+                answerPlan,
+            });
+            intentContextParts.push(formatResponsePlanForPrompt(responsePlan));
             if (answerPlan) {
+                // Compatibility contract: AnswerPlanner still owns routing, grounding,
+                // and legacy answer-type semantics. ResponsePlanner owns the new
+                // answer-shape decision above; it is intentionally additive during
+                // migration so existing routing invariants are not rewritten here.
                 intentContextParts.push(formatAnswerPlanForPrompt(answerPlan, isCodeVerificationEnabled()));
             }
             if (instructionContext) {

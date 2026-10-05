@@ -11,6 +11,7 @@ import type { RecentConversationContext } from './TranscriptContext';
 import type { TurnUnderstanding } from '../../context-intelligence/question/question-resolver';
 import type { ContextPlan, ContextSource } from './ContextTypes';
 import type { EvidencePack } from '../context-os/evidencePack';
+import type { ResponsePlan } from './ResponsePlanner';
 
 export type IntelligenceSurface =
   | 'manual-chat'
@@ -230,6 +231,8 @@ export interface NativelyIntelligenceResult {
   resolvedQuestion: string;
   /** Canonical Change 5 understanding result used by downstream planning. */
   turnUnderstanding: TurnUnderstanding;
+  /** Canonical answer-shape decision, separate from context selection. */
+  responsePlan: ResponsePlan;
   intent: IntelligenceIntent;
   responseType: IntelligenceResponseType;
   selectedContext: NativelySelectedContext;

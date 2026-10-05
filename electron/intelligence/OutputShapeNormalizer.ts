@@ -28,6 +28,7 @@ import {
 } from '../llm/answerPolish';
 import { humanizeForAnswerType } from '../llm/humanLikeness';
 import type { AnswerType } from '../llm/AnswerPlanner';
+import type { ResponsePlan } from './engine/ResponsePlanner';
 
 /** Answer styles (from AnswerPlanner) under which visible scaffold labels are OK. */
 const STRUCTURE_STYLES = new Set(['detailed', 'bullets', 'star', 'exam', 'notes']);
@@ -43,6 +44,8 @@ export interface NormalizeInput {
   answerType?: AnswerType;
   /** The user's question (enables detail-request exception detection). */
   question?: string;
+  /** Canonical Change 10 response plan. When present it supplies the output-shape facts. */
+  responsePlan?: ResponsePlan;
 }
 
 export interface NormalizeResult {
@@ -63,7 +66,11 @@ export function normalizeOutputShape(input: NormalizeInput): NormalizeResult {
   const applied: string[] = [];
   let text = input.answer ?? '';
   const original = text;
-  if (!text || input.isCoding) return { text, applied, changed: false };
+  const effectiveIsCoding = input.isCoding ?? input.responsePlan?.kind === 'coding';
+  const effectiveAnswerType = input.answerType ?? input.responsePlan?.answerType;
+  const effectiveAnswerStyle = input.answerStyle ?? input.responsePlan?.answerStyle;
+  const preserveRequestedStructure = input.responsePlan?.format === 'structured' || input.responsePlan?.format === 'bullets';
+  if (!text || effectiveIsCoding) return { text, applied, changed: false };
 
   try {
     const cleaned = cleanAnswerArtifacts(text);
@@ -74,7 +81,7 @@ export function normalizeOutputShape(input: NormalizeInput): NormalizeResult {
 
     SCAFFOLD_LABEL_RE.lastIndex = 0;
     const hasVisibleScaffold = SCAFFOLD_LABEL_RE.test(text);
-    const structureRequested = STRUCTURE_STYLES.has((input.answerStyle ?? 'default'));
+    const structureRequested = preserveRequestedStructure || STRUCTURE_STYLES.has((effectiveAnswerStyle ?? 'default'));
     if (hasVisibleScaffold && !structureRequested) {
       const speakable = compressToSpeakable(text);
       if (speakable.length >= 40) {
@@ -88,8 +95,8 @@ export function normalizeOutputShape(input: NormalizeInput): NormalizeResult {
     // lecture / technical answer is a no-op. NOTE: the speakability TRIM was removed
     // 2026-06-16 (it cropped the conclusion off long answers); length is the model's job via
     // the prompt, so the WTA path no longer trims either.
-    if (input.answerType) {
-      const human = humanizeForAnswerType(input.answerType, text);
+    if (effectiveAnswerType) {
+      const human = humanizeForAnswerType(effectiveAnswerType, text);
       if (human.changed && human.text.trim().length >= 10) {
         text = human.text;
         applied.push('humanized_spoken_answer');
@@ -119,7 +126,7 @@ export function normalizeOutputShape(input: NormalizeInput): NormalizeResult {
  * already). Pure aside from mutating the passed guard's history. Never throws.
  */
 export function applyAnswerContract(
-  input: NormalizeInput & { answerType: string; question: string; guard: AnswerDiversityGuard },
+  input: NormalizeInput & { answerType?: string; question?: string; guard: AnswerDiversityGuard },
 ): NormalizeResult & { repetition?: RepetitionVerdict } {
   const norm = normalizeOutputShape(input);
   let text = norm.text;
@@ -127,12 +134,15 @@ export function applyAnswerContract(
   let repetition: RepetitionVerdict | undefined;
 
   try {
-    repetition = input.guard.check(text, input.answerType, input.question);
-    if (repetition.repeated && !input.isCoding) {
+    const effectiveAnswerType = input.answerType ?? input.responsePlan?.answerType ?? 'unknown_answer';
+    const effectiveQuestion = input.question ?? input.responsePlan?.question ?? '';
+    const effectiveIsCoding = input.isCoding ?? input.responsePlan?.kind === 'coding';
+    repetition = input.guard.check(text, effectiveAnswerType, effectiveQuestion);
+    if (repetition.repeated && !effectiveIsCoding) {
       let repaired = text;
       if (repetition.reason === 'same_opening_window' || repetition.reason === 'same_first_sentence') {
         const varied = varySpokenOpening(text, input.guard.size);
-        if (varied !== text && !input.guard.check(varied, input.answerType, input.question).repeated) {
+        if (varied !== text && !input.guard.check(varied, effectiveAnswerType, effectiveQuestion).repeated) {
           repaired = varied;
         }
       }
@@ -141,7 +151,7 @@ export function applyAnswerContract(
         if (
           speakable.length >= 40 &&
           speakable !== text &&
-          !input.guard.check(speakable, input.answerType, input.question).repeated
+          !input.guard.check(speakable, effectiveAnswerType, effectiveQuestion).repeated
         ) {
           repaired = speakable;
         }
@@ -151,7 +161,7 @@ export function applyAnswerContract(
         applied.push('diversity_repair');
       }
     }
-    input.guard.record(text, input.answerType, input.question);
+    input.guard.record(text, effectiveAnswerType, effectiveQuestion);
   } catch {
     /* never throw — return best effort so far */
   }
