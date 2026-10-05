@@ -173,6 +173,12 @@ export interface NativelyPrompt {
   system?: string;
   user: string;
   context?: string;
+  /** Exact provider-facing prompt produced by PromptAssembler. */
+  finalPrompt: string;
+  /** Evidence identities rendered into finalPrompt, in render order. */
+  includedEvidenceIds?: string[];
+  /** Prompt sections rendered into finalPrompt. */
+  includedSections?: string[];
 }
 
 export type NativelyProviderAttemptStatus =

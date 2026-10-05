@@ -14,6 +14,7 @@ import { planContext } from './ContextPlanner';
 import type { ContextSource } from './ContextTypes';
 import { RetrievalCoordinator } from './RetrievalCoordinator';
 import { buildEvidencePackFromNativelyEvidence } from '../context-os/evidencePack';
+import { assembleNativelyPrompt } from './PromptAssembler';
 
 /**
  * Central entry boundary for Natively Intelligence.
@@ -92,6 +93,14 @@ export class NativelyIntelligenceEngine {
       evidence: retrievalResult.evidence,
     });
     stages.push('assemble-prompt');
+    const assembledPrompt = assembleNativelyPrompt({
+      request,
+      question: turnUnderstanding.question || resolvedQuestion,
+      contextPlan,
+      conversationContext,
+      evidencePack,
+      screenContext: request.screenContext?.text,
+    });
 
     return {
       requestId: request.requestId,
@@ -105,7 +114,7 @@ export class NativelyIntelligenceEngine {
       retrievalPlan,
       evidence: retrievalResult.evidence,
       evidencePack,
-      prompt: { user: resolvedQuestion },
+      prompt: assembledPrompt,
       providerAttempt: { status: 'not-started' },
       streamLifecycle: { status: 'not-started' },
       diagnostics: {
@@ -173,7 +182,39 @@ export class NativelyIntelligenceEngine {
         evidence: { items: [], sufficient: false },
         answerPolicy: 'ask_clarification',
       }),
-      prompt: { user: '' },
+      prompt: assembleNativelyPrompt({
+        request,
+        question: '',
+        contextPlan: planContext({
+          request,
+          understanding: understandTurn({
+            manualQuestion: request.manualQuestion ?? request.userMessage,
+            sessionId: request.sessionId,
+            conversationState: getConversationState(request.sessionId),
+            hasScreenContext: Boolean(request.screenContext),
+          }),
+        }),
+        conversationContext: getRecentConversationContext({
+          sessionId: request.sessionId,
+          currentTurn: this.toConversationTurn(request.currentTurn),
+          currentQuestion: request.userMessage,
+        }),
+        evidencePack: buildEvidencePackFromNativelyEvidence({
+          turnId: request.currentTurn.id || request.requestId,
+          query: request.userMessage,
+          contextPlan: planContext({
+            request,
+            understanding: understandTurn({
+              manualQuestion: request.manualQuestion ?? request.userMessage,
+              sessionId: request.sessionId,
+              conversationState: getConversationState(request.sessionId),
+              hasScreenContext: Boolean(request.screenContext),
+            }),
+          }),
+          evidence: { items: [], sufficient: false },
+          answerPolicy: 'ask_clarification',
+        }),
+      }),
       providerAttempt: { status: 'cancelled' },
       streamLifecycle: { status: 'cancelled' },
       diagnostics: { traceId, stages, warnings: ['Request was cancelled before intelligence processing began'] },
