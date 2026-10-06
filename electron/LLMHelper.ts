@@ -45,7 +45,7 @@ import {
   customProviderSupportsVision,
   customProviderIsLocal,
 } from "./llm/visionCapability"
-import { assertProviderDataScopes, getDeniedDataScopes, routeWithScopeFallback, ProviderRouter, DOCUMENT_GROUNDING_SCOPE_DENIED_MESSAGE, isProviderFamilyDisabled, ProviderDisabledError, type ProviderDataScope, type ProviderDataScopePolicy, type LLMProviderId } from "./llm/ProviderRouter"
+import { assertProviderDataScopes, getDeniedDataScopes, routeWithScopeFallback, ProviderRouter, DOCUMENT_GROUNDING_SCOPE_DENIED_MESSAGE, isProviderFamilyDisabled, ProviderDisabledError, type ProviderDataScope, type ProviderDataScopePolicy, type LLMProviderId, type ProviderRouteOptions } from "./llm/ProviderRouter"
 import { filterChatCapable, type ProviderFamily, type ProviderHealth, type VerifiedModelBinding } from "./llm/providerRegistry"
 // Outbound-scope vocabulary shared with Context Intelligence V3. ONE mapping of
 // SourceType → privacy toggle: a second copy here is how the two layers would
@@ -8887,6 +8887,64 @@ let isMultimodal = !!(imagePaths?.length);
     if (this.customProvider) return "custom";
     if (this.isCodexCliModel(this.currentModelId)) return "codex-cli";
     return this.useOllama ? "ollama" : "gemini";
+  }
+
+  /**
+   * Provider-only routing contract for the Natively Intelligence Engine.
+   * Context and prompt decisions never enter this method; GenerationController
+   * remains the owner of fallback, commit, cancellation and completion.
+   */
+  public getNativelyGenerationRouteOptions(
+    dataScopes: ProviderDataScope[] = [],
+    multimodal = false,
+  ): ProviderRouteOptions | null {
+    const modelId = this.getCurrentModelId();
+    let preferredProvider: LLMProviderId | undefined;
+
+    if (this.useOllama) preferredProvider = 'ollama';
+    else if (this.isCodexCliModel(modelId)) preferredProvider = 'codex';
+    else if (this.isOpenAiModel(modelId)) preferredProvider = 'openai';
+    else if (this.isClaudeModel(modelId)) preferredProvider = 'claude';
+    else if (this.isDeepseekModel(modelId)) preferredProvider = 'deepseek';
+    else if (this.isGroqModel(modelId)) preferredProvider = 'groq';
+    else if (this.isGeminiModel(modelId)) preferredProvider = /pro/i.test(modelId) ? 'gemini_pro' : 'gemini_flash';
+    else return null; // custom/NIM/LiteLLM remain on compatibility paths for now
+
+    let scopePolicy: ProviderDataScopePolicy | undefined;
+    try {
+      const { readProviderScopePolicy } = require('./context-intelligence/policies/provider-scope-policy') as typeof import('./context-intelligence/policies/provider-scope-policy');
+      scopePolicy = readProviderScopePolicy();
+    } catch { scopePolicy = undefined; }
+
+    return {
+      capability: multimodal ? 'vision' : 'stream_chat',
+      multimodal,
+      availability: {
+        hasGroq: Boolean(this.groqClient),
+        groqDisabled: this._groqLocalDisabled,
+        hasCodex: this.isCodexAvailable(),
+        hasGemini: Boolean(this.client),
+        hasOpenAI: Boolean(this.openaiClient),
+        hasClaude: Boolean(this.claudeClient),
+        hasDeepseek: Boolean(this.deepseekClient),
+        hasOllama: Boolean(this.ollamaModel),
+      },
+      models: {
+        groq: this.isGroqModel(modelId) ? modelId : GROQ_MODEL,
+        codex: this.codexCliConfig.model,
+        geminiFlash: this.isGeminiModel(modelId) && !/pro/i.test(modelId) ? modelId : GEMINI_FLASH_MODEL,
+        geminiPro: this.isGeminiModel(modelId) && /pro/i.test(modelId) ? modelId : GEMINI_PRO_MODEL,
+        openai: this.isOpenAiModel(modelId) ? modelId : OPENAI_MODEL,
+        claude: this.isClaudeModel(modelId) ? modelId : CLAUDE_MODEL,
+        deepseek: this.isDeepseekModel(modelId) ? modelId : DEEPSEEK_MODEL,
+        ollama: this.ollamaModel,
+      },
+      dataScopes,
+      scopePolicy,
+      preferredProvider,
+      maxAttempts: 3,
+      disabledProviders: this.getDisabledProviderFamilies(),
+    };
   }
 
   public getCurrentModel(): string {

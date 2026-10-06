@@ -83,6 +83,8 @@ export interface NativelyScreenContext {
 export interface NativelyActiveContext {
   modeId?: string;
   modeName?: string;
+  /** Active meeting identity, kept distinct from projectId for retrieval scope. */
+  meetingId?: string;
   projectId?: string;
   projectName?: string;
   profileId?: string;
@@ -218,6 +220,8 @@ export interface NativelyStreamLifecycle {
 export interface NativelyDiagnostics {
   traceId: string;
   stages: string[];
+  /** Exact architecture stage names used by the manual-chat migration trace. */
+  pipelineStages: string[];
   warnings: string[];
 }
 

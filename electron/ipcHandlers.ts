@@ -43,7 +43,12 @@ import { beginTrace, commitTrace } from './intelligence/IntelligenceTrace';
 import { ProfileTreeService } from './intelligence/ProfileTreeService';
 import { isIntelligenceFlagEnabled, getSourceOwnerEnforcementStage, isRagCitationsEnabled } from './intelligence/intelligenceFlags';
 import { recordAttribution, hindsightModeFor, type AttributionInput } from './intelligence/IntelligenceAttribution';
-import { GenerationLifecycle } from './intelligence/engine/GenerationController';
+import { GenerationController, GenerationLifecycle } from './intelligence/engine/GenerationController';
+import { NativelyIntelligenceEngine } from './intelligence/engine/NativelyIntelligenceEngine';
+import { RetrievalCoordinator, createRetrievalCapability } from './intelligence/engine/RetrievalCoordinator';
+import type { ContextSource } from './intelligence/engine/ContextTypes';
+import { readProviderScopePolicy } from './context-intelligence/policies/provider-scope-policy';
+import type { ProviderDataScope, ProviderAvailabilityState, ProviderModelState } from './llm/ProviderRouter';
 import { routeContext, isBackwardLookingQuery } from './intelligence/ContextRouter';
 import { SearchOrchestrator, type SearchCandidate } from './intelligence/SearchOrchestrator';
 import { CHAT_MODE_PROMPT } from './llm/prompts';
@@ -922,6 +927,275 @@ const _convoCleanupRegistered = new Set<number>();
 // the real-app assistant-identity leak users hit. resolveIdentityProbe keeps
 // assistant-meta probes canned but routes candidate-ambiguous probes to the
 // profile fast path whenever a profile is loaded.
+/**
+ * Change 13: wire the canonical Natively Intelligence engine to the existing
+ * retrieval implementations without letting those implementations make a new
+ * context decision. The ContextPlan has already selected the source; each
+ * adapter below receives exactly that source through RetrievalCoordinator.
+ */
+function createPrimaryManualNativelyEngine(llmHelper: any, appState: any, requestId: string) {
+  const ragManager = appState.getRAGManager?.();
+  const capabilities = ragManager ? [
+    createRetrievalCapability('project_knowledge', async ({ query, request, contextPlan, signal }) => {
+      if (signal?.aborted) return { items: [] };
+      const response = await ragManager.search(query, {
+        sessionId: request.sessionId,
+        modeId: request.activeContext?.modeId,
+        selectedSources: ['personal-files'],
+        allowedSources: ['personal-files'],
+        projectFilesOnly: true,
+        topK: 8,
+        tokenBudget: 1800,
+      });
+      return {
+        items: (response.results ?? []).map((r: any, index: number) => ({
+          id: String(r.chunk?.id ?? r.source?.id ?? `project-${index}`),
+          source: 'project_knowledge' as ContextSource,
+          content: String(r.chunk?.text ?? ''),
+          score: Number(r.rerankScore ?? r.score ?? 0),
+          metadata: {
+            sourceId: String(r.source?.id ?? r.chunk?.documentId ?? ''),
+            documentId: String(r.chunk?.documentId ?? ''),
+            documentName: String(r.source?.name ?? ''),
+            page: r.chunk?.pageStart,
+            pageEnd: r.chunk?.pageEnd,
+            section: r.chunk?.section ?? r.chunk?.heading,
+            retrievalSource: 'project-files',
+          },
+        })).filter((item: any) => item.content.trim()),
+      };
+    }),
+    createRetrievalCapability('my_files', async ({ query, request, signal }) => {
+      if (signal?.aborted) return { items: [] };
+      const response = await ragManager.search(query, {
+        sessionId: request.sessionId,
+        modeId: request.activeContext?.modeId,
+        selectedSources: ['personal-files'],
+        allowedSources: ['personal-files'],
+        topK: 8,
+        tokenBudget: 1800,
+      });
+      return {
+        items: (response.results ?? []).map((r: any, index: number) => ({
+          id: String(r.chunk?.id ?? r.source?.id ?? `file-${index}`),
+          source: 'my_files' as ContextSource,
+          content: String(r.chunk?.text ?? ''),
+          score: Number(r.rerankScore ?? r.score ?? 0),
+          metadata: {
+            sourceId: String(r.source?.id ?? r.chunk?.documentId ?? ''),
+            documentId: String(r.chunk?.documentId ?? ''),
+            documentName: String(r.source?.name ?? ''),
+            page: r.chunk?.pageStart,
+            pageEnd: r.chunk?.pageEnd,
+            section: r.chunk?.section ?? r.chunk?.heading,
+            retrievalSource: 'personal-files',
+          },
+        })).filter((item: any) => item.content.trim()),
+      };
+    }),
+    createRetrievalCapability('mode_documents', async ({ query, request, signal }) => {
+      if (signal?.aborted) return { items: [] };
+      const response = await ragManager.search(query, {
+        sessionId: request.sessionId,
+        modeId: request.activeContext?.modeId,
+        selectedSources: ['mode-reference'],
+        allowedSources: ['mode-reference'],
+        topK: 8,
+        tokenBudget: 1800,
+      });
+      return {
+        items: (response.results ?? []).map((r: any, index: number) => ({
+          id: String(r.chunk?.id ?? r.source?.id ?? `mode-${index}`),
+          source: 'mode_documents' as ContextSource,
+          content: String(r.chunk?.text ?? ''),
+          score: Number(r.rerankScore ?? r.score ?? 0),
+          metadata: {
+            sourceId: String(r.source?.id ?? r.chunk?.documentId ?? ''),
+            documentId: String(r.chunk?.documentId ?? ''),
+            documentName: String(r.source?.name ?? ''),
+            page: r.chunk?.pageStart,
+            pageEnd: r.chunk?.pageEnd,
+            section: r.chunk?.section ?? r.chunk?.heading,
+            retrievalSource: 'mode-reference',
+          },
+        })).filter((item: any) => item.content.trim()),
+      };
+    }),
+    createRetrievalCapability('meeting_transcript', async ({ query, request, signal }) => {
+      if (signal?.aborted) return { items: [] };
+      const response = await ragManager.search(query, {
+        sessionId: request.sessionId,
+        selectedSources: ['meeting'],
+        allowedSources: ['meeting'],
+        meetingId: request.activeContext?.meetingId,
+        topK: 8,
+        tokenBudget: 1800,
+      });
+      return {
+        items: (response.results ?? []).map((r: any, index: number) => ({
+          id: String(r.chunk?.id ?? r.source?.id ?? `meeting-${index}`),
+          source: 'meeting_transcript' as ContextSource,
+          content: String(r.chunk?.text ?? ''),
+          score: Number(r.rerankScore ?? r.score ?? 0),
+          metadata: {
+            sourceId: String(r.source?.id ?? r.chunk?.documentId ?? ''),
+            documentId: String(r.chunk?.documentId ?? ''),
+            documentName: String(r.source?.name ?? ''),
+            speaker: r.chunk?.speaker,
+            timestampStart: r.chunk?.timestampStart,
+            timestampEnd: r.chunk?.timestampEnd,
+            retrievalSource: 'meeting',
+          },
+        })).filter((item: any) => item.content.trim()),
+      };
+    }),
+    createRetrievalCapability('personal_knowledge', async ({ query, request, signal }) => {
+      if (signal?.aborted) return { items: [] };
+      const response = await ragManager.search(query, {
+        sessionId: request.sessionId,
+        selectedSources: ['personal-files'],
+        allowedSources: ['personal-files'],
+        topK: 8,
+        tokenBudget: 1800,
+      });
+      return {
+        items: (response.results ?? []).map((r: any, index: number) => ({
+          id: String(r.chunk?.id ?? r.source?.id ?? `personal-${index}`),
+          source: 'personal_knowledge' as ContextSource,
+          content: String(r.chunk?.text ?? ''),
+          score: Number(r.rerankScore ?? r.score ?? 0),
+          metadata: { sourceId: String(r.source?.id ?? r.chunk?.documentId ?? ''), retrievalSource: 'personal-files' },
+        })).filter((item: any) => item.content.trim()),
+      };
+    }),
+    createRetrievalCapability('structured_knowledge', async ({ query, request, signal }) => {
+      if (signal?.aborted) return { items: [] };
+      const response = await ragManager.search(query, {
+        sessionId: request.sessionId,
+        selectedSources: ['knowledge'],
+        allowedSources: ['knowledge'],
+        topK: 8,
+        tokenBudget: 1800,
+      });
+      return {
+        items: (response.results ?? []).map((r: any, index: number) => ({
+          id: String(r.chunk?.id ?? r.source?.id ?? `knowledge-${index}`),
+          source: 'structured_knowledge' as ContextSource,
+          content: String(r.chunk?.text ?? ''),
+          score: Number(r.rerankScore ?? r.score ?? 0),
+          metadata: { sourceId: String(r.source?.id ?? r.chunk?.documentId ?? ''), retrievalSource: 'knowledge' },
+        })).filter((item: any) => item.content.trim()),
+      };
+    }),
+    createRetrievalCapability('profile', async ({ query, request, signal }) => {
+      if (signal?.aborted) return { items: [] };
+      try {
+        const { ModesManager } = require('./services/ModesManager');
+        const { resolveModeIdOrWarn, resolveModePolicy } = require('./context-intelligence/policies/mode-policy-registry');
+        const { collectV3ProfileSources } = require('./services/knowledge/v3ProfileSources');
+        const { createProfileRetrievalPort } = require('./context-intelligence/retrieval/profile-retrieval-port');
+        const { decide } = require('./context-intelligence/orchestration/orchestrator');
+        const modeInfo = ModesManager.getInstance().getActiveModeInfo?.() ?? null;
+        const modeId = resolveModeIdOrWarn(modeInfo?.templateType ?? null, 'ipc/manual-chat:natively-profile', { quietWhenAbsent: true });
+        const policy = resolveModePolicy(modeId);
+        const collected = collectV3ProfileSources(llmHelper.getKnowledgeOrchestrator?.() ?? null);
+        const profilePort = createProfileRetrievalPort({
+          docs: collected.docs,
+          allowedSourceTypes: policy.allowedSourceTypes,
+          profileSources: policy.profileSources,
+          userId: 'local',
+        });
+        if (!profilePort) return { items: [] };
+        const decision = decide({
+          requestId: request.requestId,
+          requestSequence: 0,
+          surface: 'manual-chat',
+          modeId,
+          scope: { userId: 'local', sessionId: request.sessionId },
+          sessionId: request.sessionId,
+          manualQuestion: query,
+          hasScreenContext: false,
+          hasAttachedDocuments: true,
+        });
+        const boundedDecision = {
+          ...decision,
+          retrievalPlan: {
+            ...decision.retrievalPlan,
+            shouldRetrieve: true,
+            queries: [query],
+          },
+        };
+        const result = await profilePort.retrieve({ decision: boundedDecision });
+        return {
+          items: result.evidence.map((item: any) => ({
+            id: item.evidenceId,
+            source: 'profile' as ContextSource,
+            content: item.content,
+            score: item.finalScore,
+            metadata: {
+              sourceId: item.sourceId,
+              sourceType: item.sourceType,
+              documentName: item.documentTitle,
+              pageStart: item.page,
+              section: item.section,
+              chunkId: item.chunkIndex !== undefined ? `${item.sourceId}:${item.chunkIndex}` : undefined,
+              provenance: item.provenance,
+              relevance: item.finalScore,
+              confidence: item.finalScore,
+              trustLevel: item.trustLevel,
+              authority: 'evidence',
+            },
+          })),
+          metadata: { source: 'profile', attempts: result.attempts.length },
+        };
+      } catch (error) {
+        console.warn('[Natively Change 13] profile retrieval capability failed:', error instanceof Error ? error.message : String(error));
+        return { items: [] };
+      }
+    }),
+  ] : [];
+
+  const engine = new NativelyIntelligenceEngine({
+    retrievalCoordinator: new RetrievalCoordinator({ capabilities }),
+    generationPort: {
+      stream: ({ request, prompt, contextPlan, lifecycle }) => {
+        const controller = new GenerationController({
+          streamFinalPrompt: (provider, model, finalPrompt, options) => llmHelper.streamFinalPrompt(provider, model, finalPrompt, options),
+        });
+        const scopes: ProviderDataScope[] = [];
+        const required = new Set(contextPlan.requiredSources);
+        if (required.has('recent_conversation') || required.has('longer_conversation') || required.has('meeting_transcript')) scopes.push('transcript');
+        if (required.has('screen')) scopes.push('screenshots');
+        if (required.has('personal_knowledge') || required.has('profile') || required.has('structured_knowledge')) scopes.push('profile_history');
+        if (required.has('project_knowledge') || required.has('my_files') || required.has('mode_documents') || required.has('rag')) scopes.push('reference_files');
+        const route = llmHelper.getNativelyGenerationRouteOptions(
+          scopes,
+          false,
+        );
+        if (!route) throw new Error('Active provider transport is not yet supported by the Natively generation contract.');
+        if (request.providerPreferences?.preferredProvider) route.preferredProvider = request.providerPreferences.preferredProvider as any;
+        if (request.providerPreferences?.allowedProviders?.length) route.allowedProviders = request.providerPreferences.allowedProviders as any;
+        route.maxAttempts = request.providerPreferences?.maxAttempts ?? 3;
+        const generation = controller.stream({
+          requestId,
+          finalPrompt: prompt.finalPrompt,
+          route,
+          abortSignal: request.cancellationSignal,
+          thinkingBudget: request.responseShape?.detailed ? 1024 : 0,
+          lifecycle,
+        });
+        console.log('[Natively Intelligence] ProviderRouter → GenerationController', {
+          requestId,
+          preferredProvider: route.preferredProvider,
+          maxAttempts: route.maxAttempts,
+        });
+        return generation.stream;
+      },
+    },
+  });
+  return engine;
+}
+
 const _geminiChatStreamHandler = async (
 event: any,
 message: string,
@@ -957,6 +1231,168 @@ myController = new AbortController();
 generationLifecycle = new GenerationLifecycle(String(myStreamId));
 generationLifecycle.transition('PLANNING', 'manual chat request accepted');
 _chatStreamsBySender.set(senderId, { streamId: myStreamId, controller: myController });
+
+// CHANGE 13: the canonical Natively Intelligence Engine is now the PRIMARY
+// manual-chat route. The old handler below remains intact as compatibility
+// fallback. Image-bearing turns and explicit caller-owned prompt turns stay
+// on the compatibility path until their equivalent engine contracts are
+// proven. Ordinary `context` is NOT a reason to bypass the engine: the new
+// conversation-state layer is the canonical continuity source.
+const nativeSkillPrefix = /^[\/$][A-Za-z0-9_-]+\s/.test(String(message || ''));
+const nativeCompatibilityOnlyTurn =
+  isAssistantIdentityQuestion(String(message || ''))
+  || isStealthEvasionQuestion(String(message || ''))
+  || nativeSkillPrefix;
+if ((!imagePaths || imagePaths.length === 0) && !options?.skipSystemPrompt && !nativeCompatibilityOnlyTurn) {
+  try {
+    const modeInfo = (() => {
+      try { return require('./services/ModesManager').ModesManager.getInstance().getActiveModeInfo?.() ?? null; }
+      catch { return null; }
+    })();
+    const sessionId = String(
+      appState.getIntelligenceManager?.()?.getMeetingMetadata?.()?.id ?? senderId,
+    );
+    const requestId = `manual-chat-${myStreamId}`;
+    const nativeSessionId = sessionId;
+    const { appendConversationTurn, getRecentConversationTurns } = require('./context-intelligence/question/conversation-state-store') as typeof import('./context-intelligence/question/conversation-state-store');
+    const nativeCurrentTurn = appendConversationTurn({
+      sessionId: nativeSessionId,
+      text: String(message || ''),
+      role: 'user',
+      speaker: 'user',
+      source: 'manual',
+      finalized: true,
+      requestSequence: myStreamId,
+      turnId: requestId,
+    });
+    let profileAvailable = false;
+    try {
+      const { collectV3ProfileSources } = require('./services/knowledge/v3ProfileSources');
+      const collected = collectV3ProfileSources(llmHelper.getKnowledgeOrchestrator?.() ?? null);
+      profileAvailable = collected.docs.length > 0;
+    } catch { profileAvailable = false; }
+    const meetingId = String(
+      appState.getIntelligenceManager?.()?.getSessionTracker?.()?.getMeetingMetadata?.()?.id
+      ?? appState.getIntelligenceManager?.()?.getMeetingMetadata?.()?.id
+      ?? '',
+    ) || undefined;
+    const nativelyEngine = createPrimaryManualNativelyEngine(llmHelper, appState, requestId);
+    const nativelyRequest = {
+      requestId,
+      sessionId,
+      surface: 'manual-chat' as const,
+      userMessage: String(message || ''),
+      currentTurn: {
+        id: nativeCurrentTurn.id,
+        role: 'user' as const,
+        content: nativeCurrentTurn.text,
+        createdAt: nativeCurrentTurn.timestamp,
+      },
+      recentConversation: getRecentConversationTurns(nativeSessionId, 12).map((turn) => ({
+        id: turn.id,
+        role: turn.role === 'assistant' ? 'assistant' as const : turn.role === 'system' ? 'system' as const : 'user' as const,
+        content: turn.text,
+        createdAt: turn.timestamp,
+      })),
+      manualQuestion: String(message || ''),
+      activeContext: {
+        modeId: modeInfo?.id,
+        modeName: modeInfo?.name,
+        meetingId,
+        profileId: profileAvailable ? 'local-profile' : undefined,
+      },
+      cancellationSignal: myController.signal,
+      providerPreferences: {
+        allowFallback: true,
+        maxAttempts: 3,
+      },
+      contextPermissions: {
+        conversation: true,
+        transcript: Boolean(meetingId),
+        screen: false,
+        mode: Boolean(modeInfo?.id),
+        project: true,
+        profile: profileAvailable,
+        files: true,
+        memory: profileAvailable,
+        generalKnowledge: true,
+      },
+    } as import('./intelligence/engine/types').NativelyIntelligenceRequest;
+
+    console.log('[Natively Intelligence] manual-chat PRIMARY route', {
+      requestId,
+      sessionId,
+      question: String(message || '').slice(0, 160),
+    });
+
+    const run = nativelyEngine.prepareAndStream(nativelyRequest);
+    let finalText = '';
+    for await (const chunk of run.stream) {
+      if (myController.signal.aborted) break;
+      if (!chunk) continue;
+      finalText += chunk;
+      event.sender.send('gemini-stream-token', chunk, { streamId: myStreamId });
+      try { PhoneMirrorService.getInstance().publishToken(String(myStreamId), chunk); } catch { /* mirror only */ }
+    }
+    const nativelyResult = await run.result;
+
+    if (run.lifecycle.state === 'CANCELLED' || myController.signal.aborted) {
+      // STOP/supersession is terminal. Never fall through to legacy generation.
+      if (_chatStreamsBySender.get(senderId)?.streamId === myStreamId) {
+        event.sender.send('gemini-stream-done', { finalText: finalText, streamId: myStreamId });
+      }
+      return null;
+    }
+
+    if (run.lifecycle.state === 'COMPLETED') {
+      const answer = nativelyResult.finalAnswer?.text ?? finalText;
+      event.sender.send('gemini-stream-done', { finalText: answer, streamId: myStreamId });
+      try { PhoneMirrorService.getInstance().publishDone(String(myStreamId), answer); } catch { /* mirror only */ }
+      if (answer) {
+        appendConversationTurn({
+          sessionId: nativeSessionId,
+          text: answer,
+          role: 'assistant',
+          speaker: 'assistant',
+          source: 'manual',
+          finalized: true,
+          requestSequence: myStreamId,
+        });
+      }
+      try {
+        appState.getIntelligenceManager?.()?.addTranscript?.({
+          text: String(message || ''), speaker: 'user', timestamp: Date.now(), final: true, origin: 'manual_chat',
+        }, true);
+        if (answer) appState.getIntelligenceManager?.()?.addAssistantMessage?.(answer, undefined, 'manual_chat');
+        if (answer) appState.getIntelligenceManager?.()?.logUsage?.('chat', String(message || ''), answer);
+      } catch { /* session telemetry must not break the answer */ }
+      console.log('[Natively Intelligence] manual-chat PRIMARY trace', {
+        requestId,
+        stages: nativelyResult.diagnostics.pipelineStages,
+        lifecycle: run.lifecycle.state,
+        evidenceCount: nativelyResult.evidencePack.items.length,
+        includedEvidenceIds: nativelyResult.prompt.includedEvidenceIds ?? [],
+      });
+      return null;
+    }
+
+    // A generation that emitted visible output is committed: never append a
+    // legacy answer after it. Only a pre-commit engine failure is eligible for
+    // compatibility fallback.
+    if (nativelyResult.finalAnswer?.text || run.lifecycle.state === 'COMMITTED' || run.lifecycle.state === 'FAILED') {
+      const answer = nativelyResult.finalAnswer?.text ?? finalText;
+      if (answer) event.sender.send('gemini-stream-done', { finalText: answer, streamId: myStreamId });
+      else event.sender.send('gemini-stream-error', 'Natively Intelligence generation failed.', { streamId: myStreamId });
+      return null;
+    }
+  } catch (nativelyErr: any) {
+    // PRIMARY-route failures before visible output are compatibility fallbacks,
+    // not a second answer. The old handler below is the temporary migration path.
+    console.error('[Natively Intelligence] primary manual-chat route failed before commit; falling back:', nativelyErr?.message || nativelyErr);
+    try { console.warn('[Natively Intelligence] legacy fallback trace', { requestId: `manual-chat-${myStreamId}` }); } catch { /* noop */ }
+  }
+}
+
 // Vision capability gate (Problem 39): a screenshot attached to manual
 // chat is a screen ask too — the same rule as generate-what-to-say
 // applies before any images reach the selected model. Auto-switch to a
