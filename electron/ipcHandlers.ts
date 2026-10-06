@@ -43,6 +43,7 @@ import { beginTrace, commitTrace } from './intelligence/IntelligenceTrace';
 import { ProfileTreeService } from './intelligence/ProfileTreeService';
 import { isIntelligenceFlagEnabled, getSourceOwnerEnforcementStage, isRagCitationsEnabled } from './intelligence/intelligenceFlags';
 import { recordAttribution, hindsightModeFor, type AttributionInput } from './intelligence/IntelligenceAttribution';
+import { GenerationLifecycle } from './intelligence/engine/GenerationController';
 import { routeContext, isBackwardLookingQuery } from './intelligence/ContextRouter';
 import { SearchOrchestrator, type SearchCandidate } from './intelligence/SearchOrchestrator';
 import { CHAT_MODE_PROMPT } from './llm/prompts';
@@ -937,6 +938,7 @@ const { ModesManager } = require('./services/ModesManager');
 manualActiveMode = ModesManager.getInstance().getActiveModeInfo?.() ?? null;
 } catch { /* mode prior unavailable — remain mode-blind */ }
 let myController: AbortController | null = null;
+let generationLifecycle: GenerationLifecycle | null = null;
 let _manualFgToken: string | null = null;
 // Intelligence OS observe-only trace (Phase 1). Hoisted so the catch can record
 // an error + commit. Assigned to the real trace right after planAnswer; until
@@ -952,6 +954,8 @@ if (priorStream) {
 try { priorStream.controller.abort(); } catch { /* noop */ }
 }
 myController = new AbortController();
+generationLifecycle = new GenerationLifecycle(String(myStreamId));
+generationLifecycle.transition('PLANNING', 'manual chat request accepted');
 _chatStreamsBySender.set(senderId, { streamId: myStreamId, controller: myController });
 // Vision capability gate (Problem 39): a screenshot attached to manual
 // chat is a screen ask too — the same rule as generate-what-to-say
@@ -3704,6 +3708,7 @@ sourceAuthority: manualSourceContract?.sourceAuthority ?? 'legacy',
 providerAttempts: 1,
 });
 chatTrace.mark('provider_request_started', { ignoreKnowledgeMode: Boolean(ignoreKnowledge) });
+generationLifecycle?.transition('RETRIEVING', 'context and retrieval work delegated to the existing stream path');
 const stream = llmHelper.streamChat(
 message,
 imagePaths,
@@ -3791,6 +3796,7 @@ govern: true,
 : {}),
 },
 );
+generationLifecycle?.transition('GENERATING', 'provider stream established');
 // Coding chat STREAMS LIVE through a gate that holds tokens only until
 // the first "## " heading is confirmed (never code-first), then passes
 // every token through. This fixes the regression where coding chat
@@ -3809,6 +3815,9 @@ if (!visible) return;
 // renderer can drop tokens from a superseded chat stream. Backward
 // compatible: existing (token)=>… callbacks ignore the extra arg.
 iTrace.lifecycle('streaming');
+if (generationLifecycle?.state === 'GENERATING') {
+  generationLifecycle.transition('COMMITTED', 'first visible output committed to renderer');
+}
 event.sender.send('gemini-stream-token', visible, { streamId: myStreamId });
 try {
 PhoneMirrorService.getInstance().publishToken(String(myStreamId), visible);
@@ -3943,6 +3952,7 @@ sendChunkGated(token);
 },
 });
 if (manualSuperseded) {
+generationLifecycle?.cancel('superseded by a newer generation');
 iTrace.setCorrelation({ aborted: true, errorCategory: 'superseded' })
 .lifecycle('cancelled', { reason: 'superseded', finalAction: 'discard' });
 commitTrace(iTrace);
@@ -5500,6 +5510,9 @@ requestMode: manualActiveMode?.id ?? null,
 liveMode: liveModeIdAtDoneEmit,
 });
 } else if (_chatStreamsBySender.get(senderId)?.streamId === myStreamId) {
+if (generationLifecycle?.state === 'COMMITTED' || generationLifecycle?.state === 'GENERATING') {
+  generationLifecycle.transition('COMPLETED', 'manual stream completed');
+}
 // finalText is set ONLY when repair changed the streamed answer — the
 // renderer replaces the streamed row in place (no double-render). When
 // the streamed answer was already valid, finalText is undefined and the
@@ -5763,6 +5776,8 @@ console.warn('[IPC] chat coding verification skipped (non-fatal):', verifyErr?.m
 }
 }
 } catch (streamError: any) {
+if (myController?.signal.aborted) generationLifecycle?.cancel('generation aborted');
+else generationLifecycle?.fail('manual stream failed');
 console.error('[IPC] Streaming error:', streamError);
 // Classify the provider failure (marker-only telemetry). Full-JIT policy:
 // provider failure must NOT be repaired with deterministic profile prose.
@@ -5822,6 +5837,7 @@ commitTrace(iTrace);
 } catch { /* trace must never mask the real error */ }
 throw error;
 } finally {
+if (myController?.signal.aborted) generationLifecycle?.cancel('controller aborted before completion');
 if (_manualFgToken) ForegroundGate.end(_manualFgToken);
 if (myController) {
 const current = _chatStreamsBySender.get(event.sender.id);

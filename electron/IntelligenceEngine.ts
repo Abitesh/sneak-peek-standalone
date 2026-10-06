@@ -57,6 +57,7 @@ import { isIntelligenceFlagEnabled } from './intelligence/intelligenceFlags';
 import { applyAnswerContract } from './intelligence/OutputShapeNormalizer';
 import { LiveTranscriptBrain } from './intelligence/LiveTranscriptBrain';
 import { recordAttribution } from './intelligence/IntelligenceAttribution';
+import { GenerationLifecycle } from './intelligence/engine/GenerationController';
 // Type-only (fully erased at runtime, adds no require()). `getKnowledgeOrchestrator()`
 // is declared `: any`, so the orchestrator's real result type is invisible here and
 // tsc collapsed the grounding result to `{}`. Naming it restores genuine checking on
@@ -5856,6 +5857,8 @@ export class IntelligenceEngine extends EventEmitter {
     async runManualAnswer(question: string): Promise<string | null> {
         this.emit('manual_answer_started');
         this.setMode('manual');
+        const generationLifecycle = new GenerationLifecycle(`manual-answer-${this.currentGenerationId}`);
+        generationLifecycle.transition('PLANNING', 'manual answer request accepted');
 
         try {
             if (!this.answerLLM) {
@@ -5870,6 +5873,7 @@ export class IntelligenceEngine extends EventEmitter {
                 speakerPerspective: 'user',
                 activeMode: activeModeInfo,
             });
+            generationLifecycle.transition('RETRIEVING', 'context planning/retrieval preparation');
 
             // CONTEXT INTELLIGENCE V3 — legacy trace emission (Layer C).
             //
@@ -5930,6 +5934,7 @@ export class IntelligenceEngine extends EventEmitter {
                 } catch { return null; }
             })();
 
+            generationLifecycle.transition('GENERATING', 'answer generation started');
             if (_v3) {
                 // V3 owns the system prompt entirely; the legacy universal prompt
                 // and the raw context blob are both bypassed.
@@ -5966,6 +5971,7 @@ export class IntelligenceEngine extends EventEmitter {
                 answer = structureValidation.repaired;
             }
 
+            generationLifecycle.transition('COMPLETED', 'manual answer completed');
             if (answer) {
                 // MODE 5: Manual Answer (Fallback) — a manual-chat submission
                 // (submit-manual-question IPC), NOT a WTA suggestion. Was
@@ -5988,6 +5994,7 @@ export class IntelligenceEngine extends EventEmitter {
             return answer;
 
         } catch (error) {
+            generationLifecycle.fail('manual answer failed');
             this.emit('error', error as Error, 'manual');
             this.setMode('idle');
             return null;

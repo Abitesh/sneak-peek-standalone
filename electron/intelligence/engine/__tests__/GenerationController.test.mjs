@@ -36,6 +36,8 @@ test('pre-first-token provider failure falls back and emits only one final answe
 
   assert.equal(await collect(stream), 'fallback answer');
   assert.equal(outcome.status, 'completed');
+  assert.equal(outcome.lifecycle.state, 'COMPLETED');
+  assert.deepEqual(outcome.lifecycle.history.map((entry) => entry.state), ['IDLE', 'GENERATING', 'COMMITTED', 'COMPLETED']);
   assert.equal(outcome.fallbackUsed, true);
   assert.equal(outcome.committedProvider, 'gemini_flash');
   assert.equal(calls.length, 2);
@@ -61,6 +63,7 @@ test('post-commit provider failure never appends a second provider answer', asyn
 
   assert.equal(await collect(stream), 'partial answer');
   assert.equal(outcome.status, 'failed');
+  assert.equal(outcome.lifecycle.state, 'FAILED');
   assert.equal(outcome.fallbackUsed, false);
   assert.equal(calls.length, 1);
   assert.match(outcome.error, /after commit/i);
@@ -135,6 +138,7 @@ test('cancellation during streaming stops output without fallback', async () => 
 
   assert.equal(await collect(stream), 'first');
   assert.equal(outcome.status, 'cancelled');
+  assert.equal(outcome.lifecycle.state, 'CANCELLED');
   assert.equal(calls.length, 1);
 });
 
