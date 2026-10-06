@@ -122,6 +122,12 @@ export interface ProviderRouteOptions {
     models?: ProviderModelState;
     dataScopes?: ProviderDataScope[];
     scopePolicy?: ProviderDataScopePolicy;
+    /** Optional generation preference. Routing remains provider/model selection only. */
+    preferredProvider?: LLMProviderId;
+    /** Optional allow-list supplied by the caller; no semantic/context decisions happen here. */
+    allowedProviders?: readonly LLMProviderId[];
+    /** Maximum provider attempts for one generation request. */
+    maxAttempts?: number;
     /**
      * Provider FAMILY ids the user switched off in Settings > AI Providers
      * (CredentialsManager.disabledProviders). The documented contract there is
@@ -336,6 +342,30 @@ export function routeLLMProviders(options: ProviderRouteOptions): ProviderAttemp
 
 export function routeWithScopeFallback(options: ProviderRouteOptions): ProviderAttempt[] {
     return routeLLMProviders(options);
+}
+
+/**
+ * Canonical routing entry point for the Intelligence Engine generation layer.
+ *
+ * This function deliberately knows nothing about questions, RAG, profiles,
+ * projects, evidence, or prompt semantics. It only turns provider availability
+ * + explicit provider preferences into an ordered set of provider/model
+ * attempts. The GenerationController owns execution and commit/fallback state.
+ */
+export function routeGenerationProviders(options: ProviderRouteOptions): ProviderAttempt[] {
+    const routed = routeLLMProviders(options);
+    const allowed = options.allowedProviders;
+    const filtered = allowed?.length
+        ? routed.filter((attempt) => allowed.includes(attempt.provider))
+        : routed;
+
+    if (options.preferredProvider) {
+        const preferred = filtered.filter((attempt) => attempt.provider === options.preferredProvider);
+        const remainder = filtered.filter((attempt) => attempt.provider !== options.preferredProvider);
+        return [...preferred, ...remainder].slice(0, Math.max(1, options.maxAttempts ?? filtered.length));
+    }
+
+    return filtered.slice(0, Math.max(1, options.maxAttempts ?? filtered.length));
 }
 
 // =============================================================================

@@ -45,7 +45,7 @@ import {
   customProviderSupportsVision,
   customProviderIsLocal,
 } from "./llm/visionCapability"
-import { assertProviderDataScopes, getDeniedDataScopes, routeWithScopeFallback, ProviderRouter, DOCUMENT_GROUNDING_SCOPE_DENIED_MESSAGE, isProviderFamilyDisabled, ProviderDisabledError, type ProviderDataScope, type ProviderDataScopePolicy } from "./llm/ProviderRouter"
+import { assertProviderDataScopes, getDeniedDataScopes, routeWithScopeFallback, ProviderRouter, DOCUMENT_GROUNDING_SCOPE_DENIED_MESSAGE, isProviderFamilyDisabled, ProviderDisabledError, type ProviderDataScope, type ProviderDataScopePolicy, type LLMProviderId } from "./llm/ProviderRouter"
 import { filterChatCapable, type ProviderFamily, type ProviderHealth, type VerifiedModelBinding } from "./llm/providerRegistry"
 // Outbound-scope vocabulary shared with Context Intelligence V3. ONE mapping of
 // SourceType → privacy toggle: a second copy here is how the two layers would
@@ -5525,6 +5525,79 @@ let isMultimodal = !!(imagePaths?.length);
    * so the renderer never displays the AI-tell punctuation that the prompt
    * rules ban but providers emit anyway. Single-place backstop.
    */
+  /**
+   * Pure generation transport for the Natively Intelligence Engine.
+   *
+   * IMPORTANT: this method receives one already-assembled final prompt and
+   * dispatches it to exactly one provider/model. It does not retrieve context,
+   * inspect the question, invoke AnswerPlanner, or decide whether any data
+   * source is relevant. GenerationController owns fallback/commit semantics.
+   *
+   * The older streamChat() path remains intact for legacy callers during the
+   * migration. This method is the narrow provider boundary used by the new
+   * intelligence pipeline.
+   */
+  public async * streamFinalPrompt(
+    provider: LLMProviderId,
+    model: string | undefined,
+    finalPrompt: string,
+    options: { abortSignal?: AbortSignal; thinkingBudget?: number } = {},
+  ): AsyncGenerator<string, void, unknown> {
+    const abortSignal = options.abortSignal;
+    const thinkingBudget = options.thinkingBudget ?? INTERACTIVE_THINKING_BUDGET;
+
+    if (abortSignal?.aborted) return;
+    if (!finalPrompt.trim()) throw new Error('Cannot generate from an empty final prompt.');
+
+    switch (provider) {
+      case 'groq':
+        yield* this.streamWithGroq(
+          finalPrompt,
+          model || GROQ_MODEL,
+          '',
+          abortSignal,
+        );
+        return;
+      case 'gemini_flash':
+        yield* this.streamWithGeminiModel(
+          finalPrompt,
+          model || GEMINI_FLASH_MODEL,
+          undefined,
+          undefined,
+          abortSignal,
+          thinkingBudget,
+        );
+        return;
+      case 'gemini_pro':
+        yield* this.streamWithGeminiModel(
+          finalPrompt,
+          model || GEMINI_PRO_MODEL,
+          undefined,
+          undefined,
+          abortSignal,
+          thinkingBudget,
+        );
+        return;
+      case 'openai':
+        yield* this.streamWithOpenai(finalPrompt, '', model || OPENAI_MODEL, abortSignal);
+        return;
+      case 'claude':
+        yield* this.streamWithClaude(finalPrompt, '', model || CLAUDE_MODEL, abortSignal);
+        return;
+      case 'deepseek':
+        yield* this.streamWithDeepseek(finalPrompt, '', model || DEEPSEEK_MODEL, abortSignal);
+        return;
+      case 'codex':
+        yield* this.streamWithCodexCli(finalPrompt, '', false, undefined, abortSignal);
+        return;
+      case 'ollama':
+        yield* this.streamWithOllama(finalPrompt, undefined, '', undefined, abortSignal, model || this.ollamaModel);
+        return;
+      default:
+        throw new Error(`Unsupported generation provider: ${provider}`);
+    }
+  }
+
   public async * streamChat(
     ...args: Parameters<LLMHelper['_streamChatInner']>
   ): AsyncGenerator<string, void, unknown> {
