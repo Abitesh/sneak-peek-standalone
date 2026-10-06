@@ -31,6 +31,13 @@ test('duration and detail are explicit response-plan fields', () => {
   assert.match(source, /duration_is_user_requested/);
 });
 
+test('turn-understanding concise/detailed shape is bridged into response planning', () => {
+  assert.match(source, /understandingStyle/);
+  assert.match(source, /understanding\?\.responseShape === 'detailed'/);
+  assert.match(source, /understanding\?\.responseShape === 'concise'/);
+  assert.match(source, /plan\?\.answerStyle \?\? understandingStyle/);
+});
+
 test('interview/project and coding examples have deterministic routing seeds', () => {
   assert.match(source, /project_about_answer/);
   assert.match(source, /project-grounded/);

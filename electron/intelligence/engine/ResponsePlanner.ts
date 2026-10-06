@@ -124,7 +124,19 @@ export function planResponse(input: ResponsePlannerInput): ResponsePlan {
   const plan = input.answerPlan ?? null;
   const understanding = input.turnUnderstanding ?? null;
   const duration = understanding?.requestedDuration ?? explicitDurationSeconds(question);
-  const style = plan?.answerStyle;
+  // The canonical turn-understanding stage already classifies concise/detailed
+  // response shape. Preserve that decision here unless an explicit legacy
+  // AnswerPlan style overrides it. Without this bridge, phrases such as
+  // "in detail" and "one sentence" were visible to the resolver but were
+  // silently dropped before prompt assembly.
+  const understandingStyle = understanding?.responseShape === 'detailed'
+    ? 'detailed'
+    : understanding?.responseShape === 'concise'
+      ? 'short'
+      : understanding?.responseShape === 'code'
+        ? 'code_only'
+        : undefined;
+  const style = plan?.answerStyle ?? understandingStyle;
 
   const answerSeed = plan?.responseShapeSeed ?? responseShapeSeed(plan?.answerType);
   const projectGrounded = Boolean(answerSeed === 'project-grounded' || understanding?.intent === 'project-question');
