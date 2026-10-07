@@ -318,7 +318,7 @@ describe('answer pipeline lifecycle telemetry', () => {
     for (const stage of ['created', 'planned', 'evidence_selected', 'prompt_built', 'provider_dispatched', 'streaming', 'validating', 'repairing', 'completed', 'cancelled', 'failed']) {
       assert.match(ipcSrc, new RegExp(`\\.lifecycle\\('${stage}'`), `manual chat must record ${stage}`);
     }
-    assert.match(ipcSrc, /if \(manualSuperseded\) \{\s*iTrace\.setCorrelation\(\{ aborted: true, errorCategory: 'superseded' \}\)\s*\.lifecycle\('cancelled'[\s\S]*?commitTrace\(iTrace\)/,
+    assert.match(ipcSrc, /if \(manualSuperseded\) \{[\s\S]*?iTrace\.setCorrelation\(\{ aborted: true, errorCategory: 'superseded' \}\)[\s\S]*?\.lifecycle\('cancelled'[\s\S]*?commitTrace\(iTrace\)/,
       'a superseded manual turn must be committed as cancelled, not silently dropped');
   });
 });

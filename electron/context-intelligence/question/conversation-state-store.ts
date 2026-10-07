@@ -22,6 +22,7 @@ import {
   type ConversationTurn,
   type ConversationTurnRole,
   type ConversationTurnSource,
+  type ConversationGenerationStatus,
   type ResolvedReference,
   emptyState,
 } from './conversation-state';
@@ -115,6 +116,7 @@ export interface AppendConversationTurnInput {
   finalized?: boolean;
   source?: ConversationTurnSource;
   requestSequence?: number;
+  generationStatus?: ConversationGenerationStatus;
   metadata?: Readonly<Record<string, unknown>>;
   turnId?: string;
   scope?: EvidenceScope;
@@ -145,6 +147,7 @@ export function appendConversationTurn(input: AppendConversationTurnInput): Conv
     ...(typeof input.requestSequence === 'number' && Number.isFinite(input.requestSequence)
       ? { requestSequence: input.requestSequence }
       : {}),
+    ...(input.generationStatus ? { generationStatus: input.generationStatus } : {}),
     ...(input.metadata ? { metadata: cloneMetadata(input.metadata) } : {}),
   };
 
@@ -171,6 +174,7 @@ export interface UpdateConversationTurnInput {
   finalized?: boolean;
   source?: ConversationTurnSource;
   requestSequence?: number;
+  generationStatus?: ConversationGenerationStatus;
   metadata?: Readonly<Record<string, unknown>>;
 }
 
@@ -193,6 +197,7 @@ export function updateConversationTurn(input: UpdateConversationTurnInput): Conv
     ...(input.requestSequence !== undefined && Number.isFinite(input.requestSequence)
       ? { requestSequence: input.requestSequence }
       : {}),
+    ...(input.generationStatus !== undefined ? { generationStatus: input.generationStatus } : {}),
     ...(input.metadata !== undefined ? { metadata: cloneMetadata(input.metadata) } : {}),
   } as ConversationTurn;
   if (!nextTurn.text) return null;

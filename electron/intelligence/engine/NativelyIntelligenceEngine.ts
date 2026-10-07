@@ -16,7 +16,7 @@ import { RetrievalCoordinator } from './RetrievalCoordinator';
 import { buildEvidencePackFromNativelyEvidence } from '../context-os/evidencePack';
 import { assembleNativelyPrompt } from './PromptAssembler';
 import { planResponse } from './ResponsePlanner';
-import { GenerationLifecycle } from './GenerationController';
+import { GenerationLifecycle, type GenerationLifecycleSnapshot } from './GenerationController';
 
 /**
  * Central entry boundary for Natively Intelligence.
@@ -67,27 +67,69 @@ export class NativelyIntelligenceEngine {
     lifecycle.transition('PLANNING', 'manual chat request accepted by Natively Intelligence Engine');
     let resolveResult!: (value: NativelyIntelligenceResult) => void;
     let rejectResult!: (reason?: unknown) => void;
+    let resultSettled = false;
+    let preparedResult: NativelyIntelligenceResult | null = null;
     const resultPromise = new Promise<NativelyIntelligenceResult>((resolve, reject) => {
-      resolveResult = resolve;
-      rejectResult = reject;
+      resolveResult = (value) => {
+        if (resultSettled) return;
+        resultSettled = true;
+        resolve(value);
+      };
+      rejectResult = (reason) => {
+        if (resultSettled) return;
+        resultSettled = true;
+        reject(reason);
+      };
     });
 
     const stream = (async function* (engine: NativelyIntelligenceEngine) {
+      let text = '';
+
+      const buildCancelledResult = (
+        base: NativelyIntelligenceResult,
+        reason: string,
+      ): NativelyIntelligenceResult => {
+        lifecycle.cancel(reason);
+        return {
+          ...base,
+          providerAttempt: { status: 'cancelled' },
+          streamLifecycle: {
+            status: 'cancelled',
+            startedAt: base.streamLifecycle.startedAt,
+            firstTokenAt: base.streamLifecycle.firstTokenAt,
+            endedAt: Date.now(),
+            tokenCount: text.length,
+          },
+          diagnostics: {
+            ...base.diagnostics,
+            stages: [...base.diagnostics.stages, 'cancelled'],
+            pipelineStages: [...base.diagnostics.pipelineStages, 'GenerationController'],
+            warnings: [...base.diagnostics.warnings, `Generation cancelled: ${reason}`],
+          },
+          finalAnswer: null,
+        };
+      };
+
       try {
         const result = await engine.handle(request, lifecycle);
+        preparedResult = result;
         if (request.cancellationSignal?.aborted) {
-          lifecycle.cancel('cancelled before provider generation');
-          resolveResult(result);
+          resolveResult(buildCancelledResult(result, 'cancelled before provider generation'));
           return;
         }
+
         const providerStream = engine.generationPort!.stream({ request, prompt: result.prompt, contextPlan: result.contextPlan, lifecycle });
-        let text = '';
         for await (const chunk of providerStream) {
           text += chunk;
           yield chunk;
         }
+        if (request.cancellationSignal?.aborted) {
+          resolveResult(buildCancelledResult(result, 'cancelled during provider stream'));
+          return;
+        }
+
         const completed = lifecycle.state === 'COMPLETED';
-        const lifecycleHistory = lifecycle.snapshot.history;
+        const lifecycleHistory: GenerationLifecycleSnapshot['history'] = lifecycle.snapshot.history;
         const finalResult: NativelyIntelligenceResult = {
           ...result,
           providerAttempt: {
@@ -95,9 +137,9 @@ export class NativelyIntelligenceEngine {
           },
           streamLifecycle: {
             status: lifecycle.state === 'CANCELLED' ? 'cancelled' : completed ? 'completed' : lifecycle.state === 'FAILED' ? 'failed' : 'streaming',
-            startedAt: lifecycleHistory.find((h: { state: GenerationLifecycle['state']; at: number }) => h.state === 'GENERATING')?.at,
-            firstTokenAt: lifecycleHistory.find((h: { state: GenerationLifecycle['state']; at: number }) => h.state === 'COMMITTED')?.at,
-            endedAt: lifecycleHistory.find((h: { state: GenerationLifecycle['state']; at: number }) => h.state === 'COMPLETED' || h.state === 'CANCELLED' || h.state === 'FAILED')?.at,
+            startedAt: lifecycleHistory.find((h) => h.state === 'GENERATING')?.at,
+            firstTokenAt: lifecycleHistory.find((h) => h.state === 'COMMITTED')?.at,
+            endedAt: lifecycleHistory.find((h) => h.state === 'COMPLETED' || h.state === 'CANCELLED' || h.state === 'FAILED')?.at,
             tokenCount: text.length,
           },
           diagnostics: {
@@ -109,10 +151,24 @@ export class NativelyIntelligenceEngine {
         };
         resolveResult(finalResult);
       } catch (error) {
-        if (request.cancellationSignal?.aborted) lifecycle.cancel('cancelled during generation');
-        else if (lifecycle.state !== 'FAILED' && lifecycle.state !== 'CANCELLED') lifecycle.fail(error instanceof Error ? error.message : String(error));
+        if (request.cancellationSignal?.aborted) {
+          const base = preparedResult ?? engine.cancelledResult(request, `${request.sessionId}:${request.requestId}`, ['cancelled']);
+          resolveResult(buildCancelledResult(base, 'cancelled during generation'));
+          return;
+        }
+        if (lifecycle.state !== 'FAILED' && lifecycle.state !== 'CANCELLED') lifecycle.fail(error instanceof Error ? error.message : String(error));
         rejectResult(error);
         throw error;
+      } finally {
+        // Async-generator consumers can close this stream before the provider
+        // iterator reaches its normal terminal path (for example when manual
+        // chat is superseded immediately after a visible chunk). The caller
+        // still awaits `result`, so cancellation must settle it here rather
+        // than relying on another provider chunk to observe the abort signal.
+        if (request.cancellationSignal?.aborted && !resultSettled) {
+          const base = preparedResult ?? engine.cancelledResult(request, `${request.sessionId}:${request.requestId}`, ['cancelled']);
+          resolveResult(buildCancelledResult(base, 'consumer closed an aborted generation'));
+        }
       }
     })(this);
 

@@ -141,8 +141,16 @@ export function planContext(input: ContextPlannerInput): ContextPlan {
 
   const personalPrompt = /^(?:tell me about yourself|tell me about me|introduce yourself|introduce me)\b/i.test(understanding.question.trim());
   const conversationRecall = /\b(?:what did i say earlier|what did i say before|what did you say earlier|what did you say before|what did i mention earlier|what did i mention before|earlier conversation|previous conversation)\b/i.test(understanding.question);
+  const meetingSurface = request.surface === 'meeting-overlay' || request.transcriptContext?.source === 'meeting';
+  const meetingReference = /\b(?:in the meeting|during the meeting|on the call|interview|interviewer|they|he|she|we|said|mentioned|discussed|decided|agreed|asked|told|according to)\b/i.test(understanding.question);
+  const meetingScopedTurn = Boolean(
+    meetingSurface
+    && request.contextPermissions.transcript
+    && request.transcriptContext?.source === 'meeting'
+    && (meetingReference || understanding.followUp || understanding.requiresMeetingContext),
+  );
 
-  switch (personalPrompt ? 'personal-question' : conversationRecall ? 'follow-up' : understanding.intent) {
+  switch (personalPrompt ? 'personal-question' : conversationRecall ? 'follow-up' : meetingScopedTurn ? 'meeting-question' : understanding.intent) {
     case 'project-question':
     case 'system-design':
       require('recent_conversation');

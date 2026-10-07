@@ -29,6 +29,8 @@ import { isBareFollowUp, isResponseRequest, isContinuationFragment } from './tur
  */
 export type ConversationTurnRole = 'user' | 'interviewer' | 'assistant' | 'system';
 
+export type ConversationGenerationStatus = 'pending' | 'completed' | 'cancelled' | 'failed';
+
 export type ConversationTurnSource =
   | 'manual'
   | 'manual-chat'
@@ -51,6 +53,8 @@ export interface ConversationTurn {
   source: ConversationTurnSource;
   /** The request that caused this turn, when the surface has one. */
   requestSequence?: number;
+  /** Generation outcome for turns that initiated an AI response. */
+  generationStatus?: ConversationGenerationStatus;
   /** Small structured annotations; never required for core state operations. */
   metadata?: Readonly<Record<string, unknown>>;
 }

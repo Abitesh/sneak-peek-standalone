@@ -1023,16 +1023,21 @@ function createPrimaryManualNativelyEngine(llmHelper: any, appState: any, reques
     }),
     createRetrievalCapability('meeting_transcript', async ({ query, request, signal }) => {
       if (signal?.aborted) return { items: [] };
-      const response = await ragManager.search(query, {
-        sessionId: request.sessionId,
-        selectedSources: ['meeting'],
-        allowedSources: ['meeting'],
-        meetingId: request.activeContext?.meetingId,
-        topK: 8,
-        tokenBudget: 1800,
-      });
-      return {
-        items: (response.results ?? []).map((r: any, index: number) => ({
+
+      // Prefer the mature meeting RAG search when it is available. If indexing is
+      // not ready yet, fall back ONLY to the current transcript window already
+      // supplied by the transcript system. The engine still owns the decision
+      // that this source is required; this adapter merely supplies the evidence.
+      try {
+        const response = await ragManager.search(query, {
+          sessionId: request.sessionId,
+          selectedSources: ['meeting'],
+          allowedSources: ['meeting'],
+          meetingId: request.activeContext?.meetingId,
+          topK: 8,
+          tokenBudget: 1800,
+        });
+        const items = (response.results ?? []).map((r: any, index: number) => ({
           id: String(r.chunk?.id ?? r.source?.id ?? `meeting-${index}`),
           source: 'meeting_transcript' as ContextSource,
           content: String(r.chunk?.text ?? ''),
@@ -1046,7 +1051,29 @@ function createPrimaryManualNativelyEngine(llmHelper: any, appState: any, reques
             timestampEnd: r.chunk?.timestampEnd,
             retrievalSource: 'meeting',
           },
-        })).filter((item: any) => item.content.trim()),
+        })).filter((item: any) => item.content.trim());
+        if (items.length > 0) return { items };
+      } catch (error) {
+        console.warn('[Natively Intelligence] meeting retrieval unavailable; using live transcript window:', error instanceof Error ? error.message : String(error));
+      }
+
+      const turns = request.transcriptContext?.turns ?? [];
+      return {
+        items: turns
+          .filter((turn) => String(turn.content ?? '').trim())
+          .map((turn, index) => ({
+            id: String(turn.id || `meeting-live-${index}`),
+            source: 'meeting_transcript' as ContextSource,
+            content: String(turn.content),
+            score: 0.5,
+            metadata: {
+              sourceId: String(request.activeContext?.meetingId ?? 'live-transcript'),
+              speaker: turn.role === 'user' ? 'interviewer' : turn.role,
+              timestampStart: turn.createdAt,
+              timestampEnd: turn.createdAt,
+              retrievalSource: 'live-transcript-window',
+            },
+          })),
       };
     }),
     createRetrievalCapability('personal_knowledge', async ({ query, request, signal }) => {
@@ -1196,6 +1223,178 @@ function createPrimaryManualNativelyEngine(llmHelper: any, appState: any, reques
   return engine;
 }
 
+
+function buildNativelyMeetingTranscriptContext(appState: any, meetingId: string) {
+  const empty = {
+    text: '',
+    turns: [] as Array<{ id: string; role: 'user' | 'assistant' | 'system'; content: string; createdAt?: number }>,
+    source: 'meeting' as const,
+  };
+  try {
+    const manager = appState.getIntelligenceManager?.();
+    const activeId = manager?.getMeetingMetadata?.()?.id;
+    const isLiveMeeting = String(meetingId) === 'live-meeting-current';
+    if (!isLiveMeeting && activeId && String(activeId) !== String(meetingId)) return empty;
+    const brain = manager?.getLiveTranscriptBrain?.();
+    const window = brain?.getHotWindow?.(180) ?? [];
+    if (!Array.isArray(window) || window.length === 0) return empty;
+    const turns = window.map((turn: any, index: number) => ({
+      id: `meeting-transcript-${String(turn.timestamp ?? Date.now())}-${index}`,
+      role: turn.role === 'assistant' ? 'assistant' as const : 'user' as const,
+      content: String(turn.text ?? ''),
+      createdAt: Number(turn.timestamp ?? Date.now()),
+    })).filter((turn: any) => turn.content.trim());
+    return {
+      text: turns.map((turn: any) => `${turn.role === 'assistant' ? 'assistant' : 'interviewer'}: ${turn.content}`).join('\n'),
+      turns,
+      source: 'meeting' as const,
+    };
+  } catch {
+    return empty;
+  }
+}
+
+function buildNativelyMeetingRequest(
+  appState: any,
+  query: string,
+  meetingId: string,
+  requestId: string,
+  cancellationSignal: AbortSignal,
+): import('./intelligence/engine/types').NativelyIntelligenceRequest {
+  const manager = appState.getIntelligenceManager?.();
+  let modeInfo: any = null;
+  try { modeInfo = require('./services/ModesManager').ModesManager.getInstance().getActiveModeInfo?.() ?? null; } catch { /* mode optional */ }
+
+  const transcriptContext = buildNativelyMeetingTranscriptContext(appState, meetingId);
+  const sessionId = String(manager?.getMeetingMetadata?.()?.id ?? meetingId);
+
+  try {
+    const store = require('./context-intelligence/question/conversation-state-store') as any;
+    store.appendConversationTurn?.({
+      sessionId,
+      text: String(query || ''),
+      role: 'user',
+      speaker: 'user',
+      source: 'meeting',
+      finalized: true,
+      turnId: requestId,
+    });
+  } catch { /* canonical conversation state is best-effort for this adapter */ }
+
+  let recentConversation: Array<{ id: string; role: 'user' | 'assistant' | 'system'; content: string; createdAt?: number }> = [];
+  try {
+    const { getRecentConversationTurns } = require('./context-intelligence/question/conversation-state-store');
+    recentConversation = (getRecentConversationTurns(sessionId, 12) ?? []).map((turn: any) => ({
+      id: String(turn.id),
+      role: turn.role === 'assistant' ? 'assistant' as const : turn.role === 'system' ? 'system' as const : 'user' as const,
+      content: String(turn.text ?? ''),
+      createdAt: Number(turn.timestamp ?? Date.now()),
+    }));
+  } catch { /* conversation state is optional for legacy meeting sessions */ }
+
+  return {
+    requestId,
+    sessionId,
+    surface: 'meeting-overlay',
+    userMessage: String(query || ''),
+    currentTurn: {
+      id: requestId,
+      role: 'user',
+      content: String(query || ''),
+      createdAt: Date.now(),
+    },
+    recentConversation,
+    transcriptContext,
+    manualQuestion: String(query || ''),
+    activeContext: {
+      modeId: modeInfo?.id,
+      modeName: modeInfo?.name,
+      meetingId,
+    },
+    cancellationSignal,
+    providerPreferences: {
+      allowFallback: true,
+      maxAttempts: 3,
+    },
+    contextPermissions: {
+      conversation: true,
+      transcript: true,
+      screen: false,
+      mode: Boolean(modeInfo?.id),
+      project: true,
+      profile: true,
+      files: true,
+      memory: true,
+      generalKnowledge: true,
+    },
+  };
+}
+
+async function streamNativelyMeetingAnswer(
+  event: any,
+  appState: any,
+  query: string,
+  meetingId: string,
+  streamMeta: { meetingId?: string; live?: boolean },
+): Promise<{ success: boolean; fallback?: boolean; error?: string }> {
+  const llmHelper = appState.processingHelper?.getLLMHelper?.();
+  if (!llmHelper) return { success: false, fallback: true };
+
+  const requestId = `natively-meeting-${crypto.randomUUID()}`;
+  const abortController = new AbortController();
+  const queryKey = `${streamMeta.live ? 'live' : 'meeting'}-${meetingId}-${crypto.randomUUID()}`;
+  activeRAGQueries.set(queryKey, abortController);
+
+  try {
+    const request = buildNativelyMeetingRequest(appState, query, meetingId, requestId, abortController.signal);
+    const engine = createPrimaryManualNativelyEngine(llmHelper, appState, requestId);
+    const run = engine.prepareAndStream(request);
+
+    for await (const chunk of run.stream) {
+      if (abortController.signal.aborted) break;
+      if (chunk) event.sender.send('rag:stream-chunk', { ...streamMeta, chunk });
+    }
+
+    const result = await run.result;
+    if (abortController.signal.aborted || run.lifecycle.state === 'CANCELLED') {
+      return { success: true };
+    }
+    if (run.lifecycle.state === 'FAILED') {
+      const error = result.providerAttempt?.error || 'Natively Intelligence meeting generation failed.';
+      event.sender.send('rag:stream-error', { ...streamMeta, error });
+      return { success: false, error };
+    }
+    if (run.lifecycle.state === 'COMPLETED') {
+      const answer = result.finalAnswer?.text ?? '';
+      if (answer) {
+        try {
+          const store = require('./context-intelligence/question/conversation-state-store') as any;
+          store.appendConversationTurn?.({
+            sessionId: request.sessionId,
+            text: answer,
+            role: 'assistant',
+            speaker: 'assistant',
+            source: 'meeting',
+            finalized: true,
+          });
+        } catch { /* conversation memory never breaks the stream */ }
+      }
+      event.sender.send('rag:stream-complete', streamMeta);
+      return { success: true };
+    }
+    return { success: false, error: 'Natively Intelligence meeting generation ended without completion.' };
+  } catch (error: any) {
+    if (!abortController.signal.aborted) {
+      const message = error?.message || String(error);
+      event.sender.send('rag:stream-error', { ...streamMeta, error: message });
+      return { success: false, error: message };
+    }
+    return { success: true };
+  } finally {
+    activeRAGQueries.delete(queryKey);
+  }
+}
+
 const _geminiChatStreamHandler = async (
 event: any,
 message: string,
@@ -1254,7 +1453,7 @@ if ((!imagePaths || imagePaths.length === 0) && !options?.skipSystemPrompt && !n
     );
     const requestId = `manual-chat-${myStreamId}`;
     const nativeSessionId = sessionId;
-    const { appendConversationTurn, getRecentConversationTurns } = require('./context-intelligence/question/conversation-state-store') as typeof import('./context-intelligence/question/conversation-state-store');
+    const { appendConversationTurn, updateConversationTurn, getRecentConversationTurns } = require('./context-intelligence/question/conversation-state-store') as typeof import('./context-intelligence/question/conversation-state-store');
     const nativeCurrentTurn = appendConversationTurn({
       sessionId: nativeSessionId,
       text: String(message || ''),
@@ -1263,6 +1462,7 @@ if ((!imagePaths || imagePaths.length === 0) && !options?.skipSystemPrompt && !n
       source: 'manual',
       finalized: true,
       requestSequence: myStreamId,
+      generationStatus: 'pending',
       turnId: requestId,
     });
     let profileAvailable = false;
@@ -1272,8 +1472,7 @@ if ((!imagePaths || imagePaths.length === 0) && !options?.skipSystemPrompt && !n
       profileAvailable = collected.docs.length > 0;
     } catch { profileAvailable = false; }
     const meetingId = String(
-      appState.getIntelligenceManager?.()?.getSessionTracker?.()?.getMeetingMetadata?.()?.id
-      ?? appState.getIntelligenceManager?.()?.getMeetingMetadata?.()?.id
+      appState.getIntelligenceManager?.()?.getMeetingMetadata?.()?.id
       ?? '',
     ) || undefined;
     const nativelyEngine = createPrimaryManualNativelyEngine(llmHelper, appState, requestId);
@@ -1338,6 +1537,16 @@ if ((!imagePaths || imagePaths.length === 0) && !options?.skipSystemPrompt && !n
 
     if (run.lifecycle.state === 'CANCELLED' || myController.signal.aborted) {
       // STOP/supersession is terminal. Never fall through to legacy generation.
+      updateConversationTurn({
+        sessionId: nativeSessionId,
+        turnId: nativeCurrentTurn.id,
+        generationStatus: 'cancelled',
+        timestamp: Date.now(),
+        metadata: {
+          ...(nativeCurrentTurn.metadata ?? {}),
+          cancellationReason: run.lifecycle.snapshot.history[run.lifecycle.snapshot.history.length - 1]?.reason ?? 'cancelled',
+        },
+      });
       if (_chatStreamsBySender.get(senderId)?.streamId === myStreamId) {
         event.sender.send('gemini-stream-done', { finalText: finalText, streamId: myStreamId });
       }
@@ -1346,6 +1555,12 @@ if ((!imagePaths || imagePaths.length === 0) && !options?.skipSystemPrompt && !n
 
     if (run.lifecycle.state === 'COMPLETED') {
       const answer = nativelyResult.finalAnswer?.text ?? finalText;
+      updateConversationTurn({
+        sessionId: nativeSessionId,
+        turnId: nativeCurrentTurn.id,
+        generationStatus: 'completed',
+        timestamp: Date.now(),
+      });
       event.sender.send('gemini-stream-done', { finalText: answer, streamId: myStreamId });
       try { PhoneMirrorService.getInstance().publishDone(String(myStreamId), answer); } catch { /* mirror only */ }
       if (answer) {
@@ -1379,6 +1594,14 @@ if ((!imagePaths || imagePaths.length === 0) && !options?.skipSystemPrompt && !n
     // A generation that emitted visible output is committed: never append a
     // legacy answer after it. Only a pre-commit engine failure is eligible for
     // compatibility fallback.
+    if (run.lifecycle.state === 'FAILED') {
+      updateConversationTurn({
+        sessionId: nativeSessionId,
+        turnId: nativeCurrentTurn.id,
+        generationStatus: 'failed',
+        timestamp: Date.now(),
+      });
+    }
     if (nativelyResult.finalAnswer?.text || run.lifecycle.state === 'COMMITTED' || run.lifecycle.state === 'FAILED') {
       const answer = nativelyResult.finalAnswer?.text ?? finalText;
       if (answer) event.sender.send('gemini-stream-done', { finalText: answer, streamId: myStreamId });
@@ -1581,8 +1804,7 @@ name: f.fileName,
 }));
 }
 } catch { /* debug identity only */ }
-const v3MeetingId = (appState.getIntelligenceManager?.() as any)
-?.getSessionTracker?.()?.getMeetingMetadata?.()?.id ?? null;
+const v3MeetingId = appState.getIntelligenceManager?.()?.getMeetingMetadata?.()?.id ?? null;
 // V3 remains the authorization planner. Translate its document source families
 // into RAGManager's canonical source families. Explicit selection prevents the
 // RAG query planner from broadening this turn into an unauthorized source.
@@ -6296,6 +6518,16 @@ const stream = _chatStreamsBySender.get(senderId);
 if (stream) {
 try { stream.controller.abort(); } catch { /* noop */ }
 _chatStreamsBySender.delete(senderId);
+}
+// Live meeting answers now run through the same Natively Intelligence Engine
+// but retain the RAG event contract for the live surface. STOP must therefore
+// abort the live RAG controller as well; meeting-overlay STOP already calls
+// rag:cancel-query with its meeting id.
+for (const [key, controller] of activeRAGQueries) {
+if (key.startsWith('live-')) {
+try { controller.abort(); } catch { /* noop */ }
+activeRAGQueries.delete(key);
+}
 }
 });
 safeOn('natively-answer-stop', () => {
@@ -11225,7 +11457,8 @@ const activeRAGQueries = new Map<string, AbortController>();
 // reach `live-` keys. Fixed at the source: abort any still-active query
 // matching this class BEFORE minting a new one, mirroring the same
 // "abort the old, start the new" pattern ipcHandlers.ts's manual-chat
-// stream supersession (_chatStreamsBySender) already uses.
+// stream supersession (_chatStreamsBySender) already uses. Live STOP also
+// aborts the live controller from gemini-chat-stream-stop.
 function abortPriorRAGQueriesOfClass(matchesClass: (key: string) => boolean): void {
 for (const [key, controller] of activeRAGQueries) {
 if (matchesClass(key)) {
@@ -11234,164 +11467,52 @@ activeRAGQueries.delete(key);
 }
 }
 }
-// Query meeting with RAG (meeting-scoped)
+// Query meeting through the canonical Natively Intelligence Engine.
+// RAG remains retrieval infrastructure; it no longer owns answer prompting or
+// provider generation for this surface.
 safeHandle(
 'rag:query-meeting',
 async (event, { meetingId, query }: { meetingId: string; query: string }) => {
-const ragManager = appState.getRAGManager();
-if (!ragManager || !ragManager.isReady()) {
-// Fallback to regular chat if RAG not available
-console.log('[RAG] Not ready, falling back to regular chat');
-return { fallback: true };
-}
-// For completed meetings, check if post-meeting RAG is processed.
-// For live meetings with JIT indexing, let RAGManager.queryMeeting() decide.
-if (
-!ragManager.isMeetingProcessed(meetingId) &&
-!ragManager.isLiveIndexingActive(meetingId)
-) {
-console.log(
-`[RAG] Meeting ${meetingId} not processed and no JIT indexing, falling back to regular chat`,
-);
-return { fallback: true };
-}
-abortPriorRAGQueriesOfClass((key) => key.startsWith(`meeting-${meetingId}-`));
-const abortController = new AbortController();
-const queryKey = `meeting-${meetingId}-${crypto.randomUUID()}`;
-activeRAGQueries.set(queryKey, abortController);
-try {
-const stream = ragManager.queryMeeting(meetingId, query, abortController.signal);
-for await (const chunk of stream) {
-if (abortController.signal.aborted) break;
-event.sender.send('rag:stream-chunk', { meetingId, chunk });
-}
-// Code-review finding (2026-07-28): RAGManager's generator `break`s
-// (returns normally) rather than throwing when aborted, so this line
-// was previously reached unconditionally even for a query that was
-// just superseded by abortPriorRAGQueriesOfClass above. The renderer
-// has no per-query correlation for rag:stream-complete (it acts on
-// "whatever is currently the last streaming message"), so a stale
-// complete event for the OLD query could finalize the NEW,
-// still-empty placeholder as done — silently swallowing the new
-// answer. Gate on the same abort check the chunk loop already uses.
-if (!abortController.signal.aborted) {
-event.sender.send('rag:stream-complete', { meetingId });
-}
-return { success: true };
-} catch (error: any) {
-if (error.name !== 'AbortError') {
-const msg = error.message || '';
-// If specific RAG failures, return fallback to use transcript window
-if (msg.includes('NO_RELEVANT_CONTEXT') || msg.includes('NO_MEETING_EMBEDDINGS')) {
-console.log(`[RAG] Query failed with '${msg}', falling back to regular chat`);
-return { fallback: true };
-}
-console.error('[RAG] Query error:', error);
-event.sender.send('rag:stream-error', { meetingId, error: msg });
-}
-return { success: false, error: error.message };
-} finally {
-activeRAGQueries.delete(queryKey);
-}
+  // Keep the established per-meeting supersession behavior. The controller is
+  // passed into Natively Intelligence, so STOP/supersession reaches generation
+  // rather than merely hiding the renderer bubble.
+  abortPriorRAGQueriesOfClass((key) => key.startsWith(`meeting-${meetingId}-`));
+  return streamNativelyMeetingAnswer(event, appState, query, meetingId, { meetingId });
 },
 );
-// Query live meeting with JIT RAG
+// Query live meeting through the canonical Natively Intelligence Engine.
+// The transcript remains owned by IntelligenceManager/SessionTracker; this
+// handler only snapshots its current read window into the engine contract.
 safeHandle('rag:query-live', async (event, { query }: { query: string }) => {
-// Personal/profile questions belong to the V3 manual-chat surface. A
-// successful live-meeting lookup must not terminate those turns before
-// Profile Intelligence can hydrate and retrieve the active resume.
-try {
-const { classifyTurn } = require('./context-intelligence/question/turn-classifier');
-const { resolveModePolicy, resolveModeIdOrWarn } = require('./context-intelligence/policies/mode-policy-registry');
-const { ModesManager } = require('./services/ModesManager');
-const modeInfo = ModesManager.getInstance().getActiveModeInfo?.() ?? null;
-const modeId = resolveModeIdOrWarn(
-modeInfo?.templateType ?? null,
-'ipc/rag-query-live',
-{ quietWhenAbsent: true },
-);
-const classification = classifyTurn({
-resolvedQuestion: String(query || ''),
-policy: resolveModePolicy(modeId),
-isFollowUp: false,
-});
-const personalClaim = classification.claimTypes.some((claim: string) =>
-claim === 'USER_PROJECT'
-|| claim === 'USER_SKILL'
-|| claim === 'USER_EMPLOYMENT'
-|| claim === 'USER_EDUCATION'
-|| claim === 'USER_MOTIVATION',
-);
-if (personalClaim) {
-return { fallback: true };
-}
-} catch (error) {
-console.warn('[RAG] personal-question routing check failed; continuing with live RAG:', error);
-}
-const ragManager = appState.getRAGManager();
-if (!ragManager || !ragManager.isReady()) {
-return { fallback: true };
-}
-// Check if JIT indexing is active AND has at least one embedded chunk.
-// isLiveIndexingActive() only tells us the indexer is running — it may have
-// received segments but not yet produced queryable embeddings. Calling
-// queryMeeting() with zero chunks throws NO_MEETING_EMBEDDINGS, adding
-// ~300ms of wasted try/catch overhead before the fallback fires.
-if (!ragManager.isLiveIndexingActive('live-meeting-current') || !ragManager.hasLiveChunks()) {
-return { fallback: true };
-}
-// Auto-supersede any still-active LIVE query before starting this one —
-// see abortPriorRAGQueriesOfClass's doc comment. rag:cancel-query can't
-// reach `live-` keys (its own comment below), so this is the ONLY
-// supersession path for this class; without it a rapid-fire follow-up
-// question mid-stream would leave the old generator running forever,
-// its late chunks bleeding into whatever answer is on screen by then.
-abortPriorRAGQueriesOfClass((key) => key.startsWith('live-'));
-const abortController = new AbortController();
-// Date.now() alone collides when two queries fire in the same ms — the
-// second `set` would overwrite the first AbortController, the first
-// stream would become un-cancellable, and the `finally` `delete` would
-// evict the wrong entry. UUID guarantees uniqueness.
-// (Note: rag:cancel-query only matches `meeting-` and `global` prefixes,
-// so `live-` keys aren't cancellable through THAT path — mitigated above
-// by auto-superseding on the next live query instead.)
-const queryKey = `live-${crypto.randomUUID()}`;
-activeRAGQueries.set(queryKey, abortController);
-try {
-const stream = ragManager.queryMeeting('live-meeting-current', query, abortController.signal);
-for await (const chunk of stream) {
-if (abortController.signal.aborted) break;
-event.sender.send('rag:stream-chunk', { live: true, chunk });
-}
-// See the meeting-scoped handler's identical comment above — a stale
-// complete event for a superseded live query would otherwise finalize
-// the NEW placeholder as done before its first real chunk arrives.
-if (!abortController.signal.aborted) {
-event.sender.send('rag:stream-complete', { live: true });
-}
-return { success: true };
-} catch (error: any) {
-if (error.name !== 'AbortError') {
-const msg = error.message || '';
-// If JIT RAG failed (no embeddings yet, no relevant context), fallback to regular chat
-if (msg.includes('NO_RELEVANT_CONTEXT') || msg.includes('NO_MEETING_EMBEDDINGS')) {
-console.log(`[RAG] JIT query failed with '${msg}', falling back to regular live chat`);
-return { fallback: true };
-}
-console.error('[RAG] Live query error:', error);
-// No rag:stream-error here (F-118): the {success:false} return below
-// makes the renderer fall through to regular live chat, so a terminal
-// error event would DOUBLE-SIGNAL — the error handler stapled
-// "[RAG Error: …]" into the bubble and cleared streaming state, and
-// the fallback then streamed fresh tokens into that torn-down row.
-// For the live class the fallback owns the UX; the meeting/global
-// handlers keep their terminal events because nothing falls back.
-// Live-reproduced in scripts/audit/F-118-repro.mjs.
-}
-return { success: false, error: error.message };
-} finally {
-activeRAGQueries.delete(queryKey);
-}
+  const meetingId = 'live-meeting-current';
+  // Preserve the existing personal/profile escape hatch: those questions belong
+  // to the same Natively engine, but should not be prematurely claimed by the
+  // meeting-only surface before the manual/profile planner can authorize them.
+  try {
+    const { classifyTurn } = require('./context-intelligence/question/turn-classifier');
+    const { resolveModePolicy, resolveModeIdOrWarn } = require('./context-intelligence/policies/mode-policy-registry');
+    const { ModesManager } = require('./services/ModesManager');
+    const modeInfo = ModesManager.getInstance().getActiveModeInfo?.() ?? null;
+    const modeId = resolveModeIdOrWarn(modeInfo?.templateType ?? null, 'ipc/rag-query-live', { quietWhenAbsent: true });
+    const classification = classifyTurn({
+      resolvedQuestion: String(query || ''),
+      policy: resolveModePolicy(modeId),
+      isFollowUp: false,
+    });
+    const personalClaim = classification.claimTypes.some((claim: string) =>
+      claim === 'USER_PROJECT'
+      || claim === 'USER_SKILL'
+      || claim === 'USER_EMPLOYMENT'
+      || claim === 'USER_EDUCATION'
+      || claim === 'USER_MOTIVATION',
+    );
+    if (personalClaim) return { fallback: true };
+  } catch (error) {
+    console.warn('[Natively Intelligence] live personal-question routing check failed; continuing:', error);
+  }
+
+  abortPriorRAGQueriesOfClass((key) => key.startsWith('live-'));
+  return streamNativelyMeetingAnswer(event, appState, query, meetingId, { live: true });
 });
 // Query global (cross-meeting search)
 safeHandle('rag:query-global', async (event, { query }: { query: string }) => {
