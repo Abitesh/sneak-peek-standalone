@@ -1453,7 +1453,7 @@ if ((!imagePaths || imagePaths.length === 0) && !options?.skipSystemPrompt && !n
     );
     const requestId = `manual-chat-${myStreamId}`;
     const nativeSessionId = sessionId;
-    const { appendConversationTurn, updateConversationTurn, getRecentConversationTurns } = require('./context-intelligence/question/conversation-state-store') as typeof import('./context-intelligence/question/conversation-state-store');
+    const { appendConversationTurn, getRecentConversationTurns } = require('./context-intelligence/question/conversation-state-store') as typeof import('./context-intelligence/question/conversation-state-store');
     const nativeCurrentTurn = appendConversationTurn({
       sessionId: nativeSessionId,
       text: String(message || ''),
@@ -1462,7 +1462,6 @@ if ((!imagePaths || imagePaths.length === 0) && !options?.skipSystemPrompt && !n
       source: 'manual',
       finalized: true,
       requestSequence: myStreamId,
-      generationStatus: 'pending',
       turnId: requestId,
     });
     let profileAvailable = false;
@@ -1471,6 +1470,12 @@ if ((!imagePaths || imagePaths.length === 0) && !options?.skipSystemPrompt && !n
       const collected = collectV3ProfileSources(llmHelper.getKnowledgeOrchestrator?.() ?? null);
       profileAvailable = collected.docs.length > 0;
     } catch { profileAvailable = false; }
+    const personalFiles = (() => {
+      try { return require('./personalKnowledge').getPersonalKnowledgeManager().listFiles(); }
+      catch { return []; }
+    })();
+    const personalFilesAvailable = personalFiles.length > 0;
+    const projectFilesAvailable = personalFiles.some((file: any) => String(file?.fileType ?? '') === 'project');
     const meetingId = String(
       appState.getIntelligenceManager?.()?.getMeetingMetadata?.()?.id
       ?? '',
@@ -1510,10 +1515,10 @@ if ((!imagePaths || imagePaths.length === 0) && !options?.skipSystemPrompt && !n
         transcript: Boolean(meetingId),
         screen: false,
         mode: Boolean(modeInfo?.id),
-        project: true,
+        project: projectFilesAvailable,
         profile: profileAvailable,
-        files: true,
-        memory: profileAvailable,
+        files: personalFilesAvailable,
+        memory: personalFilesAvailable || profileAvailable,
         generalKnowledge: true,
       },
     } as import('./intelligence/engine/types').NativelyIntelligenceRequest;
@@ -1537,16 +1542,6 @@ if ((!imagePaths || imagePaths.length === 0) && !options?.skipSystemPrompt && !n
 
     if (run.lifecycle.state === 'CANCELLED' || myController.signal.aborted) {
       // STOP/supersession is terminal. Never fall through to legacy generation.
-      updateConversationTurn({
-        sessionId: nativeSessionId,
-        turnId: nativeCurrentTurn.id,
-        generationStatus: 'cancelled',
-        timestamp: Date.now(),
-        metadata: {
-          ...(nativeCurrentTurn.metadata ?? {}),
-          cancellationReason: run.lifecycle.snapshot.history[run.lifecycle.snapshot.history.length - 1]?.reason ?? 'cancelled',
-        },
-      });
       if (_chatStreamsBySender.get(senderId)?.streamId === myStreamId) {
         event.sender.send('gemini-stream-done', { finalText: finalText, streamId: myStreamId });
       }
@@ -1555,12 +1550,6 @@ if ((!imagePaths || imagePaths.length === 0) && !options?.skipSystemPrompt && !n
 
     if (run.lifecycle.state === 'COMPLETED') {
       const answer = nativelyResult.finalAnswer?.text ?? finalText;
-      updateConversationTurn({
-        sessionId: nativeSessionId,
-        turnId: nativeCurrentTurn.id,
-        generationStatus: 'completed',
-        timestamp: Date.now(),
-      });
       event.sender.send('gemini-stream-done', { finalText: answer, streamId: myStreamId });
       try { PhoneMirrorService.getInstance().publishDone(String(myStreamId), answer); } catch { /* mirror only */ }
       if (answer) {
@@ -1594,14 +1583,6 @@ if ((!imagePaths || imagePaths.length === 0) && !options?.skipSystemPrompt && !n
     // A generation that emitted visible output is committed: never append a
     // legacy answer after it. Only a pre-commit engine failure is eligible for
     // compatibility fallback.
-    if (run.lifecycle.state === 'FAILED') {
-      updateConversationTurn({
-        sessionId: nativeSessionId,
-        turnId: nativeCurrentTurn.id,
-        generationStatus: 'failed',
-        timestamp: Date.now(),
-      });
-    }
     if (nativelyResult.finalAnswer?.text || run.lifecycle.state === 'COMMITTED' || run.lifecycle.state === 'FAILED') {
       const answer = nativelyResult.finalAnswer?.text ?? finalText;
       if (answer) event.sender.send('gemini-stream-done', { finalText: answer, streamId: myStreamId });
@@ -1804,7 +1785,8 @@ name: f.fileName,
 }));
 }
 } catch { /* debug identity only */ }
-const v3MeetingId = appState.getIntelligenceManager?.()?.getMeetingMetadata?.()?.id ?? null;
+const v3MeetingId = (appState.getIntelligenceManager?.() as any)
+?.getSessionTracker?.()?.getMeetingMetadata?.()?.id ?? null;
 // V3 remains the authorization planner. Translate its document source families
 // into RAGManager's canonical source families. Explicit selection prevents the
 // RAG query planner from broadening this turn into an unauthorized source.

@@ -40,11 +40,11 @@ function available(request: NativelyIntelligenceRequest, source: ContextSource, 
     case 'meeting_transcript':
       return Boolean(request.contextPermissions.transcript && (a.meetingTranscript ?? request.transcriptContext?.source === 'meeting'));
     case 'personal_knowledge':
-      return Boolean(request.contextPermissions.memory && (a.personalKnowledge ?? true));
+      return Boolean(request.contextPermissions.memory && (a.personalKnowledge ?? false));
     case 'project_knowledge':
-      return Boolean(request.contextPermissions.project && request.activeContext?.projectId && (a.projectKnowledge ?? true));
+      return Boolean(request.contextPermissions.project && (a.projectKnowledge ?? true));
     case 'my_files':
-      return Boolean(request.contextPermissions.files && (a.myFiles ?? Boolean(request.activeContext?.projectId || request.manualQuestion)));
+      return Boolean(request.contextPermissions.files && (a.myFiles ?? false));
     case 'mode_documents':
       return Boolean(request.contextPermissions.mode && request.activeContext?.modeId && (a.modeDocuments ?? true));
     case 'rag':
@@ -52,9 +52,9 @@ function available(request: NativelyIntelligenceRequest, source: ContextSource, 
     case 'screen':
       return Boolean(request.contextPermissions.screen && request.screenContext && (a.screen ?? true));
     case 'profile':
-      return Boolean(request.contextPermissions.profile && request.activeContext?.profileId && (a.profile ?? true));
+      return Boolean(request.contextPermissions.profile && (a.profile ?? Boolean(request.activeContext?.profileId)));
     case 'structured_knowledge':
-      return Boolean(request.contextPermissions.memory && (a.structuredKnowledge ?? true));
+      return Boolean(request.contextPermissions.memory && (a.structuredKnowledge ?? false));
     case 'none':
       return true;
   }
@@ -221,6 +221,19 @@ export function planContext(input: ContextPlannerInput): ContextPlan {
   if (understanding.requiresPersonalContext) {
     require('personal_knowledge');
     require('profile');
+  }
+
+  // Project-specific facts are authoritative for a project turn. Profile and
+  // general personal-memory sources must not compete with project evidence,
+  // even if a broad classifier also marks the turn as personal. This keeps
+  // résumé facts such as "I have used Redis" from overriding the actual
+  // Linkship implementation evidence.
+  if (required.has('project_knowledge')) {
+    for (const source of ['personal_knowledge', 'profile', 'structured_knowledge'] as ContextSource[]) {
+      required.delete(source);
+      optional.delete(source);
+      forbidden.add(source);
+    }
   }
 
   // Availability/permissions never turn a forbidden source into an allowed

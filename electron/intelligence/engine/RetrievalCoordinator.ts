@@ -78,6 +78,36 @@ const SOURCE_EXECUTION_PRIORITY: ContextSource[] = [
 
 const RETRIEVABLE = new Set<ContextSource>(SOURCE_EXECUTION_PRIORITY);
 
+function sourcePermissionAllowed(
+  request: NativelyIntelligenceRequest,
+  source: ContextSource,
+): boolean {
+  switch (source) {
+    case 'recent_conversation':
+    case 'longer_conversation':
+      return request.contextPermissions.conversation;
+    case 'meeting_transcript':
+      return request.contextPermissions.transcript;
+    case 'personal_knowledge':
+    case 'structured_knowledge':
+      return request.contextPermissions.memory;
+    case 'project_knowledge':
+      return request.contextPermissions.project;
+    case 'my_files':
+      return request.contextPermissions.files;
+    case 'mode_documents':
+      return request.contextPermissions.mode;
+    case 'screen':
+      return request.contextPermissions.screen;
+    case 'profile':
+      return request.contextPermissions.profile;
+    case 'rag':
+      return request.contextPermissions.generalKnowledge;
+    case 'none':
+      return true;
+  }
+}
+
 function chooseExecutionSources(plan: ContextPlan): ContextSource[] {
   const required = new Set(plan.requiredSources);
   const chosen: ContextSource[] = [];
@@ -154,6 +184,17 @@ export class RetrievalCoordinator {
     const items: NativelyEvidenceItem[] = [];
     for (const source of executedSources) {
       if (input.cancellationSignal?.aborted) break;
+
+      // Permissions are an execution boundary, not a retrieval suggestion.
+      // Keep the planner's required source visible in the trace, but never
+      // invoke a capability when the request explicitly denies that source.
+      // This is deliberately defensive because capabilities may be backed by
+      // mature legacy stores that cannot safely re-decide source authority.
+      const permitted = sourcePermissionAllowed(input, source);
+      if (!permitted) {
+        trace.skippedSources.push(source);
+        continue;
+      }
 
       const capability = this.capabilities.get(source);
       if (!capability) {
